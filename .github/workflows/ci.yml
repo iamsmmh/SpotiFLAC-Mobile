@@ -131,7 +131,7 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: "temurin"
-          java-version: "25"
+          java-version: "17"
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -156,8 +156,8 @@ jobs:
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
             "ndk;29.0.14206865" \
-            "platforms;android-37.0" \
-            "build-tools;37.0.0"
+            "platforms;android-35.0" \
+            "build-tools;35.0.0"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
 
       - name: Build Go backend for Android
