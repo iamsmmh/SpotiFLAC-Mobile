@@ -82,6 +82,7 @@ DerivedData/
 # available because contribution templates link to it.
 /docs/*
 !/docs/EXTENSION_DEVELOPMENT.md
+!/docs/UNSIGNED_BUILDS.md
 
 # Temporary files and logs
 /.tmp/
