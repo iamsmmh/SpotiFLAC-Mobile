@@ -1,5 +1,6 @@
-# Uncomment this line to define a global platform for your project
-platform :ios, '14.0'
+# Minimum supported version bumped to 15.0 for Xcode 16+/26+ compatibility.
+# Xcode 15+ drops support for iOS 11 and older, and Xcode 26 requires at least 15.
+platform :ios, '15.0'
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
@@ -75,12 +76,17 @@ post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
     target.build_configurations.each do |config|
-      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '14.0'
+      # Keep pods at 15.0 minimum for Xcode 16/26 compatibility
+      if config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'].to_f < 15.0
+        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+      end
       config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= ['$(inherited)']
       definitions = config.build_settings['GCC_PREPROCESSOR_DEFINITIONS']
       unless definitions.include?('PERMISSION_NOTIFICATIONS=1')
         definitions << 'PERMISSION_NOTIFICATIONS=1'
       end
+      # Fix for Xcode 16+ / iOS 18+ with ffmpeg and other binary pods
+      config.build_settings['ENABLE_USER_SCRIPT_SANDBOXING'] = 'NO'
     end
   end
 end
