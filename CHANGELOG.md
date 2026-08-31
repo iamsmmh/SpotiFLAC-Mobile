@@ -1,5 +1,42 @@
 # Changelog
 
+## [4.9.1] - 2026-08-31
+
+### Added — Streaming Engine & Liquid Glass
+
+- **Unified Track → Source → Playback Engine** (`lib/engine/`): canonical track
+  identity (ISRC-first matching with fuzzy title/artist/duration scoring),
+  quality ladder (Auto → Hi-Res), network profiles, source ranking
+  (health · quality-fit · latency · priority), provider health with exponential
+  backoff and offline marking, URL-expiry refresh policy, and a session phase
+  machine.
+- **Smart Play**: downloaded → local, stream → progressive playback,
+  download & play on completion, explicit "unavailable" reasons. Every decision
+  carries a trace for the UI and Diagnostics.
+- **Progressive streaming playback**: the built-in audio player now plays
+  preflighted HTTP sources (`UrlSource`) alongside local files and SAF content
+  URIs, and exposes a runtime failure hook for automatic provider failover
+  (source swap without losing the queue).
+- **Streaming infrastructure**: single-byte ranged preflight, next-track
+  preloading, adaptive quality step policy, per-network quality profiles,
+  `StreamSourceAdapter` API for extension providers, engine event log.
+- **Liquid Glass UI**: frosted mini player and full player with edge
+  highlights, pointer glow, sheen, aurora scrim, glass sheets/chips/buttons/
+  sliders, and a procedural visualizer (spectrum / waveform / circular / bars).
+  Honors reduce-motion, high contrast, and low-end device profiles; can be
+  disabled to return to the classic player.
+- **Engine settings page** (Settings → Streaming & Glass): Smart Play mode,
+  quality & network policies, resilience knobs, recovery/privacy switches,
+  glass rendering controls, and a Diagnostics Center (provider health, success
+  rates, latency, event log).
+- **Playback savepoints** + local **listening statistics** (plays, skips,
+  minutes, streaks) that never leave the device, with privacy toggles.
+- **Engine controls**: volume, playback speed, balance, seek forward/back,
+  sleep timer (15/30/45/60/end-of-track).
+- **Quality assurance**: engine unit tests (identity, smart play, failover,
+  refresh policy, savepoint, stats, preloader) and Liquid Glass widget smoke
+  tests.
+
 ## [4.8.5] - 2026-08-01
 
 ### Added

@@ -98,6 +98,23 @@ class MusicPlayerController {
   Future<void> next() async => _handler?.skipToNext();
   Future<void> previous() async => _handler?.skipToPrevious();
 
+  Future<void> setVolume(double volume) async => _handler?.setVolume(volume);
+
+  Future<void> setPlaybackRate(double rate) async =>
+      _handler?.setPlaybackRate(rate);
+
+  Future<void> setBalance(double balance) async =>
+      _handler?.setBalance(balance);
+
+  Future<void> seekForward([Duration offset = const Duration(seconds: 15)]) =>
+      _handler?.seekRelative(offset);
+
+  Future<void> seekBackward([Duration offset = const Duration(seconds: 15)]) =>
+      _handler?.seekRelative(-offset);
+
+  Future<void> replaceCurrentAndPlay(PlayableMedia item) async =>
+      _handler?.replaceCurrentAndPlay(item);
+
   Future<void> togglePlayPause(bool isPlaying) async {
     final handler = _handler;
     if (handler == null) return;
