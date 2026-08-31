@@ -36,8 +36,8 @@ permissions:
 env:
   APP_NAME: SpotiFLAC
   ANDROID_NDK_VERSION: "29.0.14206865"
-  ANDROID_PLATFORM: "platforms;android-37.0"
-  ANDROID_BUILD_TOOLS: "build-tools;37.0.0"
+  ANDROID_PLATFORM: "platforms;android-35.0"
+  ANDROID_BUILD_TOOLS: "build-tools;35.0.0"
   XCODE_VERSION: "26.1.1"
 
 jobs:
@@ -111,7 +111,7 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "25"
+          java-version: "17"
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -237,8 +237,18 @@ jobs:
 
       - name: Select Xcode ${{ env.XCODE_VERSION }}
         run: |
-          sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app"
+          set -e
+          if [ -d "/Applications/Xcode_${XCODE_VERSION}.app" ]; then
+            sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app"
+          elif [ -d "/Applications/Xcode_16.4.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_16.4.app
+          elif [ -d "/Applications/Xcode_16.2.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_16.2.app
+          else
+            sudo xcode-select -s /Applications/Xcode.app || true
+          fi
           xcodebuild -version
+          ls /Applications/ | grep Xcode
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -322,6 +332,11 @@ jobs:
       - name: Get Flutter dependencies
         run: flutter pub get
 
+      - name: Install CocoaPods dependencies
+        run: |
+          cd ios
+          pod install --repo-update
+
       - name: Normalize ffmpeg plugin shell scripts (strip CRLF)
         run: |
           find "$HOME/.pub-cache/hosted" -path "*ffmpeg_kit_flutter_new_full*/scripts/*.sh" -type f -print0 |
@@ -337,6 +352,8 @@ jobs:
         run: |
           set -euo pipefail
           flutter build ios --release --no-codesign --config-only
+          cd ios
+          pod install
           xcodebuild archive \
             -workspace ios/Runner.xcworkspace \
             -scheme Runner \
@@ -349,7 +366,8 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
-            EXPANDED_CODE_SIGN_IDENTITY=""
+            EXPANDED_CODE_SIGN_IDENTITY="" \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO
 
       - name: Package IPA
         env:
