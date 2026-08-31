@@ -17,7 +17,7 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.zarz.spotiflac"
-    compileSdk = 37
+    compileSdk = 35
     ndkVersion = flutter.ndkVersion
 
     buildFeatures {
@@ -26,13 +26,13 @@ android {
 
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
-        sourceCompatibility = JavaVersion.VERSION_25
-        targetCompatibility = JavaVersion.VERSION_25
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     kotlin {
         compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_25)
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
         }
     }
 
@@ -50,7 +50,7 @@ android {
     defaultConfig {
         applicationId = "com.zarz.spotiflac"
         minSdk = flutter.minSdkVersion
-        targetSdk = 37
+        targetSdk = 35
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         multiDexEnabled = true
@@ -83,8 +83,10 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // Minification disabled to avoid R8 issues with Go AAR + FFmpeg + Java 17
+            // Enable later with thorough testing. Proguard rules kept for reference.
+            isMinifyEnabled = false
+            isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -95,15 +97,9 @@ android {
         }
     }
     
-    // Split APKs by ABI for smaller individual downloads
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("arm64-v8a", "armeabi-v7a")
-            isUniversalApk = true // Also generate universal APK
-        }
-    }
+    // APK splits are handled by Flutter's --split-per-abi flag.
+    // Keeping Gradle's splits disabled avoids double-splitting and
+    // R8 issues when both mechanisms are active.
 }
 
 flutter {
