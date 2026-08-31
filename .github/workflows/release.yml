@@ -1,9 +1,13 @@
-name: Release
+name: Release (signed, upstream)
+
+# NOTE: this is the upstream pipeline. It requires an Android keystore
+# (KEYSTORE_BASE64 / KEY_ALIAS / KEYSTORE_PASSWORD / KEY_PASSWORD) plus the
+# AltStore and Telegram secrets. Tag releases in this fork are produced by
+# `unsigned-release.yml`, which needs no secrets and no developer account, so
+# the tag trigger is disabled here to avoid two workflows racing for the same
+# release. Run this manually if you have the signing secrets configured.
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       version:
