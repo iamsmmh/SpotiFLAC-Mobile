@@ -155,7 +155,9 @@ Android revokes a saved folder grant, select the folder again in Settings.
 <br>
 
 SpotiFLAC Mobile is open source, so its code and build workflows can be
-inspected directly in this repository.
+inspected directly in this repository. Release binaries are produced entirely by
+GitHub Actions — see [docs/UNSIGNED_BUILDS.md](docs/UNSIGNED_BUILDS.md) for the
+unsigned APK/IPA pipeline.
 
 </details>
 
