@@ -59,6 +59,19 @@ class PlayableMedia {
   final String? format;
   final bool explicit;
 
+  /// Engine-side context carried through audio_service for the Liquid Glass
+  /// UI: 'local' | 'stream' | 'download'.
+  final String? playbackMode;
+
+  /// Display quality label (e.g. "MP3 128kbps").
+  final String? qualityLabel;
+
+  /// Provider display name for the source chip.
+  final String? sourceLabel;
+
+  /// Stable provider id used by the health registry / failover hook.
+  final String? providerId;
+
   const PlayableMedia({
     required this.id,
     required this.source,
@@ -72,9 +85,18 @@ class PlayableMedia {
     this.bitrate,
     this.format,
     this.explicit = false,
+    this.playbackMode,
+    this.qualityLabel,
+    this.sourceLabel,
+    this.providerId,
   });
 
   bool get isContentUri => source.startsWith('content://');
+
+  /// Progressive URL sources (http/https). The engine resolves these with the
+  /// streaming engine and plays them with [UrlSource].
+  bool get isRemoteHttp =>
+      source.startsWith('http://') || source.startsWith('https://');
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -89,6 +111,14 @@ class PlayableMedia {
     if (bitrate != null && bitrate! > 0) 'bitrate': bitrate,
     if (format != null && format!.trim().isNotEmpty) 'format': format,
     if (explicit) 'explicit': true,
+    if (playbackMode != null && playbackMode!.trim().isNotEmpty)
+      'playbackMode': playbackMode,
+    if (qualityLabel != null && qualityLabel!.trim().isNotEmpty)
+      'qualityLabel': qualityLabel,
+    if (sourceLabel != null && sourceLabel!.trim().isNotEmpty)
+      'sourceLabel': sourceLabel,
+    if (providerId != null && providerId!.trim().isNotEmpty)
+      'providerId': providerId,
   };
 
   static PlayableMedia? fromJson(Map<String, dynamic> json) {
@@ -113,6 +143,10 @@ class PlayableMedia {
       bitrate: readPositiveInt(json['bitrate']),
       format: json['format']?.toString(),
       explicit: parseExplicitFlag(json['explicit']) == true,
+      playbackMode: json['playbackMode']?.toString(),
+      qualityLabel: json['qualityLabel']?.toString(),
+      sourceLabel: json['sourceLabel']?.toString(),
+      providerId: json['providerId']?.toString(),
     );
   }
 
@@ -136,6 +170,14 @@ class PlayableMedia {
         if (format != null && format!.trim().isNotEmpty)
           'format': format!.trim(),
         if (explicit) 'explicit': true,
+        if (playbackMode != null && playbackMode!.trim().isNotEmpty)
+          'playback_mode': playbackMode!.trim(),
+        if (qualityLabel != null && qualityLabel!.trim().isNotEmpty)
+          'quality_label': qualityLabel!.trim(),
+        if (sourceLabel != null && sourceLabel!.trim().isNotEmpty)
+          'source_label': sourceLabel!.trim(),
+        if (providerId != null && providerId!.trim().isNotEmpty)
+          'provider_id': providerId!.trim(),
       },
     );
   }
@@ -503,6 +545,9 @@ class MusicPlayerHandler extends BaseAudioHandler
   /// the Go reader). 1.0 when disabled, untagged, or unreadable. Positive
   /// gains clamp at 1.0 — setVolume can only attenuate.
   Future<double> _normalizationVolumeFor(String path) async {
+    // Remote streams have no local tags; normalization is applied at the
+    // engine level (stream gain metadata) when available.
+    if (path.startsWith('http://') || path.startsWith('https://')) return 1.0;
     if (!_playbackNormalizationEnabled) return 1.0;
     final cached = _normalizationVolumeCache[path];
     if (cached != null) return cached;
@@ -900,8 +945,13 @@ class MusicPlayerHandler extends BaseAudioHandler
       if (!_isCurrentPlayRequest(generation, media)) return;
       await _player.setVolume(normalizationVolume);
       if (!_isCurrentPlayRequest(generation, media)) return;
+      // Progressive HTTP sources play with UrlSource (the streaming engine
+      // preflighted them); local/content URIs use DeviceFileSource.
+      final source = media.isRemoteHttp
+          ? UrlSource(resolved)
+          : DeviceFileSource(resolved);
       await _player.play(
-        DeviceFileSource(resolved),
+        source,
         position: effectiveStartPosition > Duration.zero
             ? effectiveStartPosition
             : null,
@@ -930,12 +980,70 @@ class MusicPlayerHandler extends BaseAudioHandler
       if (!_isCurrentPlayRequest(generation, media)) return;
       _sourceReady = false;
       _log.e('Playback failed for ${media.title}: $e');
+      // Engine hook (streaming failover) observes runtime failures first; the
+      // player still goes to stopped so the UI never lies about state.
+      playbackFailureListener?.call(media, e);
       _broadcastState(playerState: PlayerState.stopped);
     } finally {
       if (_switchingGeneration == generation) {
         _switchingGeneration = 0;
       }
     }
+  }
+
+  /// Replaces the current queue item's source and replays it without touching
+  /// the rest of the queue. Used by the streaming engine's failover path to
+  /// swap an expired/dead stream URL for the next ranked source.
+  Future<void> replaceCurrentAndPlay(PlayableMedia item) async {
+    if (_index < 0 || _index >= _media.length) return;
+    final current = _media[_index];
+    if (!current.isRemoteHttp) return; // Engine-owned streams only.
+    _media[_index] = item;
+    _queueItems[_index] = item.toMediaItem();
+    queue.add(List<MediaItem>.unmodifiable(_queueItems));
+    mediaItem.add(item.toMediaItem());
+    await _playIndex(_index, recordHistory: false);
+  }
+
+  Future<void> setVolume(double volume) async {
+    try {
+      await _player.setVolume(volume.clamp(0.0, 1.0));
+    } catch (e) {
+      _log.w('Failed to set volume: $e');
+    }
+  }
+
+  Future<void> setPlaybackRate(double rate) async {
+    try {
+      await _player.setPlaybackRate(rate.clamp(0.5, 2.0));
+    } catch (e) {
+      _log.w('Failed to set playback rate: $e');
+    }
+  }
+
+  Future<void> setBalance(double balance) async {
+    try {
+      await _player.setBalance(balance.clamp(-1.0, 1.0));
+    } catch (e) {
+      _log.w('Failed to set balance: $e');
+    }
+  }
+
+  Future<void> seekRelative(Duration offset) async {
+    final base = await _currentPositionForPersist();
+    final target = base + offset;
+    if (target < Duration.zero) {
+      await seek(Duration.zero);
+      return;
+    }
+    final current = mediaItem.value;
+    if (current?.duration != null && current!.duration! > Duration.zero) {
+      if (target > current.duration!) {
+        await _handlePlayerComplete();
+        return;
+      }
+    }
+    await seek(target);
   }
 
   /// Resolves the real track duration when the initial metadata had none and
@@ -1272,6 +1380,19 @@ final StreamController<MusicPlayerHandler> _handlerReadyController =
 MusicPlayerHandler? get musicPlayerHandler => _handler;
 
 Future<void> Function()? musicPlayerExclusiveAudioHook;
+
+/// Runtime playback failure observer, installed by the streaming engine for
+/// source failover (and left unset for plain local playback).
+typedef PlaybackFailureListener = void Function(
+  PlayableMedia media,
+  Object error,
+);
+
+PlaybackFailureListener? playbackFailureListener;
+
+void setPlaybackFailureListener(PlaybackFailureListener listener) {
+  playbackFailureListener = listener;
+}
 
 /// Flushes the current playback position if the player has been initialized.
 Future<void> persistCurrentPlaybackSession() async {

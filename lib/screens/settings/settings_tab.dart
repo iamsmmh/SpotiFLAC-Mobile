@@ -15,6 +15,7 @@ import 'package:spotiflac_android/screens/settings/library_settings_page.dart';
 import 'package:spotiflac_android/screens/settings/log_screen.dart';
 import 'package:spotiflac_android/screens/settings/lyrics_settings_page.dart';
 import 'package:spotiflac_android/screens/settings/metadata_settings_page.dart';
+import 'package:spotiflac_android/screens/settings/streaming_settings_page.dart';
 import 'package:spotiflac_android/screens/settings/settings_search_catalog.dart';
 import 'package:spotiflac_android/theme/app_tokens.dart';
 import 'package:spotiflac_android/utils/adaptive_layout.dart';
@@ -103,6 +104,29 @@ class _SettingsTabState extends ConsumerState<SettingsTab> {
             subtitle: l10n.settingsDonateSubtitle,
             keywords: const ['support', 'ko-fi', 'sponsor'],
             pageBuilder: () => const DonatePage(),
+          ),
+        ],
+      ),
+      _Group(
+        destinations: [
+          _Destination(
+            icon: Icons.auto_awesome_outlined,
+            title: 'Streaming & Glass',
+            subtitle: 'Smart Play, quality, failover, visualizer, glass UI',
+            keywords: const [
+              'stream',
+              'streaming',
+              'quality',
+              'lossless',
+              'glass',
+              'liquid',
+              'visualizer',
+              'smart play',
+              'engine',
+              'preload',
+              'adaptive',
+            ],
+            pageBuilder: () => const StreamingSettingsPage(),
           ),
         ],
       ),

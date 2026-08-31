@@ -8,10 +8,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:spotiflac_android/app.dart';
 import 'package:spotiflac_android/models/settings.dart';
 import 'package:spotiflac_android/providers/download_queue_provider.dart';
+import 'package:spotiflac_android/providers/engine_settings_provider.dart';
 import 'package:spotiflac_android/providers/extension_provider.dart';
+import 'package:spotiflac_android/providers/engine_settings_provider.dart';
 import 'package:spotiflac_android/providers/local_library_provider.dart';
 import 'package:spotiflac_android/providers/runtime_profile_provider.dart';
 import 'package:spotiflac_android/providers/settings_provider.dart';
+import 'package:spotiflac_android/providers/streaming_engine_provider.dart';
 import 'package:spotiflac_android/providers/theme_provider.dart';
 import 'package:spotiflac_android/services/notification_service.dart';
 import 'package:spotiflac_android/services/platform_bridge.dart';
@@ -44,6 +47,7 @@ void main() {
       await _prepareAndroidInstallationState(prefs);
       final bootstrapSettings = loadBootstrapSettings(prefs);
       final bootstrapTheme = loadBootstrapThemeSettings(prefs);
+      final bootstrapEngineSettings = engineSettingsFromPrefs(prefs);
       final initialSafAccessLost = await _detectInitialSafAccessLoss(
         bootstrapSettings,
       );
@@ -64,6 +68,9 @@ void main() {
               initialSafAccessLost,
             ),
             initialThemeSettingsProvider.overrideWithValue(bootstrapTheme),
+            initialEngineSettingsProvider.overrideWithValue(
+              bootstrapEngineSettings,
+            ),
           ],
           child: _EagerInitialization(
             child: SpotiFLACApp(
@@ -318,6 +325,14 @@ class _EagerInitializationState extends ConsumerState<_EagerInitialization>
           _maybeScheduleLocalLibraryWarmup(true);
         }
       },
+    );
+
+    // Streaming engine: restore the last engine savepoint (queue/modes) so
+    // recovery can offer "resume?" after a kill, and warm the failover hook
+    // before the first play request.
+    unawaited(ref.read(engineSavepointProvider.notifier).load());
+    unawaited(
+      ref.read(streamingEngineControllerProvider).ensureFailureHook(),
     );
   }
 

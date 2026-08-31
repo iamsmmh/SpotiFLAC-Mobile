@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:spotiflac_android/l10n/l10n.dart';
 import 'package:spotiflac_android/providers/download_queue_provider.dart';
+import 'package:spotiflac_android/providers/engine_settings_provider.dart';
 import 'package:spotiflac_android/providers/settings_provider.dart';
 import 'package:spotiflac_android/providers/repo_provider.dart';
 import 'package:spotiflac_android/providers/runtime_profile_provider.dart';
@@ -27,6 +28,8 @@ import 'package:spotiflac_android/services/update_checker.dart';
 import 'package:spotiflac_android/widgets/app_announcement_dialog.dart';
 import 'package:spotiflac_android/widgets/update_dialog.dart';
 import 'package:spotiflac_android/widgets/animation_utils.dart';
+import 'package:spotiflac_android/widgets/liquid/liquid_glass.dart';
+import 'package:spotiflac_android/widgets/liquid/liquid_mini_player.dart';
 import 'package:spotiflac_android/widgets/settings_group.dart';
 import 'package:spotiflac_android/widgets/mini_player.dart';
 import 'package:spotiflac_android/widgets/selection_bottom_bar.dart';
@@ -809,13 +812,14 @@ class _MainShellState extends ConsumerState<MainShell>
       ),
     );
 
-    return SelectionOverlayHost(
-      child: BackButtonListener(
-        onBackButtonPressed: () async {
-          await _handleBackPress();
-          return true;
-        },
-        child: Scaffold(
+    return LiquidGlassCapabilitiesHost(
+      child: SelectionOverlayHost(
+        child: BackButtonListener(
+          onBackButtonPressed: () async {
+            await _handleBackPress();
+            return true;
+          },
+          child: Scaffold(
           extendBody: true,
           // The page view keeps one element across the rail<->bar structure
           // swap via _pageViewKey; without it a rotation past the 600dp
@@ -869,10 +873,14 @@ class _MainShellState extends ConsumerState<MainShell>
               : pageView,
           bottomNavigationBar: Builder(
             builder: (context) {
+              final useLiquidGlass = ref.watch(glassUiEnabledProvider);
               final bottomBar = Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const MiniPlayer(),
+                  if (useLiquidGlass)
+                    const LiquidMiniPlayer()
+                  else
+                    const MiniPlayer(),
                   if (!useNavigationRail)
                     DecoratedBox(
                       position: DecorationPosition.foreground,
@@ -918,6 +926,7 @@ class _MainShellState extends ConsumerState<MainShell>
             },
           ),
         ),
+      ),
       ),
     );
   }

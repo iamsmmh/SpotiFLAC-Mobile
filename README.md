@@ -35,6 +35,29 @@
 
 ---
 
+## Streaming Engine & Liquid Glass
+
+SpotiFLAC Mobile now ships a unified **Track → Source → Playback Engine**
+(`lib/engine/`): canonical track identity (ISRC-first), Smart Play
+(local → stream → download & play), provider health scoring with failover,
+next-track preloading, and per-network quality profiles — all feeding the
+existing audio_service player (progressive `UrlSource` playback included).
+
+The UI adds an Apple-style **Liquid Glass** layer: frosted mini player,
+full glass player with a procedural visualizer, glass sheets/chips/sliders,
+aurora scrim, and pointer-reactive highlights. It degrades cleanly on
+low-end devices and respects reduce-motion / high-contrast settings, and can
+be switched off (Settings → Streaming & Glass) to return to the classic
+player.
+
+See [`docs/streaming_engine.md`](docs/streaming_engine.md) for the
+architecture and [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full feature
+map. Streaming provider integrations are extensions implementing the
+`StreamSourceAdapter` API — the engine never extracts DRM audio from
+commercial services (authorized APIs/accounts only).
+
+---
+
 ## Extensions
 
 Extensions let the community add new music sources and features without waiting for app updates. When a streaming service API changes or a new source becomes available, extensions can be updated independently.
