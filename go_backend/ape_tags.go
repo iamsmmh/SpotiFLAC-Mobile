@@ -148,6 +148,14 @@ func parseAPEItems(data []byte, count int) ([]APETagItem, error) {
 		itemFlags := binary.LittleEndian.Uint32(data[pos+4 : pos+8])
 		pos += 8
 
+		// Reject corrupt value sizes before touching the key/value slices.
+		// On 32-bit platforms a uint32 >= 2^31 converts to a negative int,
+		// and a huge valueSize could otherwise overflow pos+valueSize and
+		// reach the slice with a negative bound (panic).
+		if valueSize < 0 || int64(pos)+int64(valueSize) > int64(len(data)) {
+			break
+		}
+
 		// Key is null-terminated ASCII (2-255 bytes, case-insensitive)
 		keyEnd := pos
 		for keyEnd < len(data) && data[keyEnd] != 0 {
@@ -160,9 +168,6 @@ func parseAPEItems(data []byte, count int) ([]APETagItem, error) {
 		key := string(data[pos:keyEnd])
 		pos = keyEnd + 1
 
-		if pos+valueSize > len(data) {
-			break
-		}
 		value := string(data[pos : pos+valueSize])
 		pos += valueSize
 
