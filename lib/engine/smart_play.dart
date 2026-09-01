@@ -122,6 +122,11 @@ class SmartPlayDecision {
   final AudioQualityLevel requestedQuality;
   final AudioQualityLevel actualQuality;
 
+  /// Human-readable explanation of why playback cannot start right now.
+  /// Populated for [SmartPlayMode.unavailable] decisions so the UI can show
+  /// *why* instead of failing silently; null for playable decisions.
+  final String? reason;
+
   const SmartPlayDecision({
     required this.mode,
     this.source,
@@ -129,6 +134,7 @@ class SmartPlayDecision {
     required this.networkProfile,
     required this.requestedQuality,
     required this.actualQuality,
+    this.reason,
   });
 
   factory SmartPlayDecision.unavailable(
@@ -141,6 +147,7 @@ class SmartPlayDecision {
     networkProfile: input.networkProfile,
     requestedQuality: input.requestQuality,
     actualQuality: input.requestQuality,
+    reason: reason,
   );
 
   bool get canPlayNow => mode.isPlayable;
@@ -155,6 +162,7 @@ class SmartPlayDecision {
         networkProfile: networkProfile,
         requestedQuality: requestedQuality,
         actualQuality: source.quality,
+        reason: reason,
       );
 
   /// One-line human description, e.g. "Stream · Deezer FLAC".
@@ -173,7 +181,9 @@ class SmartPlayDecision {
       case SmartPlayMode.downloadAndPlay:
         return 'Download & Play';
       case SmartPlayMode.unavailable:
-        return 'Unavailable';
+        return reason == null
+            ? 'Unavailable'
+            : 'Unavailable — $reason';
     }
   }
 
@@ -184,6 +194,7 @@ class SmartPlayDecision {
     'network': networkProfile.name,
     'requested_quality': requestedQuality.name,
     'actual_quality': actualQuality.name,
+    if (reason != null) 'reason': reason,
   };
 }
 

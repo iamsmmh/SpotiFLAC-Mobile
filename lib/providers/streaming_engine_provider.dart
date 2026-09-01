@@ -550,18 +550,53 @@ class StreamingEngineController {
       );
     }
 
-    final outcome = _session.resolve(
-      [source],
+    var selected = source;
+    var outcome = _session.resolve(
+      [selected],
       requested: decision.requestedQuality,
     );
-    final selected = outcome.resolved;
-    if (selected == null) {
+    if (outcome.resolved == null) {
       return EnginePlayResult(
         started: false,
         decision: decision,
         failure: EnginePlayFailureKind.streamFailed,
         message: outcome.failure?.message ?? 'No usable source',
       );
+    }
+    selected = outcome.resolved!;
+
+    // URL-expiry handling: when the policy flags the source as near expiry,
+    // re-query the adapters for a fresh URL before playing. Bounded to a
+    // single refresh round so a provider that keeps issuing stale URLs cannot
+    // stall playback forever.
+    if (outcome.needsUrlRefresh &&
+        _ref.read(engineSettingsProvider).autoRefreshExpiredUrls) {
+      log.add(
+        EngineEvent.info(
+          'stream',
+          'Refreshing expired/near-expiry URL for ${track.name}',
+        ),
+      );
+      final refreshed = await candidatesFor(track);
+      final ranked = _resolver.candidates(
+        refreshed,
+        requested: decision.requestedQuality,
+      );
+      if (ranked.isNotEmpty) {
+        selected = ranked.first;
+        outcome = _session.resolve(
+          [selected],
+          requested: decision.requestedQuality,
+        );
+        if (outcome.resolved != null) {
+          selected = outcome.resolved!;
+        }
+      }
+    }
+    if (_session.state.phase == StreamPhase.refreshingUrl) {
+      // Refresh was disabled or produced no fresher candidate; proceed with
+      // the best source we have so the user is never stuck on a spinner.
+      _session.proceedWithoutRefresh(selected);
     }
 
     return _startSource(track, decision, selected);

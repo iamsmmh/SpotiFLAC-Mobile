@@ -413,9 +413,12 @@ class ListeningStats {
       plays: plays,
       skips: skips,
       listenedMs: listenedMs + elapsed.inMilliseconds,
+      // The per-day bucket holds milliseconds, matching the total: two 90s
+      // listens must read as 180000 ms "today", not 2.
       listenedMsPerDay: _increment(
         listenedMsPerDay,
         day,
+        elapsed.inMilliseconds,
       ),
       playsPerDay: playsPerDay,
       trackStats: trackStats,
@@ -503,9 +506,16 @@ class ListeningStats {
     return list;
   }
 
-  static Map<String, int> _increment(Map<String, int> source, String day) {
+  /// Adds [amount] (default 1) to a per-day bucket. Callers pass their own
+  /// unit: plays count by 1, listened time by milliseconds.
+  static Map<String, int> _increment(
+    Map<String, int> source,
+    String day, [
+    int amount = 1,
+  ]) {
+    if (amount <= 0) return source;
     final copy = Map<String, int>.from(source);
-    copy[day] = (copy[day] ?? 0) + 1;
+    copy[day] = (copy[day] ?? 0) + amount;
     return Map.unmodifiable(copy);
   }
 

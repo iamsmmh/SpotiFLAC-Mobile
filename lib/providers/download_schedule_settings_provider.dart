@@ -38,16 +38,17 @@ class DownloadScheduleSettings {
   }
 
   /// The next [DateTime] at which downloads may resume (null = already open).
+  ///
+  /// Always returns a moment strictly after [now]: a same-day window that
+  /// already closed today (e.g. 10:00–14:00 and it is 16:00) resumes
+  /// *tomorrow* at the start minute, never at a time in the past.
   DateTime? nextOpenMoment(DateTime now) {
     if (isWithinWindow(now)) return null;
-    if (startMinute <= endMinute) {
-      return _atMinute(startMinute, now);
-    }
-    // Crosses midnight: if now is before end (morning), wait until tonight.
-    if (now.hour * 60 + now.minute < endMinute) {
-      return _atMinute(startMinute, now);
-    }
-    return _atMinute(startMinute, now);
+    final candidate = _atMinute(startMinute, now);
+    if (candidate.isAfter(now)) return candidate;
+    // Start minute already passed today (closed window or a nightly window
+    // that opened before midnight and ended this morning): resume tomorrow.
+    return candidate.add(const Duration(days: 1));
   }
 
   DateTime _atMinute(int minute, DateTime now) {
