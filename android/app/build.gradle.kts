@@ -3,8 +3,10 @@ import java.io.FileInputStream
 
 plugins {
     id("com.android.application")
-    id("kotlin-android")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
+    // AGP 9.x ships built-in Kotlin support; applying the legacy
+    // `kotlin-android` plugin fails the build ("plugin is no longer required
+    // for Kotlin support since AGP 9.0"). Kotlin compiler options are
+    // configured via the `android.kotlin.compilerOptions` block below.
     id("dev.flutter.flutter-gradle-plugin")
 }
 

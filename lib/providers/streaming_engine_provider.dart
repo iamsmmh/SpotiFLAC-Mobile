@@ -11,14 +11,11 @@ import 'package:spotiflac_android/engine/smart_play.dart';
 import 'package:spotiflac_android/engine/streaming_engine.dart';
 import 'package:spotiflac_android/models/track.dart';
 import 'package:spotiflac_android/models/download_item.dart';
-import 'package:spotiflac_android/providers/download_history_provider.dart';
 import 'package:spotiflac_android/providers/download_queue_provider.dart';
-import 'package:spotiflac_android/providers/download_queue_state.dart';
 import 'package:spotiflac_android/providers/engine_settings_provider.dart';
 import 'package:spotiflac_android/providers/music_player_provider.dart';
 import 'package:spotiflac_android/providers/playback_provider.dart';
 import 'package:spotiflac_android/providers/settings_provider.dart';
-import 'package:spotiflac_android/services/history_database.dart';
 import 'package:spotiflac_android/services/music_player_service.dart';
 import 'package:spotiflac_android/utils/string_utils.dart';
 
