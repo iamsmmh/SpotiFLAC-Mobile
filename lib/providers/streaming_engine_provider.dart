@@ -259,6 +259,8 @@ class StreamingEngineController {
 
   final ProviderHealthRegistry health = ProviderHealthRegistry();
   final EngineEventLog log = EngineEventLog();
+  final BandwidthMonitor bandwidth = BandwidthMonitor();
+  final StreamIntegrityLog integrity = StreamIntegrityLog();
   late final StreamSourceResolver _resolver = StreamSourceResolver(
     health: health,
   );
@@ -285,6 +287,8 @@ class StreamingEngineController {
   EngineEventLog get eventLog => log;
   StreamingSessionState get sessionState => _session.state;
   StreamPreloader get preloader => _preloader;
+  BandwidthMonitor get bandwidthMonitor => bandwidth;
+  StreamIntegrityLog get integrityLog => integrity;
 
   /// The engine-owned track for a playing media id (used by "details" flows).
   Track? trackFor(String mediaId) => _trackByMediaId[mediaId];
@@ -570,8 +574,21 @@ class StreamingEngineController {
   ) async {
     final preflight = await _validator.validate(source);
     _network.noteLatency(preflight.latencyMs);
+    bandwidth.recordPreflight(
+      latencyMs: preflight.latencyMs,
+      contentLengthBytes: preflight.contentLengthBytes,
+      providerId: source.providerId,
+    );
     if (!preflight.ok) {
       health.recordFailure(source.providerId, latencyMs: preflight.latencyMs);
+      integrity.add(
+        StreamIntegrityRecord.failure(
+          providerId: source.providerId,
+          uri: source.uri,
+          category: 'preflight',
+          message: preflight.error ?? 'Preflight failed',
+        ),
+      );
       log.add(
         EngineEvent.error(
           'stream',
@@ -600,6 +617,14 @@ class StreamingEngineController {
     health.recordSuccess(
       source.providerId,
       latencyMs: preflight.latencyMs,
+    );
+    integrity.add(
+      StreamIntegrityRecord.success(
+        providerId: source.providerId,
+        uri: source.uri,
+        category: 'preflight',
+        message: 'Preflight ok',
+      ),
     );
 
     final media = _playableFor(track, source);
@@ -743,6 +768,14 @@ class StreamingEngineController {
           'Playback failed for ${track.name} (attempt ${_session.state.attempt + 1})',
         ),
       );
+      integrity.add(
+        StreamIntegrityRecord.failure(
+          providerId: media.sourceLabel ?? 'unknown',
+          uri: media.source,
+          category: 'playback',
+          message: error.toString(),
+        ),
+      );
       final failure = StreamFailure(
         kind: _classify(error),
         providerId: media.sourceLabel ?? 'unknown',
@@ -782,6 +815,15 @@ class StreamingEngineController {
         await _startSource(track, await decide(track), next);
         return;
       }
+      integrity.add(
+        StreamIntegrityRecord.fallback(
+          providerId: next.providerId,
+          uri: next.uri,
+          category: 'fallback',
+          message:
+              'Switched from ${media.sourceLabel ?? 'previous'} to ${next.providerId}',
+        ),
+      );
       await handler.replaceCurrentAndPlay(_playableFor(track, next));
       _session.markSuccess(next);
     } finally {
@@ -997,6 +1039,8 @@ final engineDiagnosticsProvider = Provider<StreamingDiagnostics>(
       health: engine.providerHealth,
       log: engine.eventLog,
       session: state,
+      bandwidth: engine.bandwidthMonitor,
+      integrity: engine.integrityLog,
     );
   },
 );

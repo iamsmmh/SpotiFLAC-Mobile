@@ -15,6 +15,7 @@ import 'package:spotiflac_android/models/settings.dart';
 import 'package:spotiflac_android/models/track.dart';
 import 'package:spotiflac_android/services/app_navigation_service.dart';
 import 'package:spotiflac_android/providers/settings_provider.dart';
+import 'package:spotiflac_android/providers/download_schedule_settings_provider.dart';
 import 'package:spotiflac_android/providers/extension_provider.dart';
 import 'package:spotiflac_android/providers/download_verification_retry_guard.dart';
 import 'package:spotiflac_android/providers/download_queue_state.dart';
@@ -50,6 +51,7 @@ part 'download_queue_provider_finalization.dart';
 part 'download_queue_provider_replaygain.dart';
 part 'download_queue_provider_embedding.dart';
 part 'download_queue_provider_single_item.dart';
+part 'download_queue_provider_schedule.dart';
 
 final _log = AppLogger('DownloadQueue');
 
@@ -338,6 +340,8 @@ class DownloadQueueNotifier extends Notifier<DownloadQueueState> {
   }
 
   bool _networkPausedByWifiOnly = false;
+  bool _schedulePausedByWindow = false;
+  Timer? _scheduleTimer;
   List<ConnectivityResult>? _lastConnectivityResults;
   DateTime _lastConnectionCleanupAt = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastReconnectRetryPromptAt = DateTime.fromMillisecondsSinceEpoch(0);
@@ -379,9 +383,21 @@ class DownloadQueueNotifier extends Notifier<DownloadQueueState> {
       }
     });
 
+    ref.listen<DownloadScheduleSettings>(
+      downloadScheduleSettingsProvider,
+      (previous, next) {
+        if (previous?.enabled != next.enabled ||
+            previous?.startMinute != next.startMinute ||
+            previous?.endMinute != next.endMinute) {
+          Future<void>.microtask(_applyScheduleGate);
+        }
+      },
+    );
+
     ref.onDispose(() {
       _verificationWaitCoordinator.cancelAll();
       _progressPoller.stop();
+      _scheduleTimer?.cancel();
       _connectivitySub?.cancel();
       _connectivitySub = null;
       if (_queuePersistDebounce?.isActive == true) {
@@ -1451,6 +1467,11 @@ class DownloadQueueNotifier extends Notifier<DownloadQueueState> {
       );
       return;
     }
+
+    // Scheduled window gate: the queue waits behind a closed download window
+    // and resumes itself once the window opens.
+    await _applyScheduleGate();
+    if (_scheduleBlocked) return;
 
     var settings = ref.read(settingsProvider);
     updateSettings(settings);

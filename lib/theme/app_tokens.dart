@@ -25,6 +25,7 @@ class AppTokens extends ThemeExtension<AppTokens> {
     required this.gapMd,
     required this.gapLg,
     required this.gapXl,
+    required this.pagePadding,
     required this.coverMini,
     required this.coverCompact,
     required this.coverList,
@@ -54,6 +55,7 @@ class AppTokens extends ThemeExtension<AppTokens> {
     gapMd: 12,
     gapLg: 16,
     gapXl: 24,
+    pagePadding: 16,
     coverMini: 44,
     coverCompact: 48,
     coverList: 56,
@@ -92,6 +94,10 @@ class AppTokens extends ThemeExtension<AppTokens> {
   final double gapMd;
   final double gapLg;
   final double gapXl;
+
+  /// Horizontal/vertical padding for setting-style pages (matches the app's
+  /// 16dp content margin).
+  final double pagePadding;
 
   /// Mini player artwork.
   final double coverMini;
@@ -150,6 +156,7 @@ class AppTokens extends ThemeExtension<AppTokens> {
     double? gapMd,
     double? gapLg,
     double? gapXl,
+    double? pagePadding,
     double? coverMini,
     double? coverCompact,
     double? coverList,
@@ -175,6 +182,7 @@ class AppTokens extends ThemeExtension<AppTokens> {
       gapMd: gapMd ?? this.gapMd,
       gapLg: gapLg ?? this.gapLg,
       gapXl: gapXl ?? this.gapXl,
+      pagePadding: pagePadding ?? this.pagePadding,
       coverMini: coverMini ?? this.coverMini,
       coverCompact: coverCompact ?? this.coverCompact,
       coverList: coverList ?? this.coverList,
@@ -207,6 +215,7 @@ class AppTokens extends ThemeExtension<AppTokens> {
       gapMd: lerpDouble(gapMd, other.gapMd, t),
       gapLg: lerpDouble(gapLg, other.gapLg, t),
       gapXl: lerpDouble(gapXl, other.gapXl, t),
+      pagePadding: lerpDouble(pagePadding, other.pagePadding, t),
       coverMini: lerpDouble(coverMini, other.coverMini, t),
       coverCompact: lerpDouble(coverCompact, other.coverCompact, t),
       coverList: lerpDouble(coverList, other.coverList, t),

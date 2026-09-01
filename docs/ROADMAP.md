@@ -5,7 +5,7 @@ Legend: ✅ exists in this repo · 🚀 shipped in this upgrade · 🧱 scaffold
 ## 1. Core music playback
 ✅ Play/pause/next/previous/seek · ✅ shuffle/repeat/favorite/queue/playlist/notifications
 🚀 resume position (existing audio-service savepoint + new engine savepoint) · 🚀 playback history & statistics
-⏳ recently played / most played aggregation UI
+✅ recently played / most played aggregation UI (Settings → Streaming & Glass → Listening Statistics)
 
 ## 2. Streaming engine
 🚀 instant progressive playback (`UrlSource` in MusicPlayerHandler) · 🚀 source ranking & quality ladder
@@ -13,7 +13,7 @@ Legend: ✅ exists in this repo · 🚀 shipped in this upgrade · 🧱 scaffold
 🚀 preflight validation · 🚀 URL-expiry refresh policy · 🚀 next-track preloading / adaptive quality / network profiles
 🚀 manual quality selection · 🚀 stream state monitoring (phase machine + diagnostics)
 🧱 multiple streaming providers via `StreamSourceAdapter` (extensions)
-⏳ Wi-Fi/mobile quality profiles UI (settings model ready)
+✅ Wi-Fi/mobile/poor/roaming quality profiles UI
 
 ## 3. Smart playback
 🚀 Smart Play ladder (local → stream → download&play → unavailable) with decision traces
@@ -33,7 +33,7 @@ becoming-noisy, route changes (unchanged and verified)
 🚀 Smart-Play "download & play" integration hooks (watch queue completion)
 
 ## 7. Smart download
-✅ Wi-Fi-only mode exists · 🧱 scheduling/charging hooks (settings model in place) · ⏳ provider failover download ranking (engine-side ranking reusable)
+✅ Wi-Fi-only mode exists · ✅ time-window download scheduling (pause/resume) · 🧱 charging hooks · ⏳ provider failover download ranking (engine-side ranking reusable)
 
 ## 8. Audio quality
 🚀 Auto/Low/Normal/High/Lossless/Hi-Res ladder + per-network profiles + `AudioCharacteristics`
@@ -77,9 +77,10 @@ provider-id map, duplicate merging — the "ONE TRACK" backbone
 
 ## 24. Listening statistics
 🚀 `ListeningStats` (plays, skips, listened time, per-day buckets, streak) persisted locally
+✅ per-track plays/listened time + Recently Played / Most Played (Listening Statistics page)
 
 ## 25. Privacy
-✅ no account, local-only data, logging toggle · 🚀 stats opt-out, savepoint opt-out · ⏳ history clearing UI wiring
+✅ no account, local-only data, logging toggle · 🚀 stats opt-out, savepoint opt-out ✅ history clearing UI wiring (clear restore memory + reset statistics)
 
 ## 26. Sleep timer
 🚀 15/30/45/60 + end-of-track + stop, in the glass player
@@ -91,7 +92,7 @@ provider-id map, duplicate merging — the "ONE TRACK" backbone
 ✅ existing cover/metadata cache · 🧱 streaming cache gated by provider `cachePermitted` (default off — terms guardrail)
 
 ## 29. Adaptive streaming
-🚀 quality step policy + preflight latency + preloading · ⏳ live bandwidth sampling
+🚀 quality step policy + preflight latency + preloading · ✅ live bandwidth sampling (preflight-based estimate in Diagnostics)
 
 ## 30–32. Provider system / failover / source intelligence
 ✅ extension manager, priority, health checks (existing Go runtime)
@@ -115,10 +116,10 @@ provider-id map, duplicate merging — the "ONE TRACK" backbone
 ✅ resume/retry/partial cleanup/checksums (existing)
 
 ## 42–43. Diagnostics & logs
-🚀 Diagnostics Center section in Streaming & Glass settings (provider health, success rates, latency, event log)
+🚀 Diagnostics Center section in Streaming & Glass settings (provider health, success rates, latency, event log) · ✅ Streaming integrity (per-URL success/failure/fallback reasons)
 
 ## 44–45. Backup/restore & import/export
-✅ backup/restore, M3U/M3U8/JSON/CSV (existing)
+✅ backup/restore, M3U/M3U8/JSON/CSV (existing) · ✅ queue share/import (portable JSON)
 
 ## 46–47. Sharing & deep links
 ✅ share_plus, receive_sharing_intent, SongLink (existing) · ⏳ `spotiflac://` deep-link routes
@@ -150,7 +151,7 @@ provider-id map, duplicate merging — the "ONE TRACK" backbone
 
 ## 58–59. Storage & battery
 ✅ cache management, duplicate review (existing) · 🚀 visualizer battery mode, adaptive art resolution hints
-⏳ storage breakdown UI
+✅ storage breakdown UI (per-format/artist/album disk usage)
 
 ## 60. Quality assurance
 🚀 engine unit tests (identity, smart play, failover, refresh, savepoint, stats, preloader)

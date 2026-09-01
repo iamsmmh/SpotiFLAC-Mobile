@@ -8,6 +8,7 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:spotiflac_android/l10n/l10n.dart';
 import 'package:spotiflac_android/models/settings.dart';
 import 'package:spotiflac_android/providers/settings_provider.dart';
+import 'package:spotiflac_android/screens/settings/storage_breakdown_page.dart';
 import 'package:spotiflac_android/services/platform_bridge.dart';
 import 'package:spotiflac_android/utils/file_access.dart';
 import 'package:spotiflac_android/widgets/settings_group.dart';
@@ -350,6 +351,17 @@ class _FilesSettingsPageState extends ConsumerState<FilesSettingsPage> {
                           _disableAllFilesAccess();
                         }
                       },
+                    ),
+                    SettingsItem(
+                      icon: Icons.pie_chart_outline,
+                      title: 'Storage breakdown',
+                      subtitle: 'Per-format, artist and album disk usage',
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => const StorageBreakdownPage(),
+                        ),
+                      ),
                       showDivider: false,
                     ),
                   ],

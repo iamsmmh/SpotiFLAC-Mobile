@@ -5,7 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:spotiflac_android/l10n/l10n.dart';
 import 'package:spotiflac_android/providers/settings_provider.dart';
 import 'package:spotiflac_android/providers/extension_provider.dart';
+import 'package:spotiflac_android/providers/download_schedule_settings_provider.dart';
 import 'package:spotiflac_android/screens/settings/download_fallback_extensions_page.dart';
+import 'package:spotiflac_android/screens/settings/download_schedule_settings_page.dart';
 import 'package:spotiflac_android/utils/audio_format_utils.dart';
 import 'package:spotiflac_android/widgets/app_bottom_sheet.dart';
 import 'package:spotiflac_android/widgets/settings_group.dart';
@@ -203,6 +205,17 @@ class _DownloadSettingsPageState extends ConsumerState<DownloadSettingsPage> {
                       context,
                       ref,
                       settings.concurrentDownloads,
+                    ),
+                  ),
+                  SettingsItem(
+                    icon: Icons.schedule_outlined,
+                    title: 'Download scheduling',
+                    subtitle: _scheduleSubtitle(ref),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => const DownloadScheduleSettingsPage(),
+                      ),
                     ),
                   ),
                   if (Platform.isAndroid)
@@ -616,6 +629,12 @@ class _DownloadSettingsPageState extends ConsumerState<DownloadSettingsPage> {
         ],
       ),
     );
+  }
+
+  String _scheduleSubtitle(WidgetRef ref) {
+    final schedule = ref.watch(downloadScheduleSettingsProvider);
+    if (!schedule.enabled) return 'Off';
+    return '${schedule.startLabel} → ${schedule.endLabel}';
   }
 
   void _showNetworkModePicker(
