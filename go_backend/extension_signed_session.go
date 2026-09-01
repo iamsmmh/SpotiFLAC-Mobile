@@ -992,16 +992,6 @@ func (r *extensionRuntime) refreshSignedSession(config SignedSessionConfig, reco
 	return nil
 }
 
-func (r *extensionRuntime) startSignedSessionVerification(config SignedSessionConfig, reason string) (string, error) {
-	coordinator, err := r.signedSessionCoordinator(config)
-	if err != nil {
-		return "", err
-	}
-	coordinator.mu.Lock()
-	defer coordinator.mu.Unlock()
-	return r.startSignedSessionVerificationLocked(config, coordinator, reason)
-}
-
 func (r *extensionRuntime) startSignedSessionVerificationLocked(
 	config SignedSessionConfig,
 	coordinator *signedSessionCoordinator,

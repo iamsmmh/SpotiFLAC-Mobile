@@ -926,6 +926,11 @@ class DownloadQueueNotifier extends Notifier<DownloadQueueState> {
     if (index == -1) return;
 
     final current = items[index];
+    // A completed download must not keep a stale failure/verification
+    // message from an earlier attempt; callers never pass an error together
+    // with a completed status.
+    final clearStaleError =
+        status == DownloadStatus.completed && error == null;
     final next = current.copyWith(
       status: status,
       progress: progress ?? current.progress,
@@ -933,6 +938,7 @@ class DownloadQueueNotifier extends Notifier<DownloadQueueState> {
       filePath: filePath,
       error: error,
       errorType: errorType,
+      clearError: clearStaleError,
     );
 
     if (current.status == next.status &&
@@ -1203,7 +1209,7 @@ class DownloadQueueNotifier extends Notifier<DownloadQueueState> {
         return i.copyWith(
           status: DownloadStatus.queued,
           progress: 0,
-          error: null,
+          clearError: true,
         );
       }
       return i;
@@ -1259,7 +1265,7 @@ class DownloadQueueNotifier extends Notifier<DownloadQueueState> {
             speedMBps: 0,
             bytesReceived: 0,
             bytesTotal: 0,
-            error: null,
+            clearError: true,
           );
         })
         .toList(growable: false);

@@ -82,6 +82,10 @@ class DownloadItem {
     int? playlistPosition,
     bool? fromBatch,
     bool? preserveQualityVariant,
+    // `error ?? this.error` cannot distinguish "not provided" from
+    // "clear it", so retries use this explicit flag to drop the previous
+    // failure message instead of carrying it into the fresh attempt.
+    bool clearError = false,
   }) {
     return DownloadItem(
       id: id ?? this.id,
@@ -93,8 +97,8 @@ class DownloadItem {
       bytesReceived: bytesReceived ?? this.bytesReceived,
       bytesTotal: bytesTotal ?? this.bytesTotal,
       filePath: filePath ?? this.filePath,
-      error: error ?? this.error,
-      errorType: errorType ?? this.errorType,
+      error: clearError ? null : (error ?? this.error),
+      errorType: clearError ? null : (errorType ?? this.errorType),
       preparationStage: preparationStage ?? this.preparationStage,
       createdAt: createdAt ?? this.createdAt,
       qualityOverride: qualityOverride ?? this.qualityOverride,

@@ -49,7 +49,9 @@ func TestExtensionRuntimeStorageConcurrentRuntimesMergeWrites(t *testing.T) {
 		done <- result.ToBoolean()
 	}()
 	close(start)
-	if !<-done || !<-done {
+	firstOK := <-done
+	secondOK := <-done
+	if !firstOK || !secondOK {
 		t.Fatal("concurrent storage write failed")
 	}
 

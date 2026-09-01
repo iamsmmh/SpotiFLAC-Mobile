@@ -7,10 +7,6 @@ import (
 	"strings"
 )
 
-func scanAudioFileWithKnownModTime(filePath, scanTime string, knownModTime int64) (*LibraryScanResult, error) {
-	return scanAudioFileWithKnownModTimeAndDisplayNameAndCoverCacheKey(filePath, "", "", scanTime, knownModTime)
-}
-
 func scanAudioFileWithKnownModTimeAndDisplayNameAndCoverCacheKey(filePath, displayNameHint, coverCacheKey, scanTime string, knownModTime int64) (*LibraryScanResult, error) {
 	ext := resolveLibraryAudioExt(filePath, displayNameHint)
 
@@ -170,10 +166,6 @@ func scanFLACFileWithCoverCache(filePath string, result *LibraryScanResult, disp
 	applyDefaultLibraryMetadata(filePath, displayNameHint, result)
 
 	return result, nil
-}
-
-func scanM4AFile(filePath string, result *LibraryScanResult, displayNameHint string) (*LibraryScanResult, error) {
-	return scanM4AFileWithCoverCache(filePath, result, displayNameHint, "", "")
 }
 
 func scanM4AFileWithCoverCache(filePath string, result *LibraryScanResult, displayNameHint, coverCacheDir, coverCacheKey string) (*LibraryScanResult, error) {

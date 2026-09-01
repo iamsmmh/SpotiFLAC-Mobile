@@ -281,6 +281,22 @@ func DoRequestWithRetry(client *http.Client, req *http.Request, config RetryConf
 
 	for attempt := 0; attempt <= config.MaxRetries; attempt++ {
 		reqCopy := req.Clone(req.Context())
+		// req.Clone shares the original Body reader, which the previous
+		// attempt already consumed. Rewind via GetBody (set automatically by
+		// http.NewRequest for bytes/strings readers) so a retried POST does
+		// not silently resend an empty body.
+		if attempt > 0 && req.Body != nil {
+			if req.GetBody == nil {
+				return nil, fmt.Errorf(
+					"request body cannot be replayed for retry: %w", lastErr,
+				)
+			}
+			bodyCopy, err := req.GetBody()
+			if err != nil {
+				return nil, fmt.Errorf("failed to rewind request body for retry: %w", err)
+			}
+			reqCopy.Body = bodyCopy
+		}
 		reqCopy.Header.Set("User-Agent", userAgentForURL(reqCopy.URL))
 
 		resp, err := client.Do(reqCopy)
@@ -462,7 +478,14 @@ func isTransientNetworkError(err error) bool {
 		return true
 	}
 	var netErr net.Error
-	return errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary())
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	// net.Error.Temporary is deprecated (its meaning is ill-defined); the
+	// only "temporary" condition this function relies on is a transient DNS
+	// failure, so test that explicitly. NXDOMAIN (IsNotFound) stays permanent.
+	var dnsErr *net.DNSError
+	return errors.As(err, &dnsErr) && (dnsErr.IsTimeout || dnsErr.IsTemporary)
 }
 
 // isConnectivityFailure reports DNS, dial, timeout, TLS, or truncated transport
