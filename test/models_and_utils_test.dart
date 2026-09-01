@@ -661,6 +661,39 @@ void main() {
       expect(base.copyWith(error: null).errorMessage, 'raw backend failure');
     });
 
+    test('clearError drops a stale failure while plain copyWith keeps it', () {
+      final failed = DownloadItem(
+        id: 'download-1',
+        track: sampleTrack(),
+        service: 'qobuz',
+        createdAt: DateTime.utc(2026),
+        status: DownloadStatus.failed,
+        error: 'Waiting for verification',
+        errorType: DownloadErrorType.verificationRequired,
+      );
+
+      // Regression: `error: null` is indistinguishable from "not provided"
+      // in copyWith, so retries previously carried the old failure text into
+      // the new queued attempt and the queue UI kept showing it.
+      final retried = failed.copyWith(
+        status: DownloadStatus.queued,
+        progress: 0,
+        clearError: true,
+      );
+      expect(retried.error, isNull);
+      expect(retried.errorType, isNull);
+      expect(retried.errorMessage, '');
+
+      // Plain copyWith still preserves errors for unrelated updates.
+      final progressed = failed.copyWith(progress: 0.5);
+      expect(progressed.error, 'Waiting for verification');
+      expect(progressed.errorType, DownloadErrorType.verificationRequired);
+
+      // clearError wins even when an error value is passed alongside it.
+      final cleared = failed.copyWith(clearError: true, error: 'ignored');
+      expect(cleared.error, isNull);
+    });
+
     test('decodes json defaults and enums', () {
       final item = DownloadItem.fromJson({
         'id': 'download-1',
