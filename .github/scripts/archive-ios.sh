@@ -36,6 +36,29 @@ LOG="${2:-${RUNNER_TEMP:-/tmp}/xcodebuild-archive.log}"
 
 cd "$REPO_ROOT/ios"
 
+# Flutter's CocoaPods engine pod is intentionally only a placeholder; the
+# actual module is loaded from the SDK cache. Xcode 26 does not consistently
+# propagate CocoaPods' conditional framework search path to Objective-C
+# plugin targets while archiving, so resolve the device slice once and pass it
+# as an inherited workspace-wide search path.
+FLUTTER_ROOT_PATH="$(sed -n 's/^FLUTTER_ROOT=//p' Flutter/Generated.xcconfig | head -1)"
+FLUTTER_XCFRAMEWORK="$FLUTTER_ROOT_PATH/bin/cache/artifacts/engine/ios-release/Flutter.xcframework"
+FLUTTER_DEVICE_SLICE=""
+for candidate in "$FLUTTER_XCFRAMEWORK"/ios-*; do
+  case "$candidate" in
+    *simulator*) continue ;;
+  esac
+  if [ -d "$candidate" ]; then
+    FLUTTER_DEVICE_SLICE="$candidate"
+    break
+  fi
+done
+if [ -z "$FLUTTER_ROOT_PATH" ] || [ -z "$FLUTTER_DEVICE_SLICE" ] || [ ! -f "$FLUTTER_DEVICE_SLICE/Flutter.framework/Modules/module.modulemap" ]; then
+  echo "::error::Flutter device framework/module map is missing under $FLUTTER_XCFRAMEWORK" >&2
+  exit 1
+fi
+echo "==> Flutter device framework: $FLUTTER_DEVICE_SLICE"
+
 run_archive() {
   # "$@" = the platform selector flags
   set +o pipefail
@@ -52,6 +75,7 @@ run_archive() {
     EXPANDED_CODE_SIGN_IDENTITY="" \
     ENABLE_USER_SCRIPT_SANDBOXING=NO \
     SWIFT_ENABLE_EXPLICIT_MODULES=NO \
+    "FRAMEWORK_SEARCH_PATHS=\$(inherited) $FLUTTER_DEVICE_SLICE" \
     2>&1 | tee -a "$LOG"
   local status="${PIPESTATUS[0]}"
   set -o pipefail
