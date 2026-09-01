@@ -24,10 +24,17 @@
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
+# Resolve the repository root before changing directories. `$0` is passed as a
+# relative path by Actions; resolving it after `cd ios` made the failure
+# annotation helper resolve as `ios/.github/...` and exit before reporting the
+# actual Xcode error.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
 ARCHIVE_PATH="${1:?archive path required}"
 LOG="${2:-${RUNNER_TEMP:-/tmp}/xcodebuild-archive.log}"
 
-cd "$(dirname "$0")/../../ios"
+cd "$REPO_ROOT/ios"
 
 run_archive() {
   # "$@" = the platform selector flags
@@ -99,7 +106,7 @@ if [ "$STATUS" -ne 0 ]; then
   echo "::endgroup::"
   # Mirror the log into check-run annotations so the failure stays visible
   # even when the uploaded artifact is not reachable (see scripts/ci_annotate.py).
-  ANNOTATE="$(cd "$(dirname "$0")/../.." && pwd)/scripts/ci_annotate.py"
+  ANNOTATE="$REPO_ROOT/scripts/ci_annotate.py"
   if [ -f "$ANNOTATE" ] && command -v python3 >/dev/null 2>&1; then
     python3 "$ANNOTATE" "$LOG" --file xcodebuild-archive.log --max 80 || true
   fi
