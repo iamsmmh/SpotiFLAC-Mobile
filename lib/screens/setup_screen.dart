@@ -721,7 +721,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     ('ja', '日本語', Icons.language),
     ('ko', '한국어', Icons.language),
     ('pt', 'Português', Icons.language),
-    ('pt_PT', 'Português (Brasil)', Icons.language),
+    ('pt_PT', 'Português (Portugal)', Icons.language),
     ('ru', 'Русский', Icons.language),
     ('tr', 'Türkçe', Icons.language),
     ('uk', 'Українська', Icons.language),
