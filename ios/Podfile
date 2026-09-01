@@ -60,9 +60,10 @@ def patch_device_info_plus_vision_selector
 end
 
 target 'Runner' do
-  use_frameworks!
-  use_modular_headers!
-
+  # Use Flutter's default static CocoaPods integration. Building every plugin
+  # as a dynamic framework makes Xcode 26 compile those frameworks before the
+  # vendored Flutter engine module is visible, producing `no such module
+  # 'Flutter'` across otherwise unrelated Swift plugins.
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
 end
 
