@@ -36,7 +36,7 @@ permissions:
 env:
   APP_NAME: SpotiFLAC
   ANDROID_NDK_VERSION: "29.0.14206865"
-  ANDROID_PLATFORM: "platforms;android-35.0"
+  ANDROID_PLATFORM: "platforms;android-35"
   ANDROID_BUILD_TOOLS: "build-tools;35.0.0"
   XCODE_VERSION: "26.1.1"
 
@@ -166,7 +166,9 @@ jobs:
           go install golang.org/x/mobile/cmd/gomobile
           gomobile init
           mkdir -p ../android/app/libs
-          # arm/arm64 only: ndk.abiFilters strips every other ABI from the outputs.
+          # arm/arm64 only: the --target-platform flag below restricts the ABIs
+          # (the app no longer sets ndk.abiFilters, which would conflict with
+          # Flutter's --split-per-abi).
           gomobile bind -target=android/arm,android/arm64 -androidapi 24 \
             -o ../android/app/libs/gobackend.aar .
 
@@ -355,7 +357,7 @@ jobs:
           cd ios
           pod install
           xcodebuild archive \
-            -workspace ios/Runner.xcworkspace \
+            -workspace Runner.xcworkspace \
             -scheme Runner \
             -configuration Release \
             -sdk iphoneos \
