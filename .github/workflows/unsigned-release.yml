@@ -53,7 +53,7 @@ jobs:
       publish: ${{ steps.resolve.outputs.publish }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Resolve version and release channel
         id: resolve
@@ -105,16 +105,16 @@ jobs:
           df -h /
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go_backend/go.mod
           cache-dependency-path: go_backend/go.sum
@@ -127,7 +127,7 @@ jobs:
           cache: true
 
       - name: Cache Gradle
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.gradle/caches
@@ -136,14 +136,14 @@ jobs:
           restore-keys: gradle-${{ runner.os }}-
 
       - name: Cache pub dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.pub-cache
           key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
           restore-keys: pub-${{ runner.os }}-
 
       - name: Cache Android NDK
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: /usr/local/lib/android/sdk/ndk/${{ env.ANDROID_NDK_VERSION }}
           key: ndk-${{ env.ANDROID_NDK_VERSION }}
@@ -166,7 +166,9 @@ jobs:
           go install golang.org/x/mobile/cmd/gomobile
           gomobile init
           mkdir -p ../android/app/libs
-          # arm/arm64 only: ndk.abiFilters strips every other ABI from the outputs.
+          # arm/arm64 only: the --target-platform flag below restricts the ABIs
+          # (the app no longer sets ndk.abiFilters, which would conflict with
+          # Flutter's --split-per-abi).
           gomobile bind -target=android/arm,android/arm64 -androidapi 24 \
             -o ../android/app/libs/gobackend.aar .
 
@@ -216,7 +218,7 @@ jobs:
           done
 
       - name: Upload APK artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: android-apk
           path: dist/*.apk
@@ -233,7 +235,7 @@ jobs:
     timeout-minutes: 90
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Select Xcode ${{ env.XCODE_VERSION }}
         run: |
@@ -251,7 +253,7 @@ jobs:
           ls /Applications/ | grep Xcode
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go_backend/go.mod
           cache-dependency-path: go_backend/go.sum
@@ -264,14 +266,14 @@ jobs:
           cache: true
 
       - name: Cache pub dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.pub-cache
           key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
           restore-keys: pub-${{ runner.os }}-
 
       - name: Cache CocoaPods
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ios/Pods
@@ -348,18 +350,34 @@ jobs:
       - name: Generate app icons
         run: dart run flutter_launcher_icons
 
-      - name: Build iOS app (unsigned)
+      - name: Archive Runner without code signing
         run: |
           set -euo pipefail
-          flutter build ios --release --no-codesign
+          flutter build ios --release --no-codesign --config-only
+          cd ios
+          pod install
+          xcodebuild archive \
+            -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Runner.xcarchive" \
+            -quiet \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            EXPANDED_CODE_SIGN_IDENTITY="" \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO
 
       - name: Package IPA
         env:
           VERSION: ${{ needs.meta.outputs.version }}
         run: |
           set -euo pipefail
-          APP="build/ios/iphoneos/Runner.app"
-          test -d "$APP" || { echo "::error::Runner.app missing from build/ios/iphoneos/"; exit 1; }
+          APP="$RUNNER_TEMP/Runner.xcarchive/Products/Applications/Runner.app"
+          test -d "$APP" || { echo "::error::Runner.app missing from archive"; exit 1; }
 
           STAGE="$RUNNER_TEMP/ipa"
           rm -rf "$STAGE" && mkdir -p "$STAGE/Payload"
@@ -381,7 +399,7 @@ jobs:
           du -h "$IPA"
 
       - name: Upload IPA artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ios-ipa
           path: dist/*.ipa
@@ -400,12 +418,12 @@ jobs:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: dist
           merge-multiple: true
