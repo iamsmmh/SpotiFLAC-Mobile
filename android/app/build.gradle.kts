@@ -20,7 +20,11 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.zarz.spotiflac"
-    compileSdk = 35
+    // compileSdk 36: several dependencies (androidx.core 1.18, activity 1.13,
+    // audioplayers_android, connectivity_plus, file_picker) now require
+    // compiling against API 36+. targetSdk stays 35 to avoid opting in to
+    // newer runtime behavior until the app is deliberately migrated.
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     buildFeatures {

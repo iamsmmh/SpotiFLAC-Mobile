@@ -214,8 +214,11 @@ class ProviderHealth {
     }
     final reliability = successRate;
     final recency = _recencyScore(lastCheckedAt);
+    // A provider that has never been measured is not penalized: like the
+    // other no-data dimensions it scores neutral (1.0), so a fresh provider
+    // ranks alongside perfectly-reliable ones until real measurements exist.
     final latency = lastLatencyMs == null
-        ? 0.5
+        ? 1.0
         : (1 - (lastLatencyMs! / 2000)).clamp(0.0, 1.0);
     return ((reliability * 0.55) + (recency * 0.20) + (latency * 0.25))
         .clamp(0.0, 1.0);
