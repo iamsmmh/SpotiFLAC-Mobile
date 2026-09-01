@@ -884,10 +884,14 @@ func (m *extensionManager) UnloadAllExtensions() {
 }
 
 func (m *extensionManager) InvokeAction(extensionID string, actionName string) (map[string]any, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
+	// Hold the manager lock only for the lookup. JS actions can run for the
+	// full JS timeout (e.g. a slow completeGrant network call); holding m.mu
+	// through that would freeze every other extension lookup — searches,
+	// downloads, and the extension list UI. Per-VM safety is provided by
+	// lockReadyVM/VMMu below, the same pattern callExtension uses.
+	m.mu.RLock()
 	ext, exists := m.extensions[extensionID]
+	m.mu.RUnlock()
 	if !exists {
 		return nil, fmt.Errorf("extension not found: %s", extensionID)
 	}

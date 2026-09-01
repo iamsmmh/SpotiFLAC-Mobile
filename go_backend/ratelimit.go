@@ -20,32 +20,29 @@ func NewRateLimiter(maxRequests int, window time.Duration) *RateLimiter {
 	}
 }
 
+// WaitForSlot blocks until the caller may proceed without exceeding
+// maxRequests per window. Capacity is re-checked after every wait: several
+// goroutines can be parked on the same expiring timestamp, and only as many
+// as there are freed slots may be admitted when it expires. An unconditional
+// append after the sleep would over-admit under concurrency and burst past
+// the provider's rate limit.
 func (r *RateLimiter) WaitForSlot() {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	for {
+		now := time.Now()
+		r.cleanOldTimestamps(now)
 
-	now := time.Now()
+		if len(r.timestamps) < r.maxRequests {
+			r.timestamps = append(r.timestamps, now)
+			r.mu.Unlock()
+			return
+		}
 
-	r.cleanOldTimestamps(now)
-
-	if len(r.timestamps) < r.maxRequests {
-		r.timestamps = append(r.timestamps, now)
-		return
-	}
-
-	oldestTimestamp := r.timestamps[0]
-	waitUntil := oldestTimestamp.Add(r.window)
-	waitDuration := waitUntil.Sub(now)
-
-	if waitDuration > 0 {
+		waitUntil := r.timestamps[0].Add(r.window)
 		r.mu.Unlock()
-		time.Sleep(waitDuration)
+		time.Sleep(time.Until(waitUntil))
 		r.mu.Lock()
-
-		r.cleanOldTimestamps(time.Now())
 	}
-
-	r.timestamps = append(r.timestamps, time.Now())
 }
 
 func (r *RateLimiter) cleanOldTimestamps(now time.Time) {
