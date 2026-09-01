@@ -226,7 +226,13 @@ func fetchMusicBrainzRecordingByISRC(isrc string, inc string, payload any) (stri
 	return normalizedISRC, nil
 }
 
-func FetchMusicBrainzAlbumArtistByISRC(isrc string, albumName string) (string, error) {
+func FetchMusicBrainzAlbumArtistByISRC(isrc string, albumName string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	key := "albumartist\x00" + strings.ToUpper(strings.TrimSpace(isrc)) +
 		"\x00" + strings.ToLower(strings.TrimSpace(albumName))
 	return musicBrainzCached(key, func() (string, error) {
@@ -245,7 +251,13 @@ func FetchMusicBrainzAlbumArtistByISRC(isrc string, albumName string) (string, e
 	})
 }
 
-func FetchMusicBrainzGenreByISRC(isrc string) (string, error) {
+func FetchMusicBrainzGenreByISRC(isrc string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	key := "genre\x00" + strings.ToUpper(strings.TrimSpace(isrc))
 	return musicBrainzCached(key, func() (string, error) {
 		var payload musicBrainzRecordingResponse

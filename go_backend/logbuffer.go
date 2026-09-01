@@ -207,7 +207,9 @@ func GoLog(format string, args ...any) {
 	GetLogBuffer().Add(level, tag, message)
 }
 
-func GetLogsSince(index int) string {
+func GetLogsSince(index int) (bridgeOut string) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	entries, nextIndex := GetLogBuffer().getSince(index)
 	logsJson, _ := json.Marshal(entries)
 	result := fmt.Sprintf(`{"logs":%s,"next_index":%d}`, string(logsJson), nextIndex)
@@ -215,9 +217,13 @@ func GetLogsSince(index int) string {
 }
 
 func ClearLogs() {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	GetLogBuffer().Clear()
 }
 
 func SetLoggingEnabled(enabled bool) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	GetLogBuffer().SetLoggingEnabled(enabled)
 }

@@ -157,6 +157,8 @@ func CloseIdleConnections() {
 }
 
 func SetNetworkCompatibilityOptions(allowHTTP, insecureTLS bool) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	networkCompatibilityMu.Lock()
 	networkCompatibilityOptions = NetworkCompatibilityOptions{
 		AllowHTTP:   allowHTTP,

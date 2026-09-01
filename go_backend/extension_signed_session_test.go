@@ -643,6 +643,16 @@ func TestNormalizeSignedSessionRecordScope(t *testing.T) {
 
 func newSignedSessionTestRuntime(t *testing.T, extensionID string, transport roundTripFunc) *extensionRuntime {
 	t.Helper()
+	// `pendingAuthRequests` is a process-global, 5-minute-TTL dedupe cache
+	// keyed by extension id. Several tests in this file reuse the same id, so
+	// without an explicit reset a verification challenge recorded by an
+	// earlier test is replayed into the next one and the bootstrap request
+	// under test never happens. That made the package order-dependent
+	// (`go test -shuffle=on` failed on
+	// TestSignedSessionFetchUnauthenticatedTriggersVerification).
+	ClearPendingAuthRequest(extensionID)
+	t.Cleanup(func() { ClearPendingAuthRequest(extensionID) })
+
 	dataDir := t.TempDir()
 	return &extensionRuntime{
 		extensionID: extensionID,

@@ -205,9 +205,7 @@ func pooledHTTP2RetirementTimeout(state http2.ClientConnState) time.Duration {
 }
 
 func retirePooledHTTP2Conn(conn pooledHTTP2ClientConn) {
-	go func() {
-		retirePooledHTTP2ConnWithTimeout(conn, pooledHTTP2RetirementTimeout(conn.State()))
-	}()
+	retirePooledHTTP2ConnWithTimeout(conn, pooledHTTP2RetirementTimeout(conn.State()))
 }
 
 func retirePooledHTTP2ConnWithTimeout(conn pooledHTTP2ClientConn, timeout time.Duration) {
@@ -217,6 +215,11 @@ func retirePooledHTTP2ConnWithTimeout(conn pooledHTTP2ClientConn, timeout time.D
 			closeOnce.Do(func() { _ = conn.Close() })
 		}
 		if timeout <= 0 {
+			// Streams are still in flight (a track may legitimately stream for
+			// several minutes), so no artificial deadline is imposed here: the
+			// shutdown completes when the last stream does. http2 aborts the
+			// shutdown if the connection dies, so this cannot outlive the
+			// socket.
 			if err := conn.Shutdown(context.Background()); err != nil {
 				forceClose()
 			}

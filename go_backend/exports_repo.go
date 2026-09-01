@@ -7,12 +7,24 @@ import (
 	"strings"
 )
 
-func InitExtensionRepoJSON(cacheDir string) error {
+func InitExtensionRepoJSON(cacheDir string) (bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	initExtensionRepo(cacheDir)
 	return nil
 }
 
-func SetRepoRegistryURLJSON(registryURL string) error {
+func SetRepoRegistryURLJSON(registryURL string) (bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	repo := getExtensionRepo()
 	if repo == nil {
 		return fmt.Errorf("extension repo not initialized")
@@ -31,7 +43,13 @@ func SetRepoRegistryURLJSON(registryURL string) error {
 	return nil
 }
 
-func ClearRepoRegistryURLJSON() error {
+func ClearRepoRegistryURLJSON() (bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	repo := getExtensionRepo()
 	if repo == nil {
 		return fmt.Errorf("extension repo not initialized")
@@ -42,7 +60,13 @@ func ClearRepoRegistryURLJSON() error {
 	return nil
 }
 
-func GetRepoRegistryURLJSON() (string, error) {
+func GetRepoRegistryURLJSON() (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	repo := getExtensionRepo()
 	if repo == nil {
 		return "", fmt.Errorf("extension repo not initialized")
@@ -51,7 +75,13 @@ func GetRepoRegistryURLJSON() (string, error) {
 	return repo.getRegistryURL(), nil
 }
 
-func GetRepoExtensionsJSON(forceRefresh bool) (string, error) {
+func GetRepoExtensionsJSON(forceRefresh bool) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	repo := getExtensionRepo()
 	if repo == nil {
 		return "", fmt.Errorf("extension repo not initialized")
@@ -65,7 +95,13 @@ func GetRepoExtensionsJSON(forceRefresh bool) (string, error) {
 	return marshalJSONString(extensions)
 }
 
-func SearchRepoExtensionsJSON(query, category string) (string, error) {
+func SearchRepoExtensionsJSON(query, category string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	repo := getExtensionRepo()
 	if repo == nil {
 		return "", fmt.Errorf("extension repo not initialized")
@@ -79,7 +115,13 @@ func SearchRepoExtensionsJSON(query, category string) (string, error) {
 	return marshalJSONString(extensions)
 }
 
-func GetRepoCategoriesJSON() (string, error) {
+func GetRepoCategoriesJSON() (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	repo := getExtensionRepo()
 	if repo == nil {
 		return "", fmt.Errorf("extension repo not initialized")
@@ -114,7 +156,13 @@ func buildRepoExtensionDestPath(destDir, extensionID, downloadURL string) (strin
 	return filepath.Join(destDir, safeExtensionID+repoExtensionPackageSuffix(downloadURL)), nil
 }
 
-func DownloadRepoExtensionJSON(extensionID, destDir string) (string, error) {
+func DownloadRepoExtensionJSON(extensionID, destDir string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	repo := getExtensionRepo()
 	if repo == nil {
 		return "", fmt.Errorf("extension repo not initialized")
@@ -137,7 +185,13 @@ func DownloadRepoExtensionJSON(extensionID, destDir string) (string, error) {
 	return destPath, nil
 }
 
-func ClearRepoCacheJSON() error {
+func ClearRepoCacheJSON() (bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	repo := getExtensionRepo()
 	if repo == nil {
 		return fmt.Errorf("extension repo not initialized")

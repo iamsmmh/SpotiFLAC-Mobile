@@ -27,6 +27,8 @@ var allowPrivateNetworkAccess atomic.Bool
 // are permitted to reach private/local network targets. Exposed to the Flutter
 // layer via the platform bridge.
 func SetAllowPrivateNetwork(allowed bool) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	allowPrivateNetworkAccess.Store(allowed)
 	if allowed {
 		GoLog("[HTTP] Private/local network access ENABLED (SSRF guard relaxed)\n")

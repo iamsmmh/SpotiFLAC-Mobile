@@ -54,6 +54,7 @@ class BatchProgressDialog extends StatefulWidget {
   }) : _progressNotifier = progressNotifier;
 
   static ValueNotifier<_BatchProgress>? _activeNotifier;
+  static NavigatorState? _activeNavigator;
 
   static void show({
     required BuildContext context,
@@ -62,29 +63,63 @@ class BatchProgressDialog extends StatefulWidget {
     required VoidCallback onCancel,
     IconData icon = Icons.transform,
   }) {
-    _activeNotifier = ValueNotifier(const _BatchProgress());
-    final notifier = _activeNotifier!;
+    // Each dialog owns its notifier and disposes it in `whenComplete` below,
+    // so an overlapping `show()` must not dispose the previous one here
+    // (ChangeNotifier.dispose() asserts on a second call).
+    final notifier = ValueNotifier(const _BatchProgress());
+    _activeNotifier = notifier;
+    _activeNavigator = Navigator.of(context, rootNavigator: true);
 
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => BatchProgressDialog._(
-        title: title,
-        total: total,
-        icon: icon,
-        onCancel: onCancel,
-        progressNotifier: notifier,
+      useRootNavigator: true,
+      builder: (_) => PopScope(
+        // The system back gesture must not silently close the dialog: the
+        // caller's `cancelled` flag would stay false and the final
+        // `dismiss()` would then pop the *page underneath*. Route back to
+        // the same handler as the Cancel button instead.
+        canPop: false,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) onCancel();
+        },
+        child: BatchProgressDialog._(
+          title: title,
+          total: total,
+          icon: icon,
+          onCancel: onCancel,
+          progressNotifier: notifier,
+        ),
       ),
-    );
+    ).whenComplete(() {
+      if (identical(_activeNotifier, notifier)) {
+        _activeNotifier = null;
+        _activeNavigator = null;
+      }
+      // Safe: ChangeNotifier.removeListener tolerates a disposed notifier, so
+      // the dialog state's dispose() cannot race with this.
+      notifier.dispose();
+    });
   }
 
   static void update({required int current, String? detail}) {
     _activeNotifier?.value = _BatchProgress(current: current, detail: detail);
   }
 
+  /// Closes the progress dialog if (and only if) it is still on screen.
+  ///
+  /// Callers invoke this both from `onCancel` and after their loop finishes,
+  /// so it must be idempotent: an unconditional `Navigator.pop()` used to pop
+  /// the underlying page whenever the dialog was already gone.
   static void dismiss(BuildContext context) {
+    final notifier = _activeNotifier;
+    if (notifier == null) return;
     _activeNotifier = null;
-    Navigator.of(context, rootNavigator: true).pop();
+    final navigator = _activeNavigator ?? Navigator.maybeOf(context, rootNavigator: true);
+    _activeNavigator = null;
+    if (navigator != null && navigator.canPop()) {
+      navigator.pop();
+    }
   }
 
   @override

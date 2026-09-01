@@ -58,6 +58,8 @@ var signedSessionHintState = struct {
 }
 
 func SetRuntimeState(raw string) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	next := signedSessionHints{Values: map[string]string{}}
 	if err := json.Unmarshal([]byte(raw), &next); err != nil {
 		next = signedSessionHints{Values: map[string]string{}}

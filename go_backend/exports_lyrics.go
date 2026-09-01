@@ -7,7 +7,13 @@ import (
 	"strings"
 )
 
-func GetLyricsLRC(spotifyID, trackName, artistName string, filePath string, durationMs int64) (string, error) {
+func GetLyricsLRC(spotifyID, trackName, artistName string, filePath string, durationMs int64) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	if filePath != "" {
 		lyrics, err := ExtractLyrics(filePath)
 		if err == nil && rawLyricsHasUsableContent(lyrics) {
@@ -31,7 +37,13 @@ func GetLyricsLRC(spotifyID, trackName, artistName string, filePath string, dura
 	return lrcContent, nil
 }
 
-func GetLyricsLRCWithSource(spotifyID, trackName, artistName string, filePath string, durationMs int64) (string, error) {
+func GetLyricsLRCWithSource(spotifyID, trackName, artistName string, filePath string, durationMs int64) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	if filePath != "" {
 		lyrics, err := ExtractLyrics(filePath)
 		if err == nil && rawLyricsHasUsableContent(lyrics) {
@@ -80,7 +92,13 @@ func GetLyricsLRCWithSource(spotifyID, trackName, artistName string, filePath st
 	return marshalJSONString(result)
 }
 
-func EmbedLyricsToFile(filePath, lyrics string) (string, error) {
+func EmbedLyricsToFile(filePath, lyrics string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	err := EmbedLyrics(filePath, lyrics)
 	if err != nil {
 		return errorResponse("Failed to embed lyrics: " + err.Error())
@@ -95,7 +113,13 @@ func EmbedLyricsToFile(filePath, lyrics string) (string, error) {
 	return s, nil
 }
 
-func FetchAndSaveLyrics(trackName, artistName, spotifyID string, durationMs int64, outputPath string, audioFilePath string) error {
+func FetchAndSaveLyrics(trackName, artistName, spotifyID string, durationMs int64, outputPath string, audioFilePath string) (bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	// If the audio file already has embedded lyrics or a sidecar .lrc,
 	// use those directly instead of making redundant network requests.
 	if audioFilePath != "" {
@@ -134,7 +158,13 @@ func FetchAndSaveLyrics(trackName, artistName, spotifyID string, durationMs int6
 	return nil
 }
 
-func SetLyricsProvidersJSON(providersJSON string) error {
+func SetLyricsProvidersJSON(providersJSON string) (bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	var providers []string
 	if err := json.Unmarshal([]byte(providersJSON), &providers); err != nil {
 		return err
@@ -144,17 +174,35 @@ func SetLyricsProvidersJSON(providersJSON string) error {
 	return nil
 }
 
-func GetLyricsProvidersJSON() (string, error) {
+func GetLyricsProvidersJSON() (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	providers := GetLyricsProviderOrder()
 	return marshalJSONString(providers)
 }
 
-func GetAvailableLyricsProvidersJSON() (string, error) {
+func GetAvailableLyricsProvidersJSON() (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	providers := GetAvailableLyricsProviders()
 	return marshalJSONString(providers)
 }
 
-func SetLyricsFetchOptionsJSON(optionsJSON string) error {
+func SetLyricsFetchOptionsJSON(optionsJSON string) (bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	opts := GetLyricsFetchOptions()
 	if strings.TrimSpace(optionsJSON) != "" {
 		if err := json.Unmarshal([]byte(optionsJSON), &opts); err != nil {
@@ -166,7 +214,13 @@ func SetLyricsFetchOptionsJSON(optionsJSON string) error {
 	return nil
 }
 
-func GetLyricsFetchOptionsJSON() (string, error) {
+func GetLyricsFetchOptionsJSON() (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	opts := GetLyricsFetchOptions()
 	return marshalJSONString(opts)
 }

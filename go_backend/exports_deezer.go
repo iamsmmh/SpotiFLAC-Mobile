@@ -10,14 +10,24 @@ import (
 // GetTrackCacheSize and ClearTrackIDCache back the Settings cache screen. The
 // track-ID cache is currently a no-op, so these report an empty cache and clear
 // nothing, but the gomobile export contract is kept for the Dart/Kotlin callers.
-func GetTrackCacheSize() int {
+func GetTrackCacheSize() (bridgeRet0 int) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	return 0
 }
 
 func ClearTrackIDCache() {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 }
 
-func GetDeezerMetadata(resourceType, resourceID string) (string, error) {
+func GetDeezerMetadata(resourceType, resourceID string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -45,7 +55,13 @@ func GetDeezerMetadata(resourceType, resourceID string) (string, error) {
 	return marshalJSONString(data)
 }
 
-func GetDeezerExtendedMetadata(trackID string) (string, error) {
+func GetDeezerExtendedMetadata(trackID string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	if trackID == "" {
 		return "", fmt.Errorf("empty track ID")
 	}
@@ -65,11 +81,23 @@ func GetDeezerExtendedMetadata(trackID string) (string, error) {
 	return marshalJSONString(result)
 }
 
-func SearchDeezerByISRC(isrc string) (string, error) {
+func SearchDeezerByISRC(isrc string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	return SearchDeezerByISRCForItemID(isrc, "")
 }
 
-func SearchDeezerByISRCForItemID(isrc string, itemID string) (string, error) {
+func SearchDeezerByISRCForItemID(isrc string, itemID string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	parentCtx := context.Background()
 	if itemID != "" {
 		parentCtx = initDownloadCancel(itemID)
@@ -149,7 +177,13 @@ func buildDeezerISRCSearchResult(track *TrackMetadata) map[string]any {
 	return result
 }
 
-func ConvertSpotifyToDeezer(resourceType, spotifyID string) (string, error) {
+func ConvertSpotifyToDeezer(resourceType, spotifyID string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -187,12 +221,24 @@ func ConvertSpotifyToDeezer(resourceType, spotifyID string) (string, error) {
 	return "", fmt.Errorf("spotify to Deezer conversion only supported for tracks and albums: please search by name for %s", resourceType)
 }
 
-func GetSpotifyIDFromDeezerTrack(deezerTrackID string) (string, error) {
+func GetSpotifyIDFromDeezerTrack(deezerTrackID string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	client := NewSongLinkClient()
 	return client.GetSpotifyIDFromDeezer(deezerTrackID)
 }
 
-func GetTidalURLFromDeezerTrack(deezerTrackID string) (string, error) {
+func GetTidalURLFromDeezerTrack(deezerTrackID string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	client := NewSongLinkClient()
 	return client.GetTidalURLFromDeezer(deezerTrackID)
 }

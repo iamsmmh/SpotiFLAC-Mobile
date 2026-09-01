@@ -1,0 +1,262 @@
+diff --git a/.github/workflows/build-mobile.yml b/.github/workflows/build-mobile.yml
+index 4ad919b..da7b954 100644
+--- a/.github/workflows/build-mobile.yml
++++ b/.github/workflows/build-mobile.yml
+@@ -162,12 +162,21 @@ jobs:
+       - name: Generate app icons
+         run: dart run flutter_launcher_icons
+ 
++      # Wrapper script instead of a bare `flutter build`: the Flutter tool
++      # collapses every Gradle failure to "Gradle task assembleRelease failed
++      # with exit code 1". The script tees the Gradle log, greps the real
++      # diagnostic and emits it as check-run annotations.
+       - name: Build release APKs
+-        run: |
+-          set -euo pipefail
+-          flutter build apk --release --split-per-abi \
+-            --target-platform android-arm,android-arm64
+-          ls -la build/app/outputs/flutter-apk/
++        run: bash scripts/flutter_build_apk.sh
++
++      - name: Upload Gradle log
++        if: failure()
++        uses: actions/upload-artifact@v6
++        with:
++          name: android-gradle-log
++          path: ${{ runner.temp }}/gradle-assembleRelease.log
++          if-no-files-found: ignore
++          retention-days: 14
+ 
+       - name: Collect and rename APKs
+         env:
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index e483526..3d0ae0c 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -10,6 +10,11 @@ concurrency:
+   group: ci-${{ github.ref }}
+   cancel-in-progress: true
+ 
++# Least privilege by default; the `changes` job additively requests
++# pull-requests:read for dorny/paths-filter.
++permissions:
++  contents: read
++
+ jobs:
+   changes:
+     name: Detect changed paths
+@@ -117,6 +122,12 @@ jobs:
+       - name: Run tests
+         run: go test ./...
+ 
++      # The backend is heavily concurrent (extension VMs, download workers,
++      # rate limiters, cancellation registry). Data races only surface under
++      # the race detector, so gate merges on it as well.
++      - name: Run tests (race detector)
++        run: go test -race -count=1 ./...
++
+   android:
+     name: Android compile & native tests
+     runs-on: ubuntu-latest
+@@ -159,4 +170,38 @@ jobs:
+           ANDROID_PLATFORM: "platforms;android-37"
+           ANDROID_BUILD_TOOLS: "build-tools;35.0.0"
+ 
+-      - name: 
++      # The Kotlin sources call into the gomobile-generated `Gobackend`
++      # package, so the AAR has to exist before Gradle can compile them.
++      - name: Build Go backend (gomobile AAR)
++        working-directory: go_backend
++        env:
++          CGO_ENABLED: 1
++        run: |
++          set -euo pipefail
++          export PATH="$(go env GOPATH)/bin:$PATH"
++          go install golang.org/x/mobile/cmd/gomobile
++          gomobile init
++          mkdir -p ../android/app/libs
++          gomobile bind -target=android/arm,android/arm64 -androidapi 24 \
++            -o ../android/app/libs/gobackend.aar .
++          test -f ../android/app/libs/gobackend.aar
++
++      - name: Get Flutter dependencies
++        run: flutter pub get
++
++      # android/local.properties is gitignored; the Flutter Gradle plugin is
++      # resolved through it in settings.gradle.kts (`require(flutter.sdk)`).
++      - name: Configure Flutter SDK for Gradle
++        run: echo "flutter.sdk=$FLUTTER_ROOT" > android/local.properties
++
++      - name: Compile Kotlin and run native unit tests
++        run: gradle -p android :app:compileDebugKotlin :app:testDebugUnitTest
++
++      - name: Upload native unit test report
++        if: failure()
++        uses: actions/upload-artifact@v6
++        with:
++          name: android-unit-test-report
++          path: build/app/reports/tests/
++          if-no-files-found: ignore
++          retention-days: 7
+diff --git a/.github/workflows/pages.yml b/.github/workflows/pages.yml
+index 6048d59..a84b52d 100644
+--- a/.github/workflows/pages.yml
++++ b/.github/workflows/pages.yml
+@@ -1,5 +1,10 @@
+ name: Deploy to GitHub Pages
+ 
++# The published site lives in `site/`. That directory is optional: forks that
++# do not ship a landing page must not get a permanently red workflow, so the
++# build job detects it and the deploy job is skipped when it is absent
++# (actions/upload-pages-artifact fails hard on a missing path).
++
+ on:
+   push:
+     branches: [main]
+@@ -20,20 +25,36 @@ concurrency:
+ jobs:
+   build:
+     runs-on: ubuntu-latest
++    outputs:
++      has_site: ${{ steps.detect.outputs.has_site }}
+     steps:
+       - name: Checkout
+         uses: actions/checkout@v6
+ 
++      - name: Detect site directory
++        id: detect
++        run: |
++          set -euo pipefail
++          if [ -d site ] && [ -n "$(ls -A site 2>/dev/null)" ]; then
++            echo "has_site=true" >> "$GITHUB_OUTPUT"
++          else
++            echo "::notice::No 'site/' directory in this repository - skipping GitHub Pages deployment."
++            echo "has_site=false" >> "$GITHUB_OUTPUT"
++          fi
++
+       - name: Setup Pages
++        if: steps.detect.outputs.has_site == 'true'
+         uses: actions/configure-pages@v5
+ 
+       - name: Upload artifact
++        if: steps.detect.outputs.has_site == 'true'
+         uses: actions/upload-pages-artifact@v4
+         with:
+           path: site
+ 
+   deploy:
+     needs: build
++    if: needs.build.outputs.has_site == 'true'
+     runs-on: ubuntu-latest
+     environment:
+       name: github-pages
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index 6109d37..4ae0b01 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -15,6 +15,11 @@ on:
+         required: true
+         default: "v1.0.0"
+ 
++# Least privilege by default; the jobs that publish a release / push apps.json
++# request `contents: write` explicitly.
++permissions:
++  contents: read
++
+ jobs:
+   get-version:
+     runs-on: ubuntu-latest
+@@ -42,6 +47,10 @@ jobs:
+   build-android:
+     runs-on: ubuntu-latest
+     needs: get-version
++    env:
++      # `secrets` is not an available context inside `if:` expressions, so the
++      # presence of the signing key is mapped to a plain env flag here.
++      HAS_KEYSTORE: ${{ secrets.KEYSTORE_BASE64 != '' && 'true' || 'false' }}
+ 
+     steps:
+       - name: Free disk space
+@@ -124,13 +133,26 @@ jobs:
+ 
+       - name: Build APK (Release - unsigned)
+         run: |
+-          flutter build apk --release --split-per-abi \
+-            --target-platform android-arm,android-arm64
+-          ls -la build/app/outputs/flutter-apk/
++          set -euo pipefail
++          # See scripts/flutter_build_apk.sh - surfaces the real Gradle error.
++          bash scripts/flutter_build_apk.sh
+           test -f build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+           test -f build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+ 
++      - name: Upload Gradle log
++        if: failure()
++        uses: actions/upload-artifact@v6
++        with:
++          name: android-gradle-log
++          path: ${{ runner.temp }}/gradle-assembleRelease.log
++          if-no-files-found: ignore
++          retention-days: 14
++
+       - name: Sign APKs
++        # Skipped automatically when the fork has no signing secrets: the
++        # rename step below then publishes the (debug-key signed) APKs
++        # produced by Gradle instead of failing the whole release.
++        if: env.HAS_KEYSTORE == 'true'
+         uses: r0adkll/sign-android-release@v1
+         id: sign_arm64
+         with:
+@@ -140,7 +162,10 @@ jobs:
+           keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
+           keyPassword: ${{ secrets.KEY_PASSWORD }}
+         env:
+-          BUILD_TOOLS_VERSION: "36.0.0"
++          # Must match a build-tools version that setup-android-sdk.sh
++          # actually installed (ANDROID_BUILD_TOOLS above); the action shells
++          # out to $ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/apksigner.
++          BUILD_TOOLS_VERSION: "35.0.0"
+ 
+       - name: Rename APKs
+         run: |
+@@ -492,6 +517,11 @@ jobs:
+           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+         run: |
++          # Forks without Telegram secrets must not fail the release pipeline.
++          if [ -z "${TELEGRAM_BOT_TOKEN}" ] || [ -z "${TELEGRAM_CHANNEL_ID}" ]; then
++            echo "::notice::Telegram secrets are not configured - skipping announcement."
++            exit 0
++          fi
+           VERSION=${{ needs.get-version.outputs.version }}
+           CHANGELOG=$(cat /tmp/changelog.txt)
+           ARM64_APK=$(find ./release -name "*arm64*.apk" | head -1)
+diff --git a/.github/workflows/unsigned-release.yml b/.github/workflows/unsigned-release.yml
+index 621d593..b86eff3 100644
+--- a/.github/workflows/unsigned-release.yml
++++ b/.github/workflows/unsigned-release.yml
+@@ -154,12 +154,19 @@ jobs:
+       - name: Generate app icons
+         run: dart run flutter_launcher_icons
+ 
++      # See scripts/flutter_build_apk.sh - surfaces the real Gradle error
++      # instead of Flutter's opaque "assembleRelease failed" message.
+       - name: Build release APKs
+-        run: |
+-          set -euo pipefail
+-          flutter build apk --release --split-per-abi \
+-            --target-platform android-arm,android-arm64
+-          ls -la build/app/outputs/flutter-apk/
++        run: bash scripts/flutter_build_apk.sh
++
++      - name: Upload Gradle log
++        if: failure()
++        uses: actions/upload-artifact@v6
++        with:
++          name: android-gradle-log
++          path: ${{ runner.temp }}/gradle-assembleRelease.log
++          if-no-files-found: ignore
++          retention-days: 14
+ 
+       - name: Collect and rename APKs
+         env:

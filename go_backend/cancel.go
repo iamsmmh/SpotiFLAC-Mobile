@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 )
 
 // ErrDownloadCancelled is returned when a download is cancelled by the user.
@@ -18,11 +19,71 @@ type cancelEntry struct {
 	cancel   context.CancelFunc
 	canceled bool
 	refs     int
+
+	// tombstonedAt is set when the entry only exists to remember a cancel
+	// that arrived while no work was attached (refs == 0). Such an entry is
+	// pure garbage once the window in which the work could still start has
+	// passed, so it is swept by pruneLocked.
+	tombstonedAt time.Time
 }
+
+// A cancel that arrives before the work starts must still be honoured, but a
+// cancel that arrives *after* the work already finished leaves an entry behind
+// that nothing will ever claim. Extension request IDs are freshly generated for
+// every call (see PlatformBridge._nextExtensionRequestId), and the UI cancels
+// superseded home-feed/search requests optimistically, so those late cancels
+// used to append a permanent map entry per request - an unbounded leak for the
+// lifetime of the process.
+const (
+	cancelTombstoneTTL       = 2 * time.Minute
+	cancelRegistryMaxEntries = 1024
+)
 
 type cancelRegistry struct {
 	mu      sync.Mutex
 	entries map[string]*cancelEntry
+}
+
+// pruneLocked drops tombstones that can no longer be claimed. Entries with
+// live work attached (refs > 0) are never touched. The caller must hold r.mu.
+func (r *cancelRegistry) pruneLocked(now time.Time) {
+	var oldest string
+	var oldestAt time.Time
+
+	for id, entry := range r.entries {
+		if entry.refs > 0 || entry.tombstonedAt.IsZero() {
+			continue
+		}
+		if now.Sub(entry.tombstonedAt) >= cancelTombstoneTTL {
+			if entry.cancel != nil {
+				entry.cancel()
+			}
+			delete(r.entries, id)
+			continue
+		}
+		if oldestAt.IsZero() || entry.tombstonedAt.Before(oldestAt) {
+			oldest, oldestAt = id, entry.tombstonedAt
+		}
+	}
+
+	// Hard cap: a pathological caller must not be able to grow the map without
+	// bound between TTL sweeps. Evict the oldest claimable tombstone.
+	for len(r.entries) > cancelRegistryMaxEntries && oldest != "" {
+		if entry, ok := r.entries[oldest]; ok && entry.cancel != nil {
+			entry.cancel()
+		}
+		delete(r.entries, oldest)
+
+		oldest, oldestAt = "", time.Time{}
+		for id, entry := range r.entries {
+			if entry.refs > 0 || entry.tombstonedAt.IsZero() {
+				continue
+			}
+			if oldestAt.IsZero() || entry.tombstonedAt.Before(oldestAt) {
+				oldest, oldestAt = id, entry.tombstonedAt
+			}
+		}
+	}
 }
 
 var (
@@ -38,6 +99,8 @@ func (r *cancelRegistry) init(id string) context.Context {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	r.pruneLocked(time.Now())
+
 	if entry, ok := r.entries[id]; ok {
 		if entry.ctx == nil {
 			ctx, cancel := context.WithCancel(context.Background())
@@ -48,6 +111,8 @@ func (r *cancelRegistry) init(id string) context.Context {
 			}
 		}
 		entry.refs++
+		// Work is attached again: the entry is live, not collectable garbage.
+		entry.tombstonedAt = time.Time{}
 		return entry.ctx
 	}
 
@@ -84,9 +149,15 @@ func (r *cancelRegistry) requestCancel(id string) {
 		if entry.cancel != nil {
 			entry.cancel()
 		}
+		if entry.refs <= 0 && entry.tombstonedAt.IsZero() {
+			// Cancel landed after the work released the entry (or before it
+			// ever attached): make it sweepable.
+			entry.tombstonedAt = time.Now()
+		}
 	} else {
-		r.entries[id] = &cancelEntry{canceled: true}
+		r.entries[id] = &cancelEntry{canceled: true, tombstonedAt: time.Now()}
 	}
+	r.pruneLocked(time.Now())
 	r.mu.Unlock()
 }
 
@@ -179,4 +250,23 @@ func isExtensionRequestCancelled(requestID string) bool {
 
 func clearExtensionRequestCancel(requestID string) {
 	extensionRequestCancels.release(requestID)
+}
+
+// resetForTest drops every entry. Tests share one process, and a cancel that
+// is recorded by one test must not leak into the next one.
+func (r *cancelRegistry) resetForTest() {
+	r.mu.Lock()
+	for id, entry := range r.entries {
+		if entry.cancel != nil {
+			entry.cancel()
+		}
+		delete(r.entries, id)
+	}
+	r.mu.Unlock()
+}
+
+// resetCancelRegistriesForTest clears both process-global cancel registries.
+func resetCancelRegistriesForTest() {
+	downloadCancels.resetForTest()
+	extensionRequestCancels.resetForTest()
 }

@@ -45,10 +45,20 @@ import Gobackend
             GobackendSetAppVersion(version)
         }
         
-        let controller = window?.rootViewController as! FlutterViewController
+        // Never force-cast the root view controller: `window` is nil at this
+        // point in a UIScene-based launch (and in unit-test hosts), which
+        // turned a recoverable setup failure into a launch crash. Fall back to
+        // the engine owned by the app delegate's registrar, and finally bail
+        // out gracefully - Dart-side calls then surface as MissingPluginException
+        // instead of the process dying before the first frame.
+        guard let messenger = resolveBinaryMessenger() else {
+            NSLog("[SpotiFLAC] No FlutterBinaryMessenger available at launch; backend channels are disabled.")
+            GeneratedPluginRegistrant.register(with: self)
+            return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+        }
         let channel = FlutterMethodChannel(
             name: CHANNEL,
-            binaryMessenger: controller.binaryMessenger
+            binaryMessenger: messenger
         )
         backendChannel = channel
         if !pendingSessionGrantEvents.isEmpty {
@@ -60,11 +70,11 @@ import Gobackend
         }
         let downloadProgressEvents = FlutterEventChannel(
             name: DOWNLOAD_PROGRESS_STREAM_CHANNEL,
-            binaryMessenger: controller.binaryMessenger
+            binaryMessenger: messenger
         )
         let libraryScanProgressEvents = FlutterEventChannel(
             name: LIBRARY_SCAN_PROGRESS_STREAM_CHANNEL,
-            binaryMessenger: controller.binaryMessenger
+            binaryMessenger: messenger
         )
         
         channel.setMethodCallHandler { [weak self] call, result in
@@ -102,12 +112,34 @@ import Gobackend
         return super.application(application, didFinishLaunchingWithOptions: launchOptions)
     }
 
+    /// Resolves a binary messenger without force-casting `window`.
+    ///
+    /// Order of preference:
+    ///   1. the root `FlutterViewController` (classic, non-scene launch),
+    ///   2. any `FlutterViewController` reachable from a connected scene
+    ///      (iOS 13+ / UIScene lifecycle, where `window` is still nil in
+    ///      `didFinishLaunchingWithOptions`),
+    ///   3. `nil` - the caller degrades gracefully instead of crashing.
+    private func resolveBinaryMessenger() -> FlutterBinaryMessenger? {
+        if let controller = window?.rootViewController as? FlutterViewController {
+            return controller.binaryMessenger
+        }
+        for scene in UIApplication.shared.connectedScenes {
+            guard let windowScene = scene as? UIWindowScene else { continue }
+            for sceneWindow in windowScene.windows {
+                if let controller = sceneWindow.rootViewController as? FlutterViewController {
+                    return controller.binaryMessenger
+                }
+            }
+        }
+        return nil
+    }
+
     /// Extension return URLs:
     /// - OAuth: spotiflac://callback?code=...&state=<extension_id>
     /// - Signed session: spotiflac://session-grant?grant=...&state=<extension_id>
     @discardableResult
-    private func handleExtensionOAuthRedirect(url: URL) -> Bool {
-        guard let route = ExtensionCallbackParser.parse(url) else { return false }
+    private func handleExtensionOAuthRedirect(url: URL) -> Bool {        guard let route = ExtensionCallbackParser.parse(url) else { return false }
         streamQueue.async {
             var err: NSError?
             var response: String?
@@ -219,65 +251,82 @@ import Gobackend
 
     private func startDownloadProgressStream(_ eventSink: @escaping FlutterEventSink) {
         stopDownloadProgressStream()
+        // `downloadProgressEventSink` is main-thread-only state; the payload /
+        // sequence cursor is owned exclusively by `streamQueue` (see below).
         downloadProgressEventSink = eventSink
-        lastDownloadProgressPayload = nil
-        lastDownloadProgressSeq = 0
 
-        let timer = DispatchSource.makeTimerSource(queue: streamQueue)
-        timer.schedule(deadline: .now(), repeating: .milliseconds(800))
-        timer.setEventHandler { [weak self] in
+        streamQueue.async { [weak self] in
             guard let self else { return }
-            let payload = GobackendGetAllDownloadProgressDelta(self.lastDownloadProgressSeq) as String? ?? ""
-            if payload.isEmpty || payload == self.lastDownloadProgressPayload {
-                return
+            self.lastDownloadProgressPayload = nil
+            self.lastDownloadProgressSeq = 0
+
+            let timer = DispatchSource.makeTimerSource(queue: self.streamQueue)
+            timer.schedule(deadline: .now(), repeating: .milliseconds(800))
+            timer.setEventHandler { [weak self] in
+                guard let self else { return }
+                let payload = GobackendGetAllDownloadProgressDelta(self.lastDownloadProgressSeq) as String? ?? ""
+                if payload.isEmpty || payload == self.lastDownloadProgressPayload {
+                    return
+                }
+                self.updateDownloadProgressSeq(payload)
+                self.lastDownloadProgressPayload = payload
+                DispatchQueue.main.async { [weak self] in
+                    self?.downloadProgressEventSink?(self?.parseJsonPayload(payload))
+                }
             }
-            self.updateDownloadProgressSeq(payload)
-            self.lastDownloadProgressPayload = payload
-            DispatchQueue.main.async { [weak self] in
-                self?.downloadProgressEventSink?(self?.parseJsonPayload(payload))
-            }
+            self.downloadProgressTimer = timer
+            timer.resume()
         }
-        downloadProgressTimer = timer
-        timer.resume()
     }
 
     private func stopDownloadProgressStream() {
-        downloadProgressTimer?.setEventHandler {}
-        downloadProgressTimer?.cancel()
-        downloadProgressTimer = nil
         downloadProgressEventSink = nil
-        lastDownloadProgressPayload = nil
-        lastDownloadProgressSeq = 0
+        // Timer + cursor live on `streamQueue`; mutating them from the main
+        // thread (onCancel / deinit) while the handler is running was an
+        // unsynchronized read-write race on a Swift String and Int64.
+        streamQueue.sync {
+            downloadProgressTimer?.setEventHandler {}
+            downloadProgressTimer?.cancel()
+            downloadProgressTimer = nil
+            lastDownloadProgressPayload = nil
+            lastDownloadProgressSeq = 0
+        }
     }
 
     private func startLibraryScanProgressStream(_ eventSink: @escaping FlutterEventSink) {
         stopLibraryScanProgressStream()
         libraryScanProgressEventSink = eventSink
-        lastLibraryScanProgressPayload = nil
 
-        let timer = DispatchSource.makeTimerSource(queue: streamQueue)
-        timer.schedule(deadline: .now(), repeating: .milliseconds(800))
-        timer.setEventHandler { [weak self] in
+        streamQueue.async { [weak self] in
             guard let self else { return }
-            let payload = GobackendGetLibraryScanProgressJSON() as String? ?? "{}"
-            if payload == self.lastLibraryScanProgressPayload {
-                return
+            self.lastLibraryScanProgressPayload = nil
+
+            let timer = DispatchSource.makeTimerSource(queue: self.streamQueue)
+            timer.schedule(deadline: .now(), repeating: .milliseconds(800))
+            timer.setEventHandler { [weak self] in
+                guard let self else { return }
+                let payload = GobackendGetLibraryScanProgressJSON() as String? ?? "{}"
+                if payload == self.lastLibraryScanProgressPayload {
+                    return
+                }
+                self.lastLibraryScanProgressPayload = payload
+                DispatchQueue.main.async { [weak self] in
+                    self?.libraryScanProgressEventSink?(self?.parseJsonPayload(payload))
+                }
             }
-            self.lastLibraryScanProgressPayload = payload
-            DispatchQueue.main.async { [weak self] in
-                self?.libraryScanProgressEventSink?(self?.parseJsonPayload(payload))
-            }
+            self.libraryScanProgressTimer = timer
+            timer.resume()
         }
-        libraryScanProgressTimer = timer
-        timer.resume()
     }
 
     private func stopLibraryScanProgressStream() {
-        libraryScanProgressTimer?.setEventHandler {}
-        libraryScanProgressTimer?.cancel()
-        libraryScanProgressTimer = nil
         libraryScanProgressEventSink = nil
-        lastLibraryScanProgressPayload = nil
+        streamQueue.sync {
+            libraryScanProgressTimer?.setEventHandler {}
+            libraryScanProgressTimer?.cancel()
+            libraryScanProgressTimer = nil
+            lastLibraryScanProgressPayload = nil
+        }
     }
 
     private func parseJsonPayload(_ payload: String) -> Any {

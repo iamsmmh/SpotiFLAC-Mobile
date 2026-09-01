@@ -34,6 +34,8 @@ func GetPendingFFmpegCommand(commandID string) *FFmpegCommand {
 }
 
 func SetFFmpegCommandResult(commandID string, success bool, output, errorMsg string) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	ffmpegCommandsMu.Lock()
 	defer ffmpegCommandsMu.Unlock()
 	if cmd, exists := ffmpegCommands[commandID]; exists {
