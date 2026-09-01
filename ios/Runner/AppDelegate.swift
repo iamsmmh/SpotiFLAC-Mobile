@@ -119,7 +119,8 @@ import Gobackend
     ///   2. any `FlutterViewController` reachable from a connected scene
     ///      (iOS 13+ / UIScene lifecycle, where `window` is still nil in
     ///      `didFinishLaunchingWithOptions`),
-    ///   3. `nil` - the caller degrades gracefully instead of crashing.
+    ///   3. the registrar backed by FlutterAppDelegate's engine,
+    ///   4. `nil` - the caller degrades gracefully instead of crashing.
     private func resolveBinaryMessenger() -> FlutterBinaryMessenger? {
         if let controller = window?.rootViewController as? FlutterViewController {
             return controller.binaryMessenger
@@ -131,6 +132,12 @@ import Gobackend
                     return controller.binaryMessenger
                 }
             }
+        }
+        // UIScene may not have attached any window yet, while FlutterAppDelegate
+        // already owns the engine/plugin registry. Its registrar provides the
+        // same messenger without requiring a view controller or a force-cast.
+        if let registrar = registrar(forPlugin: "SpotiFLACBackendChannels") {
+            return registrar.messenger()
         }
         return nil
     }
@@ -247,6 +254,10 @@ import Gobackend
     deinit {
         stopDownloadProgressStream()
         stopLibraryScanProgressStream()
+        (activeWebAuthSession as? ASWebAuthenticationSession)?.cancel()
+        activeWebAuthSession = nil
+        endBackgroundDownloadTask()
+        releaseAllSecurityScopedAccesses()
     }
 
     private func startDownloadProgressStream(_ eventSink: @escaping FlutterEventSink) {
@@ -1375,6 +1386,16 @@ import Gobackend
         let url = securityScopedAccesses.removeValue(forKey: token)
         securityScopedAccessLock.unlock()
         url?.stopAccessingSecurityScopedResource()
+    }
+
+    private func releaseAllSecurityScopedAccesses() {
+        securityScopedAccessLock.lock()
+        let urls = Array(securityScopedAccesses.values)
+        securityScopedAccesses.removeAll()
+        securityScopedAccessLock.unlock()
+        for url in urls {
+            url.stopAccessingSecurityScopedResource()
+        }
     }
 }
 

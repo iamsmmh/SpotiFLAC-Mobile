@@ -7,6 +7,8 @@ import 'package:spotiflac_android/services/platform_bridge.dart';
 import 'package:spotiflac_android/utils/logger.dart';
 import 'package:spotiflac_android/providers/extension_provider.dart';
 import 'package:spotiflac_android/providers/settings_provider.dart';
+import 'package:spotiflac_android/utils/int_utils.dart';
+import 'package:spotiflac_android/utils/string_utils.dart';
 
 final _log = AppLogger('ExploreProvider');
 
@@ -41,18 +43,18 @@ class ExploreItem {
 
   factory ExploreItem.fromJson(Map<String, dynamic> json) {
     return ExploreItem(
-      id: json['id'] as String? ?? '',
-      uri: json['uri'] as String? ?? '',
-      type: json['type'] as String? ?? 'track',
-      name: json['name'] as String? ?? '',
-      artists: json['artists'] as String? ?? '',
-      description: json['description'] as String?,
-      coverUrl: json['cover_url'] as String?,
-      providerId: json['provider_id'] as String?,
-      albumId: json['album_id'] as String?,
-      albumName: json['album_name'] as String?,
-      releaseDate: json['release_date']?.toString(),
-      durationMs: json['duration_ms'] as int? ?? 0,
+      id: json['id']?.toString() ?? '',
+      uri: json['uri']?.toString() ?? '',
+      type: normalizeOptionalString(json['type']?.toString()) ?? 'track',
+      name: json['name']?.toString() ?? '',
+      artists: json['artists']?.toString() ?? '',
+      description: normalizeOptionalString(json['description']?.toString()),
+      coverUrl: normalizeCoverReference(json['cover_url']?.toString()),
+      providerId: normalizeOptionalString(json['provider_id']?.toString()),
+      albumId: normalizeOptionalString(json['album_id']?.toString()),
+      albumName: normalizeOptionalString(json['album_name']?.toString()),
+      releaseDate: normalizeOptionalString(json['release_date']?.toString()),
+      durationMs: readPositiveInt(json['duration_ms']) ?? 0,
     );
   }
 
@@ -86,14 +88,18 @@ class ExploreSection {
   });
 
   factory ExploreSection.fromJson(Map<String, dynamic> json) {
-    final itemsList = json['items'] as List<dynamic>? ?? [];
-    final items = itemsList
-        .map((item) => ExploreItem.fromJson(item as Map<String, dynamic>))
-        .toList();
+    final rawItems = json['items'];
+    final items = <ExploreItem>[];
+    if (rawItems is List) {
+      for (final rawItem in rawItems) {
+        if (rawItem is! Map) continue;
+        items.add(ExploreItem.fromJson(Map<String, dynamic>.from(rawItem)));
+      }
+    }
     final isQuickPicks = _isYTMusicQuickPicksItems(items);
     return ExploreSection(
-      uri: json['uri'] as String? ?? '',
-      title: json['title'] as String? ?? '',
+      uri: json['uri']?.toString() ?? '',
+      title: json['title']?.toString() ?? '',
       items: items,
       isYTMusicQuickPicks: isQuickPicks,
     );
@@ -427,16 +433,18 @@ class ExploreNotifier extends Notifier<ExploreState> {
         return;
       }
 
-      final success = result['success'] as bool? ?? false;
+      final success = result['success'] == true;
       _log.d('getExtensionHomeFeed success=$success');
       if (!success) {
-        final error = result['error'] as String? ?? 'Unknown error';
+        final error =
+            normalizeOptionalString(result['error']?.toString()) ??
+            'Unknown error';
         state = state.copyWith(isLoading: false, error: error);
         return;
       }
 
-      final greeting = result['greeting'] as String?;
-      final sectionsData = result['sections'] as List<dynamic>? ?? [];
+      final greeting = normalizeOptionalString(result['greeting']?.toString());
+      final sectionsData = result['sections'];
       final normalizedSectionsWithoutProvider = await compute(
         _normalizeExploreSectionsPayload,
         sectionsData,

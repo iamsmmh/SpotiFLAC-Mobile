@@ -124,8 +124,7 @@ internal fun NativeDownloadFinalizer.finalizeQualityVariantFilename(
         val cleanTarget = File(source.parentFile, cleanName)
         val lockTarget = if (collisionOnly) cleanTarget else File(source.parentFile, preferredName)
         val lockKey = lockTarget.absolutePath.lowercase(Locale.ROOT)
-        val lock = qualityVariantNameLocks.computeIfAbsent(lockKey) { Any() }
-        synchronized(lock) {
+        qualityVariantNameLocks.withLock(lockKey) {
             val selectedName = if (collisionOnly) {
                 resolveQualityVariantFilename(
                     fileName = logicalFileName,
@@ -138,11 +137,11 @@ internal fun NativeDownloadFinalizer.finalizeQualityVariantFilename(
                 preferredName
             }
             input.result.put("quality_variant_file_name", selectedName)
-            if (selectedName == state.fileName) return@synchronized
+            if (selectedName == state.fileName) return@withLock
             val target = uniqueLocalFile(source.parentFile, selectedName)
             if (!source.renameTo(target)) {
                 Log.w(TAG, "Could not rename quality variant output: ${source.absolutePath}")
-                return@synchronized
+                return@withLock
             }
             state.filePath = target.absolutePath
             state.fileName = target.name

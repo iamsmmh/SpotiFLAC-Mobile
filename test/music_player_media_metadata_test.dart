@@ -37,6 +37,25 @@ void main() {
     expect(restored.explicit, isTrue);
   });
 
+  test('malformed optional persisted metadata falls back without throwing', () {
+    final restored = PlayableMedia.fromJson({
+      'id': 7,
+      'source': '/music/track.flac',
+      'title': true,
+      'artist': ['Artist'],
+      'durationMs': '180000',
+      'bitDepth': '24',
+      'artUri': 'not a URL',
+    });
+
+    expect(restored, isNotNull);
+    expect(restored!.id, '7');
+    expect(restored.title, 'true');
+    expect(restored.duration, const Duration(minutes: 3));
+    expect(restored.bitDepth, 24);
+    expect(restored.artUri, isNull);
+  });
+
   test('file probe cannot erase valid queue quality with empty values', () {
     final merged = mergePlaybackFileMetadata(
       playbackAudioMetadataFromMediaItem(media.toMediaItem()),

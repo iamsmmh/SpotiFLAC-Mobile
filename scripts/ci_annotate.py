@@ -1,24 +1,55 @@
 #!/usr/bin/env python3
-"""Emit a log file as GitHub Actions check-run annotations.
+"""Emit a CI log excerpt as one GitHub Actions check-run annotation.
 
-GitHub Actions stores ``::error::`` workflow-command output as annotations on
-the job's check run. They are visible in the Actions UI and retrievable via the
-checks API, even when the log artifact cannot be downloaded (expired, missing
-permissions, or network-restricted environments). CI jobs should call this
-helper on failure so the *real* error is always discoverable.
+GitHub Actions keeps only a small number of workflow-command annotations per
+step. Emitting one annotation per log line therefore loses the diagnostic tail
+on long compiler logs. This helper puts likely failure lines first, fills the
+remaining excerpt from the tail, and encodes the result into one annotation
+that remains retrievable through the Checks API.
 
 Usage:
     ci_annotate.py LOG_FILE [--file NAME] [--max N]
-
-Example:
-    python3 scripts/ci_annotate.py xcodebuild.log --file xcodebuild-archive.log --max 60
-
-If the log has more than ``--max`` lines, the head and tail are kept (the
-actionable error is usually at the end) and the middle is summarized.
 """
 
 import argparse
 import os
+import re
+
+_DIAGNOSTIC = re.compile(
+    r"(?:\berror:|\bfatal error:|\bfailed\b|\bfailure:|undefined symbols?|"
+    r"linker command failed|could not build|could not resolve|exception|"
+    r"no such module|not found|duplicate symbol)",
+    re.IGNORECASE,
+)
+
+
+def _select_excerpt(lines: list[str], limit: int) -> list[str]:
+    nonempty = [(index, line) for index, line in enumerate(lines) if line.strip()]
+    if len(nonempty) <= limit:
+        return [line for _, line in nonempty]
+
+    diagnostic_indices = [
+        index for index, line in nonempty if _DIAGNOSTIC.search(line)
+    ]
+    # Failure summaries are normally near the end. Put the newest actionable
+    # diagnostics first so they survive even if a consumer truncates messages.
+    selected_indices: list[int] = []
+    for index in reversed(diagnostic_indices):
+        if index not in selected_indices:
+            selected_indices.append(index)
+        if len(selected_indices) >= limit // 2:
+            break
+    for index, _ in reversed(nonempty):
+        if index not in selected_indices:
+            selected_indices.append(index)
+        if len(selected_indices) >= limit:
+            break
+
+    omitted = len(nonempty) - len(selected_indices)
+    selected = [lines[index] for index in selected_indices]
+    if omitted > 0:
+        selected.append(f"... {omitted} non-empty lines omitted ...")
+    return selected
 
 
 def main() -> int:
@@ -33,7 +64,7 @@ def main() -> int:
         "--max",
         type=int,
         default=80,
-        help="maximum number of annotation lines (default: 80)",
+        help="maximum lines included in the single annotation (default: 80)",
     )
     args = ap.parse_args()
 
@@ -43,22 +74,18 @@ def main() -> int:
     with open(args.log, errors="replace") as fh:
         lines = fh.read().splitlines()
 
-    if len(lines) > args.max:
-        head = args.max // 2
-        tail = args.max - head - 1
-        omitted = len(lines) - args.max
-        lines = lines[:head] + [f"... {omitted} lines omitted ..."] + lines[-tail:]
+    excerpt = _select_excerpt(lines, max(1, args.max))
+    if not excerpt:
+        return 0
 
-    for line in lines:
-        if not line.strip():
-            continue
-        # Workflow-command escaping: % -> %25, \r -> %0D, \n -> %0A.
-        msg = (
-            line.replace("%", "%25")
-            .replace("\r", "%0D")
-            .replace("\n", "%0A")
-        )
-        print(f"::error file={args.file}::{msg[:2000]}")
+    message = "\n".join(excerpt)
+    # Workflow-command escaping: % -> %25, \r -> %0D, \n -> %0A.
+    message = (
+        message.replace("%", "%25")
+        .replace("\r", "%0D")
+        .replace("\n", "%0A")
+    )
+    print(f"::error file={args.file}::{message[:60000]}")
     return 0
 
 

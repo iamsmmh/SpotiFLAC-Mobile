@@ -24,7 +24,7 @@ object SafDownloadHandler {
     // cannot interleave writes into one document. Different names keep
     // downloading in parallel; the second same-name caller blocks, then hits
     // the exists check and reports already_exists.
-    private val safNameLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
+    private val safNameLocks = ReferenceCountedKeyedLock<String>()
 
     data class UniqueWriteResult(val uri: String, val fileName: String)
     data class ExistingAwareWriteResult(
@@ -40,8 +40,7 @@ object SafDownloadHandler {
         block: () -> T
     ): T {
         val key = "$treeUriStr|$relativeDir|${fileName.lowercase(Locale.ROOT)}"
-        val lock = safNameLocks.computeIfAbsent(key) { Any() }
-        return synchronized(lock) { block() }
+        return safNameLocks.withLock(key, block)
     }
 
     /**
@@ -67,6 +66,14 @@ object SafDownloadHandler {
 
         val relativeDir = sanitizeRelativeDir(req.optString("saf_relative_dir", ""))
         val outputExt = normalizeExt(req.optString("saf_output_ext", ""))
+            .ifBlank { normalizeExt(req.optString("output_ext", "")) }
+            .ifBlank {
+                if (req.optString("quality", "").equals("HIGH", ignoreCase = true)) {
+                    ".mp3"
+                } else {
+                    ".flac"
+                }
+            }
         val fileName = buildSafFileName(req, outputExt)
         return withSafNameLock(treeUriStr, relativeDir, fileName) {
             handleSafLocked(context, req, downloader, treeUriStr, relativeDir, outputExt, fileName)
@@ -304,22 +311,29 @@ object SafDownloadHandler {
     }
 
     fun copyContentUriToTemp(context: Context, uriStr: String): String? {
+        var temp: File? = null
         return try {
             val uri = Uri.parse(uriStr)
-            val extension = DocumentFile.fromSingleUri(context, uri)
-                ?.name
-                ?.substringAfterLast('.', "")
-                ?.takeIf { it.isNotBlank() }
-                ?.let { ".$it" }
-                ?: ".tmp"
-            val temp = File.createTempFile("native_saf_", extension, context.cacheDir)
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                temp.outputStream().use { output ->
+            val extension = normalizeExt(
+                DocumentFile.fromSingleUri(context, uri)
+                    ?.name
+                    ?.substringAfterLast('.', ""),
+            ).ifBlank { ".tmp" }
+            val createdTemp = File.createTempFile("native_saf_", extension, context.cacheDir)
+            temp = createdTemp
+            val inputStream = context.contentResolver.openInputStream(uri)
+            if (inputStream == null) {
+                createdTemp.delete()
+                return null
+            }
+            inputStream.use { input ->
+                createdTemp.outputStream().use { output ->
                     input.copyTo(output)
                 }
-            } ?: return null
-            temp.absolutePath
+            }
+            createdTemp.absolutePath
         } catch (e: Exception) {
+            temp?.delete()
             android.util.Log.w("SpotiFLAC", "Failed to copy SAF URI to temp: ${e.message}")
             null
         }
@@ -565,15 +579,25 @@ object SafDownloadHandler {
     }
 
     internal fun normalizeExt(ext: String?): String {
-        val trimmed = ext?.trim().orEmpty()
-        if (trimmed.isEmpty()) return ""
-        return if (trimmed.startsWith(".")) trimmed.lowercase(Locale.ROOT) else ".${trimmed.lowercase(Locale.ROOT)}"
+        val token = ext
+            ?.trim()
+            .orEmpty()
+            .trimStart('.')
+            .lowercase(Locale.ROOT)
+        // Extensions cross a provider/native boundary and become part of a SAF
+        // display name. Reject path fragments, query strings, compound suffixes,
+        // and unreasonable values instead of publishing malformed filenames.
+        if (token.length !in 1..16 || !token.matches(Regex("^[a-z0-9]+$"))) {
+            return ""
+        }
+        return ".$token"
     }
 
     internal fun mimeTypeForExt(ext: String?): String {
         return when (normalizeExt(ext)) {
             ".m4a", ".mp4" -> "audio/mp4"
             ".mp3" -> "audio/mpeg"
+            ".aac" -> "audio/aac"
             ".opus", ".ogg" -> "audio/ogg"
             ".flac" -> "audio/flac"
             ".wav" -> "audio/wav"
@@ -589,7 +613,10 @@ object SafDownloadHandler {
 
         val safeName = sanitizeFilename(name)
         val lower = safeName.lowercase(Locale.ROOT)
-        val knownExts = listOf(".flac", ".m4a", ".mp4", ".mp3", ".opus", ".lrc")
+        val knownExts = listOf(
+            ".flac", ".m4a", ".mp4", ".mp3", ".opus", ".ogg",
+            ".wav", ".aiff", ".aif", ".aifc", ".aac", ".lrc",
+        )
         for (knownExt in knownExts) {
             if (lower.endsWith(knownExt)) {
                 return safeName.dropLast(knownExt.length) + normalizedExt

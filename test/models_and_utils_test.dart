@@ -496,6 +496,26 @@ void main() {
       expect(track.toJson()['upc'], '0012345678901');
     });
 
+    test('tolerates numeric metadata encoded by extensions as strings', () {
+      final track = Track.fromBackendMap({
+        'id': 42,
+        'name': 'Song',
+        'artists': 'Artist',
+        'duration_ms': '180000.9',
+        'track_number': '3',
+        'disc_number': 1.0,
+        'total_tracks': '12',
+        'total_discs': 'invalid',
+      });
+
+      expect(track.id, '42');
+      expect(track.duration, 180);
+      expect(track.trackNumber, 3);
+      expect(track.discNumber, 1);
+      expect(track.totalTracks, 12);
+      expect(track.totalDiscs, isNull);
+    });
+
     test('does not treat a playlist container name as a track album', () {
       final playlistTrack = Track.fromBackendMap({
         'id': 'playlist-track-1',

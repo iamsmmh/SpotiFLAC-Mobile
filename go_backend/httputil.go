@@ -443,14 +443,28 @@ func getRetryAfterDuration(resp *http.Response) time.Duration {
 	return 0
 }
 
+const maxMetadataHTTPResponseBytes = 16 << 20
+
 func ReadResponseBody(resp *http.Response) ([]byte, error) {
 	if resp == nil {
 		return nil, fmt.Errorf("response is nil")
 	}
+	if resp.ContentLength > maxMetadataHTTPResponseBytes {
+		return nil, fmt.Errorf(
+			"response body exceeds %d byte limit",
+			maxMetadataHTTPResponseBytes,
+		)
+	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxMetadataHTTPResponseBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	if len(body) > maxMetadataHTTPResponseBytes {
+		return nil, fmt.Errorf(
+			"response body exceeds %d byte limit",
+			maxMetadataHTTPResponseBytes,
+		)
 	}
 
 	if len(body) == 0 {

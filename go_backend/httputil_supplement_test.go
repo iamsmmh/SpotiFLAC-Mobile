@@ -112,6 +112,12 @@ func TestHTTPUtilityHelpers(t *testing.T) {
 	if body, err := ReadResponseBody(&http.Response{Body: io.NopCloser(strings.NewReader("ok"))}); err != nil || string(body) != "ok" {
 		t.Fatalf("ReadResponseBody = %q/%v", body, err)
 	}
+	if _, err := ReadResponseBody(&http.Response{
+		ContentLength: maxMetadataHTTPResponseBytes + 1,
+		Body:          io.NopCloser(strings.NewReader("oversized")),
+	}); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("expected oversized response error, got %v", err)
+	}
 	origJitter := jitterFloat
 	jitterFloat = func() float64 { return 1 }
 	if calculateNextDelay(10*time.Millisecond, RetryConfig{BackoffFactor: 3, MaxDelay: 20 * time.Millisecond}) != 20*time.Millisecond {

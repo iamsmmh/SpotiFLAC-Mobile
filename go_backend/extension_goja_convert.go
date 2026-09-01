@@ -133,17 +133,33 @@ func gojaObjectStringSlice(obj *goja.Object, keys ...string) []string {
 	return result
 }
 
+const maxExtensionResultArrayLength = 10_000
+
 func gojaArrayLength(value goja.Value, vm *goja.Runtime) (int, error) {
 	if gojaValueIsEmpty(value) {
 		return 0, nil
 	}
-	lengthValue := value.ToObject(vm).Get("length")
-	if gojaValueIsEmpty(lengthValue) {
+	obj := value.ToObject(vm)
+	// Merely exposing a numeric `length` does not make a value an array. Without
+	// this check, a malformed extension could return {length: 2^31} and make the
+	// native bridge attempt a process-killing allocation before parsing entries.
+	if obj.ClassName() != "Array" {
 		return 0, fmt.Errorf("value is not an array")
+	}
+	lengthValue := obj.Get("length")
+	if gojaValueIsEmpty(lengthValue) {
+		return 0, fmt.Errorf("array has no length")
 	}
 	length := lengthValue.ToInteger()
 	if length <= 0 {
 		return 0, nil
+	}
+	if length > maxExtensionResultArrayLength {
+		return 0, fmt.Errorf(
+			"extension array length %d exceeds limit %d",
+			length,
+			maxExtensionResultArrayLength,
+		)
 	}
 	return int(length), nil
 }
