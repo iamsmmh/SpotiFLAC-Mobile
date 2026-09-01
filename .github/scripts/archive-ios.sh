@@ -51,6 +51,7 @@ run_archive() {
     DEVELOPMENT_TEAM="" \
     EXPANDED_CODE_SIGN_IDENTITY="" \
     ENABLE_USER_SCRIPT_SANDBOXING=NO \
+    SWIFT_ENABLE_EXPLICIT_MODULES=NO \
     2>&1 | tee -a "$LOG"
   local status="${PIPESTATUS[0]}"
   set -o pipefail
