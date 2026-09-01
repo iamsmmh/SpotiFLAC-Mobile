@@ -129,3 +129,63 @@ After applying all fixes:
 - Consider replacing `ffmpeg_kit_flutter_new_full` (which bundles large binaries) with a more lightweight FFmpeg solution or `ffmpeg_kit_flutter_new_min` if full codecs not needed
 - Commit `ios/Podfile.lock` to repo to make CocoaPods cache key work (currently gitignored, so cache always misses)
 - Update `.fvmrc` Flutter version 3.44.8 - verify it exists, otherwise use stable 3.35.x
+
+---
+
+## iOS: `xcodebuild archive failed with exit code 70` (2026-09-01)
+
+### Root cause
+
+The `Archive Runner without code signing` step in `.github/workflows/build-mobile.yml`
+(and the same step in `unsigned-release.yml`) fails **fast** (before any compilation)
+with exit code 70 and an `ios-xcodebuild-log` artifact of only ~1.3 KB.
+
+The log's byte layout matches Xcode's **"Unable to find a destination matching the
+provided destination specifier: { platform:iOS, generic }"** error, with the
+"Any iOS Device" destination marked *ineligible* because the iOS platform for the
+preferred Xcode is missing/incomplete:
+
+- The workflow prefers `Xcode 26.1.1` (when present on the runner image).
+- GitHub-hosted `macos-15` images have shipped Xcode 26.1 **without a properly
+  installed iOS 26.1 platform** — known issue
+  [actions/runner-images#13275](https://github.com/actions/runner-images/issues/13275)
+  ("iOS 26.1 is not installed. Please download and install the platform from
+  Xcode > Settings > Components."). `xcodebuild` then cannot resolve the generic
+  iOS device destination and exits with code 70 after printing only ~1.2 KB.
+- `gomobile bind -target=ios` still succeeds because it only needs the SDK
+  headers/toolchain, not Xcode's destination/device registration.
+
+(The scheme-not-found variant would produce a ~980-byte log, which does not match
+the observed ~1311-byte artifact, so the Runner scheme is not the problem.)
+
+### Fix (requires `workflows` permission to push — see `workflow_fix.patch`)
+
+In `.github/workflows/build-mobile.yml`:
+
+1. Before archiving, ensure the iOS platform is present:
+   `xcodebuild -downloadPlatform iOS || true` (cheap no-op when installed).
+2. Wrap the `xcodebuild archive` call in a retry function; if it fails, retry
+   once with the runner's default Xcode whose platform is always installed
+   (`/Applications/Xcode_16.4.app`, falling back to `/Applications/Xcode.app`).
+3. On failure, mirror the raw log (both attempts), the Xcode version, and
+   scheme/destination probes into `::error::` check-run annotations via
+   `scripts/ci_annotate.py`, so the real error is visible in the Actions UI and
+   via the checks API without downloading the artifact.
+
+Apply locally:
+
+```bash
+git apply workflow_fix.patch   # from this branch's root
+git add .github/workflows/build-mobile.yml
+git commit -m "ci: fix iOS archive destination failure (exit 70)"
+git push
+```
+
+### Android: compileSdk 37 vs installed SDK platform
+
+`android/app/build.gradle.kts` compiles against `compileSdk = 37` (the current
+androidx/activity/plugin set requires it), but `build-mobile.yml` only installed
+`platforms;android-35`. The workflow now also installs `platforms;android-37`
+and `build-tools;36.0.0`; AGP auto-downloads anything still missing. This was
+one candidate cause of the parallel `Build release APKs` failure (exit 1) — the
+new log annotations will confirm the exact Gradle error on the next run.
