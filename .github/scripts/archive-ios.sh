@@ -97,6 +97,12 @@ if [ "$STATUS" -ne 0 ]; then
   echo "::group::xcodebuild errors"
   grep -nE "error:|fatal error:|Undefined symbol|ld: |clang: error|Command .* failed" "$LOG" | head -100 || true
   echo "::endgroup::"
+  # Mirror the log into check-run annotations so the failure stays visible
+  # even when the uploaded artifact is not reachable (see scripts/ci_annotate.py).
+  ANNOTATE="$(cd "$(dirname "$0")/../.." && pwd)/scripts/ci_annotate.py"
+  if [ -f "$ANNOTATE" ] && command -v python3 >/dev/null 2>&1; then
+    python3 "$ANNOTATE" "$LOG" --file xcodebuild-archive.log --max 80 || true
+  fi
   echo "::error::xcodebuild archive failed with exit code ${STATUS} - see the diagnostics above and the ios-xcodebuild-log artifact"
   exit "$STATUS"
 fi

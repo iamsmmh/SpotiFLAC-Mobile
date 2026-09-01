@@ -1,5 +1,10 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.zarz.spotiflac">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+      No `package` attribute here on purpose: AGP 8+ takes the namespace from
+      android.namespace in app/build.gradle.kts and rejects/ignores the
+      manifest attribute ("Setting the namespace via the package attribute in
+      the source AndroidManifest.xml is no longer supported").
+    -->
 
     <!-- Permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -182,6 +187,29 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!--
+          Android 11+ (API 30) package visibility. Without these entries
+          url_launcher's canLaunchUrl() returns false and launchUrl() throws
+          for web links (About page, extension stores, OAuth consent pages)
+          and for mailto:, because the app cannot see any handler package.
+        -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="http" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="mailto" />
+        </intent>
+        <!-- open_filex / share_plus hand finished downloads to a player. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="audio/*" />
         </intent>
     </queries>
 </manifest>

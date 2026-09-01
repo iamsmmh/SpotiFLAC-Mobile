@@ -10,7 +10,12 @@
 include: package:flutter_lints/flutter.yaml
 
 plugins:
-  riverpod_lint: 3.1.4-dev.3
+  # Must stay in sync with the `riverpod_lint` dev_dependency in pubspec.yaml
+  # (pubspec.lock resolves 3.1.4). A hard-pinned pre-release such as
+  # "3.1.4-dev.3" is not satisfiable by the `^3.1.4` constraint in pubspec.yaml,
+  # so the analyzer had to resolve two different versions of the same plugin
+  # package and `flutter analyze` failed before analysing a single file.
+  riverpod_lint: ^3.1.4
 
 analyzer:
   exclude:

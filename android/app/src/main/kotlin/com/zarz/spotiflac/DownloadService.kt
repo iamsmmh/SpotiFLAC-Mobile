@@ -545,22 +545,59 @@ class DownloadService : Service() {
         }
     }
     
-    private fun startForegroundService() {
+    /**
+     * Promotes the service to the foreground.
+     *
+     * `startForeground` is *not* a safe call on modern Android:
+     *   * API 31+ throws `ForegroundServiceStartNotAllowedException` when the
+     *     app is not eligible to start a FGS from the background,
+     *   * API 34+ throws `SecurityException` / `InvalidForegroundServiceTypeException`
+     *     when the declared type or its permission is not granted,
+     *   * API 35+ throws once the `dataSync` 6h/24h budget is exhausted - which
+     *     a long queue *will* hit.
+     *
+     * An uncaught throw inside onStartCommand crashes the process (and is
+     * immediately followed by the "did not then call startForeground()" ANR),
+     * so failures are downgraded to a graceful stop instead.
+     *
+     * @return true when the service is now in the foreground.
+     */
+    private fun startForegroundService(): Boolean {
         isRunning = true
 
         ensureWakeLock()
 
         val notification = buildNotification(0, 0)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e(
+                "DownloadService",
+                "startForeground failed (${ForegroundServiceStartPolicy.errorCode(e)}): ${e.message}",
+                e,
             )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+            if (hasNativeWorkerState()) {
+                writeNativeWorkerSnapshot(
+                    isRunning = false,
+                    isPaused = false,
+                    currentItemId = "",
+                    message = "Foreground service start denied by the system",
+                    includeItems = true,
+                )
+            }
+            stopForegroundService(cancelNativeWorker = true)
+            return false
         }
         pushWidgetState(0, 0)
+        return true
     }
 
     private fun startNativeWorker(requestsJson: String, settingsJson: String) {
@@ -649,7 +686,11 @@ class DownloadService : Service() {
         currentArtistName = requests.firstOrNull()?.artistName ?: ""
         lastProgress = 0L
         lastTotal = 0L
-        startForegroundService()
+        if (!startForegroundService()) {
+            // The system refused the foreground promotion; startForegroundService()
+            // already stopped the service and reported the failure to Dart.
+            return
+        }
         writeNativeWorkerSnapshot(
             isRunning = true,
             isPaused = isNativeWorkerPaused(),
