@@ -411,7 +411,15 @@ func applySongLinkRegionFromRequest(req *DownloadRequest) {
 }
 
 // DownloadByStrategy routes all download requests through extension providers.
-func DownloadByStrategy(requestJSON string) (string, error) {
+func DownloadByStrategy(requestJSON string) (resp string, err error) {
+	// gomobile does not recover panics at the JNI/Swift boundary; an
+	// escaping panic would kill the whole app and stall the queue.
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			resp, _ = errorResponse(r.Error())
+			err = nil
+		}
+	}()
 	var req DownloadRequest
 	if err := json.Unmarshal([]byte(requestJSON), &req); err != nil {
 		return errorResponse("Invalid request: " + err.Error())
@@ -433,11 +441,21 @@ func DownloadByStrategy(requestJSON string) (string, error) {
 	return errorResponse("Extension providers are disabled; built-in download providers have been retired")
 }
 
-func GetAllDownloadProgress() string {
+func GetAllDownloadProgress() (resp string) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			resp = `{"items":{}}`
+		}
+	}()
 	return GetMultiProgress()
 }
 
-func GetAllDownloadProgressDelta(sinceSeq int64) string {
+func GetAllDownloadProgressDelta(sinceSeq int64) (resp string) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			resp = `{"items":{}}`
+		}
+	}()
 	return GetMultiProgressDelta(sinceSeq)
 }
 

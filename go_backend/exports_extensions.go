@@ -481,7 +481,20 @@ func preflightExtensionDownloadSession(extensionID string) (bool, error) {
 	return ext.runtime.preflightSignedSession()
 }
 
-func DownloadWithExtensionsJSON(requestJSON string) (string, error) {
+func DownloadWithExtensionsJSON(requestJSON string) (resp string, err error) {
+	// The fallback pipeline reaches third-party extension code, network
+	// responses and tag parsers; never let a panic cross the JNI/Swift
+	// boundary (it would abort the app and freeze the whole queue).
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			resp, _ = marshalJSONString(&DownloadResponse{
+				Success:   false,
+				Error:     "Download failed: " + r.Error(),
+				ErrorType: "unknown",
+			})
+			err = nil
+		}
+	}()
 	var req DownloadRequest
 	if err := json.Unmarshal([]byte(requestJSON), &req); err != nil {
 		return "", fmt.Errorf("invalid request: %w", err)
@@ -925,7 +938,16 @@ func FindURLHandlerJSON(url string) string {
 	return handler.extension.ID
 }
 
-func RunPostProcessingV2JSON(inputJSON, metadataJSON string) (string, error) {
+func RunPostProcessingV2JSON(inputJSON, metadataJSON string) (resp string, err error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			resp, _ = marshalJSONString(map[string]any{
+				"success": false,
+				"error":   r.Error(),
+			})
+			err = nil
+		}
+	}()
 	var metadata map[string]any
 	if metadataJSON != "" {
 		if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {

@@ -23,9 +23,11 @@ func NewRateLimiter(maxRequests int, window time.Duration) *RateLimiter {
 // WaitForSlot blocks until the caller may proceed without exceeding
 // maxRequests per window. Capacity is re-checked after every wait: several
 // goroutines can be parked on the same expiring timestamp, and only as many
-// as there are freed slots may be admitted when it expires. An unconditional
-// append after the sleep would over-admit under concurrency and burst past
-// the provider's rate limit.
+// as there are freed slots may be admitted when it expires. The previous
+// implementation released the lock around the sleep and then appended
+// unconditionally after re-locking, so N sleepers all admitted at once and
+// burst past the provider's rate limit (the classic thundering herd that
+// triggers 429/503 cascades).
 func (r *RateLimiter) WaitForSlot() {
 	r.mu.Lock()
 	for {

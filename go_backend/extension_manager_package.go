@@ -198,9 +198,27 @@ func extractExtensionArchive(zipReader *zip.ReadCloser, destination string) erro
 			destFile.Close()
 			return fmt.Errorf("failed to open file in archive: %w", err)
 		}
-		_, copyErr := io.Copy(destFile, srcFile)
+		// The per-entry UncompressedSize64 in the zip central directory is
+		// attacker-controlled metadata, not verified data: a hostile package
+		// can lie ("1 KB") while streaming gigabytes. Cap the actual byte
+		// stream while copying so a zip bomb cannot exhaust disk/memory even
+		// if it passed validateExtensionArchive's header-based total.
+		limitedSrc := io.LimitReader(srcFile, maxExtensionArchiveUncompressedBytes+1)
+		written, copyErr := io.Copy(destFile, limitedSrc)
+		if copyErr == nil && written > maxExtensionArchiveUncompressedBytes {
+			copyErr = fmt.Errorf(
+				"extension archive entry %s exceeds the %d MiB extracted size limit",
+				file.Name,
+				maxExtensionArchiveUncompressedBytes/(1024*1024),
+			)
+		}
 		closeSrcErr := srcFile.Close()
 		closeDestErr := destFile.Close()
+		if copyErr != nil {
+			// Remove the oversized partial file so it can't masquerade as a
+			// fully-extracted asset.
+			_ = os.Remove(destPath)
+		}
 		if copyErr != nil {
 			return fmt.Errorf("failed to extract extension file: %w", copyErr)
 		}
