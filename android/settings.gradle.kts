@@ -20,8 +20,11 @@ pluginManagement {
 plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
     id("com.android.application") version "9.3.1" apply false
-    // Kotlin support is built into AGP 9.x — do not apply the legacy
-    // org.jetbrains.kotlin.android plugin (it is rejected by AGP 9.0+).
+    // AGP 9.x bundles built-in Kotlin, but Flutter < 3.47 (CI runs 3.44.8)
+    // requires the classic Kotlin Gradle plugin. android.builtInKotlin=false
+    // in gradle.properties opts out of built-in Kotlin so applying the
+    // kotlin-android plugin below stays valid.
+    id("org.jetbrains.kotlin.android") version "2.4.10" apply false
 }
 
 include(":app")

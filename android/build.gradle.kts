@@ -24,6 +24,13 @@ subprojects {
             // Add desugaring dependency to all Android subprojects
             project.dependencies.add("coreLibraryDesugaring", "com.android.tools:desugar_jdk_libs:2.1.5")
         }
+        
+        // Keep every Android module's Kotlin output on the Java 17 toolchain.
+        tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+            compilerOptions {
+                jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+            }
+        }
     }
 }
 

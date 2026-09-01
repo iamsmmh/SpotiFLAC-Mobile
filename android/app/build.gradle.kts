@@ -3,10 +3,11 @@ import java.io.FileInputStream
 
 plugins {
     id("com.android.application")
-    // AGP 9.x ships built-in Kotlin support; applying the legacy
-    // `kotlin-android` plugin fails the build ("plugin is no longer required
-    // for Kotlin support since AGP 9.0"). Kotlin compiler options are
-    // configured via the `android.kotlin.compilerOptions` block below.
+    // Kotlin is compiled with the classic Kotlin Gradle plugin: Flutter < 3.47
+    // cannot use AGP 9's built-in Kotlin, so gradle.properties opts out with
+    // android.builtInKotlin=false and android.newDsl=false.
+    id("kotlin-android")
+    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
@@ -30,12 +31,6 @@ android {
         isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    kotlin {
-        compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-        }
     }
 
     signingConfigs {
@@ -102,6 +97,13 @@ android {
     // splits that --split-per-abi enables and breaks the release build
     // ("conflicting configuration in ndk abiFilters cannot be present when
     //  splits abi filters are set").
+}
+
+// Kotlin compiler options for the classic Kotlin Gradle plugin (KGP 2.x DSL).
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
 }
 
 flutter {

@@ -144,31 +144,35 @@ class StringSimilarity {
     // drops below the meaningful threshold; bail out early on very long
     // strings (metadata blobs, multi-line comments).
     final limit = math.min(12, math.max(3, (math.max(m, n) * 0.5).floor()));
-    var previous = List<int>.generate(n + 1, (i) => i);
-    var current = List<int>.filled(n + 1, 0);
+    // Optimal string alignment (Damerau) distance. `oneBack` holds row i-1
+    // and `twoBack` row i-2; the transposition rule must consult the cell
+    // d[i-2][j-2] (two rows up), not d[i-1][j-2], otherwise adjacent swaps
+    // are never credited and the distance is overestimated.
+    var oneBack = List<int>.generate(n + 1, (i) => i);
+    var twoBack = List<int>.filled(n + 1, 0);
     for (var i = 1; i <= m; i++) {
+      final current = List<int>.filled(n + 1, 0);
       current[0] = i;
       var rowMin = current[0];
       for (var j = 1; j <= n; j++) {
         final cost = a.codeUnitAt(i - 1) == b.codeUnitAt(j - 1) ? 0 : 1;
         current[j] = math.min(
-          math.min(current[j - 1] + 1, previous[j] + 1),
-          previous[j - 1] + cost,
+          math.min(current[j - 1] + 1, oneBack[j] + 1),
+          oneBack[j - 1] + cost,
         );
         if (j > 1 &&
             i > 1 &&
             a.codeUnitAt(i - 1) == b.codeUnitAt(j - 2) &&
             a.codeUnitAt(i - 2) == b.codeUnitAt(j - 1)) {
-          current[j] = math.min(current[j], previous[j - 2] + 1);
+          current[j] = math.min(current[j], twoBack[j - 2] + 1);
         }
         rowMin = math.min(rowMin, current[j]);
       }
       if (rowMin > limit) return math.max(m, n);
-      final swap = previous;
-      previous = current;
-      current = swap;
+      twoBack = oneBack;
+      oneBack = current;
     }
-    return previous[n];
+    return oneBack[n];
   }
 }
 
