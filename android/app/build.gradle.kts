@@ -26,7 +26,11 @@ android {
     // Do NOT lower this to 35 — that fails checkReleaseAarMetadata
     // ("requires compileSdk of at least 37"). targetSdk stays 35 to avoid
     // opting in to newer runtime behavior until the app is migrated.
-    compileSdk = 37
+    // CI may not be able to install the android-37 platform (it is not always
+    // published to sdkmanager's stable channel). .github/scripts/setup-android-sdk.sh
+    // exports ANDROID_COMPILE_SDK with whatever level actually got installed,
+    // so honour that and only default to 37.
+    compileSdk = (System.getenv("ANDROID_COMPILE_SDK") ?: "37").toInt()
     // Pin NDK r29 (16 KB page size, Android 15+). Flutter 3.44.8's
     // flutter.ndkVersion is 28.2.13676358, which CI does not install;
     // assembleRelease then dies in extractReleaseNativeDebugMetadata /
