@@ -8,18 +8,15 @@
 	<array>
 		<string>en</string>
 		<string>de</string>
-		<string>es</string>
+		<string>es-ES</string>
 		<string>fr</string>
-		<string>hi</string>
 		<string>id</string>
 		<string>ja</string>
 		<string>ko</string>
-		<string>nl</string>
-		<string>pt</string>
+		<string>pt-PT</string>
 		<string>ru</string>
-		<string>zh</string>
-		<string>zh-Hans</string>
-		<string>zh-Hant</string>
+		<string>tr</string>
+		<string>uk</string>
 	</array>
 	<key>CFBundleDisplayName</key>
 	<string>SpotiFLAC Mobile</string>

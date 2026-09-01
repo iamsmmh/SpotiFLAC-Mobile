@@ -332,9 +332,7 @@ class _EagerInitializationState extends ConsumerState<_EagerInitialization>
     // recovery can offer "resume?" after a kill, and warm the failover hook
     // before the first play request.
     unawaited(ref.read(engineSavepointProvider.notifier).load());
-    unawaited(
-      ref.read(streamingEngineControllerProvider).ensureFailureHook(),
-    );
+    ref.read(streamingEngineControllerProvider).ensureFailureHook();
 
     // Download scheduling settings must be restored before the queue can
     // decide whether a new download should wait behind a closed window.

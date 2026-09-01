@@ -11,14 +11,11 @@ import 'package:spotiflac_android/engine/smart_play.dart';
 import 'package:spotiflac_android/engine/streaming_engine.dart';
 import 'package:spotiflac_android/models/track.dart';
 import 'package:spotiflac_android/models/download_item.dart';
-import 'package:spotiflac_android/providers/download_history_provider.dart';
 import 'package:spotiflac_android/providers/download_queue_provider.dart';
-import 'package:spotiflac_android/providers/download_queue_state.dart';
 import 'package:spotiflac_android/providers/engine_settings_provider.dart';
 import 'package:spotiflac_android/providers/music_player_provider.dart';
 import 'package:spotiflac_android/providers/playback_provider.dart';
 import 'package:spotiflac_android/providers/settings_provider.dart';
-import 'package:spotiflac_android/services/history_database.dart';
 import 'package:spotiflac_android/services/music_player_service.dart';
 import 'package:spotiflac_android/utils/string_utils.dart';
 
@@ -153,7 +150,8 @@ class NetworkStatusMonitor {
         ConnectivityResult.wifi || ConnectivityResult.ethernet ||
         ConnectivityResult.vpn => NetworkProfile.wifi,
         ConnectivityResult.mobile || ConnectivityResult.bluetooth ||
-        ConnectivityResult.other => NetworkProfile.mobile,
+        ConnectivityResult.other || ConnectivityResult.satellite =>
+            NetworkProfile.mobile,
         ConnectivityResult.none => NetworkProfile.offline,
       });
     } catch (_) {
@@ -285,7 +283,7 @@ class StreamingEngineController {
 
   ProviderHealthRegistry get providerHealth => health;
   EngineEventLog get eventLog => log;
-  StreamingSessionState get sessionState => _session.state;
+  StreamSessionState get sessionState => _session.state;
   StreamPreloader get preloader => _preloader;
   BandwidthMonitor get bandwidthMonitor => bandwidth;
   StreamIntegrityLog get integrityLog => integrity;
@@ -550,18 +548,53 @@ class StreamingEngineController {
       );
     }
 
-    final outcome = _session.resolve(
-      [source],
+    var selected = source;
+    var outcome = _session.resolve(
+      [selected],
       requested: decision.requestedQuality,
     );
-    final selected = outcome.resolved;
-    if (selected == null) {
+    if (outcome.resolved == null) {
       return EnginePlayResult(
         started: false,
         decision: decision,
         failure: EnginePlayFailureKind.streamFailed,
         message: outcome.failure?.message ?? 'No usable source',
       );
+    }
+    selected = outcome.resolved!;
+
+    // URL-expiry handling: when the policy flags the source as near expiry,
+    // re-query the adapters for a fresh URL before playing. Bounded to a
+    // single refresh round so a provider that keeps issuing stale URLs cannot
+    // stall playback forever.
+    if (outcome.needsUrlRefresh &&
+        _ref.read(engineSettingsProvider).autoRefreshExpiredUrls) {
+      log.add(
+        EngineEvent.info(
+          'stream',
+          'Refreshing expired/near-expiry URL for ${track.name}',
+        ),
+      );
+      final refreshed = await candidatesFor(track);
+      final ranked = _resolver.candidates(
+        refreshed,
+        requested: decision.requestedQuality,
+      );
+      if (ranked.isNotEmpty) {
+        selected = ranked.first;
+        outcome = _session.resolve(
+          [selected],
+          requested: decision.requestedQuality,
+        );
+        if (outcome.resolved != null) {
+          selected = outcome.resolved!;
+        }
+      }
+    }
+    if (_session.state.phase == StreamPhase.refreshingUrl) {
+      // Refresh was disabled or produced no fresher candidate; proceed with
+      // the best source we have so the user is never stuck on a spinner.
+      _session.proceedWithoutRefresh(selected);
     }
 
     return _startSource(track, decision, selected);
@@ -994,7 +1027,7 @@ class SleepTimerNotifier extends Notifier<SleepTimerState> {
       final remaining = deadline.difference(DateTime.now());
       if (remaining <= Duration.zero) {
         stop();
-        _ref.read(musicPlayerControllerProvider).pause();
+        ref.read(musicPlayerControllerProvider).pause();
         return;
       }
       state = SleepTimerState(
@@ -1020,16 +1053,9 @@ class SleepTimerNotifier extends Notifier<SleepTimerState> {
 /// Provider wiring
 /// ---------------------------------------------------------------------------
 
-final streamingEngineControllerProvider =
-    Provider<StreamingEngineController>(_StreamingEngineControllerFactory.new);
-
-class _StreamingEngineControllerFactory {
-  const _StreamingEngineControllerFactory(this._ref);
-
-  final Ref _ref;
-
-  StreamingEngineController call() => StreamingEngineController._(_ref);
-}
+final streamingEngineControllerProvider = Provider<StreamingEngineController>(
+  (ref) => StreamingEngineController._(ref),
+);
 
 final engineDiagnosticsProvider = Provider<StreamingDiagnostics>(
   (ref) {

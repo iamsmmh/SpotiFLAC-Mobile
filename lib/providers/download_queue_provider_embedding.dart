@@ -192,19 +192,42 @@ extension _DownloadQueueEmbedding on DownloadQueueNotifier {
     String itemId,
   ) async {
     try {
+      // Track ids may be bare provider ids (e.g. a plain Spotify id) or
+      // prefixed ("deezer:123456", "tidal:123456", "spotify:track:..."). Only
+      // split on a separator when one actually exists; otherwise the whole id
+      // is the provider-side id and the source field names the provider.
       final colonIdx = track.id.indexOf(':');
-      final provider = track.id.substring(0, colonIdx);
+      final hasProviderPrefix =
+          colonIdx > 0 && colonIdx < track.id.length - 1;
+      final provider = hasProviderPrefix
+          ? track.id.substring(0, colonIdx)
+          : (track.source?.trim().isNotEmpty == true
+                ? track.source!.trim()
+                : '');
       final effectiveProvider = resolveEffectiveMetadataProvider(
         provider,
         ref.read(extensionProvider),
       );
-      final providerTrackId = track.id.substring(colonIdx + 1);
+      final providerTrackId = hasProviderPrefix
+          ? track.id.substring(colonIdx + 1)
+          : track.id.trim();
+
+      final lookupProvider =
+          effectiveProvider.isEmpty ? provider : effectiveProvider;
+      if (lookupProvider.isEmpty || providerTrackId.isEmpty) {
+        // No provider can be named for this id — nothing to query, fall back
+        // to any known Deezer id already attached to the track.
+        return _DeezerLookupPreparation(
+          track: track,
+          deezerTrackId: _extractKnownDeezerTrackId(track),
+        );
+      }
 
       _log.d(
-        'No ISRC, fetching from ${effectiveProvider.isEmpty ? provider : effectiveProvider} API: $providerTrackId',
+        'No ISRC, fetching from $lookupProvider API: $providerTrackId',
       );
       final providerData = await PlatformBridge.getProviderMetadata(
-        effectiveProvider.isEmpty ? provider : effectiveProvider,
+        lookupProvider,
         'track',
         providerTrackId,
       );

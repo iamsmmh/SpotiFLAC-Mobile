@@ -10,6 +10,7 @@ import 'package:spotiflac_android/providers/settings_provider.dart';
 import 'package:spotiflac_android/services/app_navigation_service.dart';
 import 'package:spotiflac_android/theme/dynamic_color_wrapper.dart';
 import 'package:spotiflac_android/l10n/app_localizations.dart';
+import 'package:spotiflac_android/l10n/supported_locales.dart';
 
 String initialLocationForAppState({
   required bool isFirstLaunch,
@@ -227,7 +228,12 @@ class SpotiFLACApp extends ConsumerWidget {
             GlobalWidgetsLocalizations.delegate,
             GlobalCupertinoLocalizations.delegate,
           ],
-          supportedLocales: AppLocalizations.supportedLocales,
+          // Only locales that meet the translation completion threshold are
+          // declared as supported (see lib/l10n/supported_locales.dart). The
+          // raw gen-l10n list would also expose the incomplete generic es/pt
+          // locales, which fall back to English for hundreds of strings.
+          // filteredSupportedLocales keeps them out of the app entirely.
+          supportedLocales: filteredSupportedLocales,
         );
       },
     );

@@ -1,3 +1,4 @@
+library;
 import 'dart:math' as math;
 
 /// Playback session state: queue, shuffle/repeat, transport savepoints, and
@@ -8,7 +9,6 @@ import 'dart:math' as math;
 /// *engine* dimensions the player does not know about — playback mode, quality
 /// level, provider, volume/rate/balance — plus honest recovery semantics:
 /// a savepoint restores paused, and the UI asks the user before resuming.
-library;
 
 enum SessionRepeatMode {
   none('Off'),
@@ -32,7 +32,14 @@ enum SessionRepeatMode {
       );
 }
 
-enum SessionShuffleMode { off('Off'), on('On') }
+enum SessionShuffleMode {
+  off('Off'),
+  on('On');
+
+  const SessionShuffleMode(this.label);
+
+  final String label;
+}
 
 /// One queue entry at engine level. Mirrors `PlayableMedia` but is
 /// engine-owned so the savepoint never depends on the audio player's schema.
@@ -413,9 +420,12 @@ class ListeningStats {
       plays: plays,
       skips: skips,
       listenedMs: listenedMs + elapsed.inMilliseconds,
+      // The per-day bucket holds milliseconds, matching the total: two 90s
+      // listens must read as 180000 ms "today", not 2.
       listenedMsPerDay: _increment(
         listenedMsPerDay,
         day,
+        elapsed.inMilliseconds,
       ),
       playsPerDay: playsPerDay,
       trackStats: trackStats,
@@ -503,9 +513,16 @@ class ListeningStats {
     return list;
   }
 
-  static Map<String, int> _increment(Map<String, int> source, String day) {
+  /// Adds [amount] (default 1) to a per-day bucket. Callers pass their own
+  /// unit: plays count by 1, listened time by milliseconds.
+  static Map<String, int> _increment(
+    Map<String, int> source,
+    String day, [
+    int amount = 1,
+  ]) {
+    if (amount <= 0) return source;
     final copy = Map<String, int>.from(source);
-    copy[day] = (copy[day] ?? 0) + 1;
+    copy[day] = (copy[day] ?? 0) + amount;
     return Map.unmodifiable(copy);
   }
 

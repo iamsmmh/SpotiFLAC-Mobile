@@ -49,8 +49,8 @@ String buildSafFileDisplayPath({
   if (displayRoot != null) {
     return [
       displayRoot.replaceAll(RegExp(r'/+$'), ''),
-      if (cleanRelativeDir != null) cleanRelativeDir,
-      if (cleanFileName != null) cleanFileName,
+      ?cleanRelativeDir,
+      ?cleanFileName,
     ].join('/');
   }
 

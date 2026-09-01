@@ -3,6 +3,9 @@ import java.io.FileInputStream
 
 plugins {
     id("com.android.application")
+    // Kotlin is compiled with the classic Kotlin Gradle plugin: Flutter < 3.47
+    // cannot use AGP 9's built-in Kotlin, so gradle.properties opts out with
+    // android.builtInKotlin=false and android.newDsl=false.
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
@@ -17,7 +20,12 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.zarz.spotiflac"
-    compileSdk = 35
+    // compileSdk 37: the current dependency set (androidx.core 1.18,
+    // activity 1.13, audioplayers_android, connectivity_plus, file_picker,
+    // receive_sharing_intent) requires compiling against API 37+.
+    // targetSdk stays 35 to avoid opting in to newer runtime behavior until
+    // the app is deliberately migrated.
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     buildFeatures {
@@ -28,12 +36,6 @@ android {
         isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    kotlin {
-        compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-        }
     }
 
     signingConfigs {
@@ -100,6 +102,13 @@ android {
     // splits that --split-per-abi enables and breaks the release build
     // ("conflicting configuration in ndk abiFilters cannot be present when
     //  splits abi filters are set").
+}
+
+// Kotlin compiler options for the classic Kotlin Gradle plugin (KGP 2.x DSL).
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
 }
 
 flutter {

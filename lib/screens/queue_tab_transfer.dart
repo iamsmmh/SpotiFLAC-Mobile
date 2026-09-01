@@ -7,11 +7,12 @@ Future<void> _shareQueueTransfer(
   BuildContext context,
   WidgetRef ref,
 ) async {
+  final messenger = ScaffoldMessenger.of(context);
   final items = ref.read(downloadQueueProvider).items
       .where((item) => item.status != DownloadStatus.completed)
       .toList(growable: false);
   if (items.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(
+    messenger.showSnackBar(
       const SnackBar(content: Text('Nothing to share — the queue is empty')),
     );
     return;
@@ -22,12 +23,12 @@ Future<void> _shareQueueTransfer(
       exportName: 'spotiflac-queue',
     );
     if (path == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         const SnackBar(content: Text('Nothing to share — the queue is empty')),
       );
     }
   } catch (e) {
-    ScaffoldMessenger.of(context).showSnackBar(
+    messenger.showSnackBar(
       SnackBar(content: Text('Could not share queue: $e')),
     );
   }
@@ -39,11 +40,12 @@ Future<void> _importQueueTransfer(
   BuildContext context,
   WidgetRef ref,
 ) async {
+  final messenger = ScaffoldMessenger.of(context);
   final opened = await QueueTransferService.pickAndImport();
   if (opened == null) return;
   final tracks = QueueTransferService.tracksFromItems(opened);
   if (tracks.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(
+    messenger.showSnackBar(
       const SnackBar(content: Text('No tracks found in this queue file')),
     );
     return;
@@ -52,7 +54,7 @@ Future<void> _importQueueTransfer(
     tracks,
     opened.first.service,
   );
-  ScaffoldMessenger.of(context).showSnackBar(
+  messenger.showSnackBar(
     SnackBar(
       content: Text('Imported ${tracks.length} track(s) into the queue'),
     ),

@@ -160,7 +160,7 @@ class AudioCharacteristics {
     if (codec != null) {
       final codecText = codec!.toUpperCase();
       if (bitDepth != null && sampleRateHz != null && bitDepth! > 0) {
-        return '$codecText ${bitDepth}-bit/${formatSampleRateKHz(sampleRateHz!)}';
+        return '$codecText $bitDepth-bit/${formatSampleRateKHz(sampleRateHz!)}';
       }
       if (bitrateKbps != null && bitrateKbps! > 0) return '$codecText ${bitrateKbps}kbps';
       if (lossless) return '$codecText Lossless';
@@ -175,10 +175,10 @@ class AudioCharacteristics {
   List<String> get detailLines {
     final lines = <String>[
       if (codec != null && codec!.trim().isNotEmpty) codec!.toUpperCase(),
-      if (bitDepth != null && bitDepth! > 0) '${bitDepth}-bit',
+      if (bitDepth != null && bitDepth! > 0) '$bitDepth-bit',
       if (sampleRateHz != null && sampleRateHz! > 0)
         formatSampleRateKHz(sampleRateHz!),
-      if (bitrateKbps != null && bitrateKbps! > 0) '${bitrateKbps} kbps',
+      if (bitrateKbps != null && bitrateKbps! > 0) '$bitrateKbps kbps',
       if (channels != null && channels! > 0) _channelsLabel(channels!),
       if (fileSizeBytes != null && fileSizeBytes! > 0)
         formatBytes(fileSizeBytes!),

@@ -1,3 +1,4 @@
+library;
 import 'dart:async';
 import 'dart:collection';
 import 'dart:math' as math;
@@ -13,7 +14,6 @@ import 'package:spotiflac_android/utils/string_utils.dart';
 /// [StreamDescriptor]s and decides what to do next; the Riverpod layer
 /// (streaming_engine_provider.dart) performs the actual HTTP/preflight work and
 /// feeds playback into the existing audio_service player.
-library;
 
 /// What a source is. [StreamSourceKind] drives both the ranking policy and the
 /// terms-of-use checks — protected commercial streams are never promoted to
@@ -35,6 +35,10 @@ enum StreamSourceKind {
 
 /// One candidate source for one logical track.
 class StreamDescriptor {
+  /// Sentinel used by [copyWith] to distinguish "not provided" from an
+  /// explicit null (which clears the field).
+  static const Object _unset = Object();
+
   final String id;
   final String providerId;
   final StreamSourceKind kind;
@@ -95,9 +99,9 @@ class StreamDescriptor {
     String? uri,
     AudioQualityLevel? quality,
     AudioCharacteristics? characteristics,
-    DateTime? expiresAt,
-    DateTime? validFrom,
-    int? latencyMs,
+    Object? expiresAt = _unset,
+    Object? validFrom = _unset,
+    Object? latencyMs = _unset,
     int? priority,
   }) => StreamDescriptor(
     id: id,
@@ -106,9 +110,12 @@ class StreamDescriptor {
     uri: uri ?? this.uri,
     quality: quality ?? this.quality,
     characteristics: characteristics ?? this.characteristics,
-    expiresAt: expiresAt ?? this.expiresAt,
-    validFrom: validFrom ?? this.validFrom,
-    latencyMs: latencyMs ?? this.latencyMs,
+    // Sentinel-based fields so nullable values can be explicitly cleared
+    // (e.g. a refreshed URL must drop the previous expiry/validFrom/latency
+    // instead of silently inheriting stale values).
+    expiresAt: identical(expiresAt, _unset) ? this.expiresAt : expiresAt as DateTime?,
+    validFrom: identical(validFrom, _unset) ? this.validFrom : validFrom as DateTime?,
+    latencyMs: identical(latencyMs, _unset) ? this.latencyMs : latencyMs as int?,
     requiresAuthorization: requiresAuthorization,
     cachePermitted: cachePermitted,
     priority: priority ?? this.priority,
@@ -207,8 +214,11 @@ class ProviderHealth {
     }
     final reliability = successRate;
     final recency = _recencyScore(lastCheckedAt);
+    // A provider that has never been measured is not penalized: like the
+    // other no-data dimensions it scores neutral (1.0), so a fresh provider
+    // ranks alongside perfectly-reliable ones until real measurements exist.
     final latency = lastLatencyMs == null
-        ? 0.5
+        ? 1.0
         : (1 - (lastLatencyMs! / 2000)).clamp(0.0, 1.0);
     return ((reliability * 0.55) + (recency * 0.20) + (latency * 0.25))
         .clamp(0.0, 1.0);
@@ -241,7 +251,11 @@ class ProviderHealth {
     return ProviderHealth(
       providerId: providerId,
       version: version ?? this.version,
-      online: consecutiveFailures < 5, // only permanently disable after 5 in a row
+      // Only permanently disable after 5 consecutive failures. `failures`
+      // already includes this call, so the 5th failure is the one that
+      // flips the provider offline (previously the pre-increment value was
+      // compared, delaying the switch by one failure).
+      online: failures < 5,
       successCount: successCount,
       failureCount: failureCount + 1,
       consecutiveFailures: failures,
@@ -428,9 +442,9 @@ class StreamSourceResolver {
 }
 
 /// Exponential backoff with full jitter (AWS-style), deterministic under an
-/// injected [Random] so tests can assert the sequence.
+/// injected [math.Random] so tests can assert the sequence.
 class BackoffScheduler {
-  final Random _random;
+  final math.Random _random;
   final Duration base;
   final Duration max;
   final double jitter;
@@ -439,7 +453,7 @@ class BackoffScheduler {
     this.base = const Duration(milliseconds: 750),
     this.max = const Duration(seconds: 30),
     this.jitter = 0.5,
-    Random? random,
+    math.Random? random,
   }) : _random = random ?? const _SecureRandom();
 
   Duration next(int attempt) {
@@ -449,13 +463,15 @@ class BackoffScheduler {
     final high = capMs;
     final span = math.max(1, high - low);
     final value = low + _random.nextInt(span + 1);
-    return Duration(milliseconds: value.clamp(1, max.inMilliseconds));
+    // `clamp` on int returns num; stay in int space with explicit bounds.
+    final bounded = math.max(1, math.min(value, max.inMilliseconds));
+    return Duration(milliseconds: bounded);
   }
 }
 
 /// Stateless PRNG suitable for tests (system randomness is injected elsewhere
 /// where a seeded sequence matters).
-class _SecureRandom implements Random {
+class _SecureRandom implements math.Random {
   const _SecureRandom();
 
   @override
@@ -844,7 +860,7 @@ class StreamIntegrityRecord {
     required String providerId,
     required String uri,
     required String category,
-    String message,
+    String message = '',
   }) => StreamIntegrityRecord(
     at: DateTime.now(),
     providerId: providerId,
@@ -932,12 +948,17 @@ enum PreloadJobState { pending, preflighting, ready, failed, skipped }
 ///
 /// Validation is a lightweight HEAD/GET-range check via the injected
 /// [StreamPreflightValidator]; it never decodes audio. Jobs are keyed by track
-/// id so repeated calls cannot duplicate work.
+/// id so repeated calls cannot duplicate work, and terminal jobs are pruned so
+/// the registry stays bounded for long queues.
 class StreamPreloader {
   final StreamPreflightValidator validator;
   final Map<String, PreloadJob> _jobs = {};
   final Map<String, bool> _ready = {};
   final EngineEventLog log;
+
+  /// Upper bound on tracked jobs; the oldest terminal jobs are pruned beyond
+  /// this so a long-lived queue cannot grow the registry without limit.
+  static const int _maxJobs = 128;
 
   StreamPreloader({
     required this.validator,
@@ -951,6 +972,9 @@ class StreamPreloader {
 
   bool isReady(String trackId) => _ready[trackId] == true;
 
+  /// Number of tracked jobs (diagnostics / tests). Bounded by [_maxJobs].
+  int get jobCount => _jobs.length;
+
   /// Plans preloads for [trackIds] in queue order. [resolver] can be omitted
   /// when the controller registered a resolver at construction time.
   Future<void> plan(
@@ -961,14 +985,42 @@ class StreamPreloader {
   }) async {
     final resolve = resolver ?? _sourceResolver;
     if (resolve == null) return;
+    _pruneTerminalJobs();
     for (final trackId in trackIds.take(window)) {
       if (skipIds?.contains(trackId) ?? false) continue;
       if (_jobs.containsKey(trackId)) continue;
       final source = resolve(trackId);
-      if (source == null || source.kind == StreamSourceKind.localFile) continue;
+      if (source.kind == StreamSourceKind.localFile) continue;
       final job = PreloadJob(trackId: trackId, source: source);
       _jobs[trackId] = job;
       unawaited(_run(job));
+    }
+  }
+
+  /// Drops jobs that reached a terminal state (ready/failed/skipped), keeping
+  /// the registry bounded for arbitrarily long queues. Pending and in-flight
+  /// jobs are preserved so a repeated plan call cannot duplicate work.
+  void _pruneTerminalJobs() {
+    if (_jobs.length <= _maxJobs) return;
+    final terminal = _jobs.entries
+        .where(
+          (entry) =>
+              entry.value.state == PreloadJobState.ready ||
+              entry.value.state == PreloadJobState.failed ||
+              entry.value.state == PreloadJobState.skipped,
+        )
+        .toList(growable: false);
+    for (final entry in terminal) {
+      if (_jobs.length <= _maxJobs) break;
+      _jobs.remove(entry.key);
+      _ready.remove(entry.key);
+    }
+    // Defensive bound: even if every job is in flight, never exceed the cap by
+    // more than the window that can be pending at once.
+    while (_jobs.length > _maxJobs + 8) {
+      final oldest = _jobs.keys.first;
+      _jobs.remove(oldest);
+      _ready.remove(oldest);
     }
   }
 
@@ -1133,12 +1185,27 @@ class StreamingSessionController {
     final selected = candidates.first;
     final shouldRefresh = refreshPolicy.shouldRefresh(selected, now: now);
     if (shouldRefresh) {
+      // The caller is expected to refresh the source URL and resolve again
+      // (see [StreamResolutionOutcome.needsUrlRefresh]); stay in the
+      // refreshingUrl phase until a refreshed source is handed back.
       _transition(
         _state.copyWith(
           phase: StreamPhase.refreshingUrl,
           active: selected,
           quality: selected.quality,
         ),
+      );
+      log.add(
+        EngineEvent.info(
+          'stream',
+          '${selected.providerId} URL needs refresh '
+          '(expires ${selected.expiresAt?.toIso8601String() ?? 'unknown'})',
+        ),
+      );
+      return StreamResolutionOutcome(
+        resolved: selected,
+        alternatives: candidates.skip(1).toList(growable: false),
+        needsUrlRefresh: true,
       );
     }
     _transition(
@@ -1151,6 +1218,21 @@ class StreamingSessionController {
     return StreamResolutionOutcome(
       resolved: selected,
       alternatives: candidates.skip(1).toList(growable: false),
+    );
+  }
+
+  /// Moves a [StreamPhase.refreshingUrl] session back to preflighting when the
+  /// caller decides to proceed with the current source (e.g. URL refresh is
+  /// disabled, or re-resolving produced no fresher candidate). No-op for any
+  /// other phase.
+  void proceedWithoutRefresh(StreamDescriptor source) {
+    if (_state.phase != StreamPhase.refreshingUrl) return;
+    _transition(
+      _state.copyWith(
+        phase: StreamPhase.preflighting,
+        active: source,
+        quality: source.quality,
+      ),
     );
   }
 
@@ -1246,10 +1328,17 @@ class StreamResolutionOutcome {
   final List<StreamDescriptor> alternatives;
   final StreamFailure? failure;
 
+  /// Whether the selected source's URL is near/at expiry and should be
+  /// re-fetched from the provider before playback. When true, the session
+  /// stays in [StreamPhase.refreshingUrl] until the caller resolves again
+  /// with a refreshed source.
+  final bool needsUrlRefresh;
+
   const StreamResolutionOutcome({
     required this.resolved,
     required this.alternatives,
     this.failure,
+    this.needsUrlRefresh = false,
   });
 
   bool get failed => resolved == null;
@@ -1261,10 +1350,10 @@ class StreamResolutionOutcome {
 extension StreamDescriptorText on StreamDescriptor {
   /// Short human label: "Provider · 320kbps".
   String get displayLabel {
-    final quality = characteristics.compactLabel.isNotEmpty
+    final qualityLabel = characteristics.compactLabel.isNotEmpty
         ? characteristics.compactLabel
         : quality.label;
-    return '$providerId · $quality';
+    return '$providerId · $qualityLabel';
   }
 
   String get safeUriLabel {

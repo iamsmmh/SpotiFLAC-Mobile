@@ -217,6 +217,21 @@ void main() {
       expect(health.successRate, closeTo(0.5, 0.001));
     });
 
+    test('permanently disables after 5 consecutive failures', () {
+      var health = ProviderHealth.initial('p1');
+      for (var i = 1; i <= 5; i++) {
+        health = health.recordFailure();
+        if (i < 5) {
+          // Backoff makes the provider unavailable, but it must stay *online*
+          // (eligible again after the window) until the 5th failure.
+          expect(health.online, isTrue, reason: 'failure #$i');
+        }
+      }
+      expect(health.online, isFalse, reason: '5 failures in a row');
+      expect(health.consecutiveFailures, 5);
+      expect(health.isAvailable, isFalse);
+    });
+
     test('successes restore reliability', () {
       final fresh = ProviderHealth.initial('p1');
       expect(fresh.score, 1.0);
@@ -231,6 +246,52 @@ void main() {
       expect(registry.healthOf('p1').failureCount, 1);
       registry.reset('p1');
       expect(registry.healthOf('p1').failureCount, 0);
+    });
+  });
+
+  group('StreamDescriptor.copyWith', () {
+    StreamDescriptor base() => StreamDescriptor(
+      id: 't1',
+      providerId: 'p',
+      kind: StreamSourceKind.httpStream,
+      uri: 'https://example.test/1',
+      expiresAt: DateTime.utc(2030),
+      validFrom: DateTime.utc(2026),
+      latencyMs: 42,
+      priority: 3,
+    );
+
+    test('omitted nullable fields keep their previous values', () {
+      final copy = base().copyWith(uri: 'https://example.test/2');
+      expect(copy.uri, 'https://example.test/2');
+      expect(copy.expiresAt, DateTime.utc(2030));
+      expect(copy.validFrom, DateTime.utc(2026));
+      expect(copy.latencyMs, 42);
+      expect(copy.priority, 3);
+    });
+
+    test('explicit null clears expiry, validFrom, and latency', () {
+      final copy = base().copyWith(
+        expiresAt: null,
+        validFrom: null,
+        latencyMs: null,
+      );
+      expect(copy.expiresAt, isNull);
+      expect(copy.validFrom, isNull);
+      expect(copy.latencyMs, isNull);
+      // Non-nullable fields still carry over.
+      expect(copy.priority, 3);
+      expect(copy.uri, 'https://example.test/1');
+    });
+
+    test('explicit values still replace existing ones', () {
+      final copy = base().copyWith(
+        expiresAt: DateTime.utc(2031),
+        latencyMs: 7,
+      );
+      expect(copy.expiresAt, DateTime.utc(2031));
+      expect(copy.validFrom, DateTime.utc(2026));
+      expect(copy.latencyMs, 7);
     });
   });
 
@@ -398,6 +459,53 @@ void main() {
         isNull,
       );
     });
+
+    test('near-expiry extension sources resolve with needsUrlRefresh', () {
+      final health = ProviderHealthRegistry();
+      final log = EngineEventLog();
+      final session = StreamingSessionController(
+        resolver: StreamSourceResolver(health: health),
+        health: health,
+        log: log,
+      );
+      final now = DateTime.utc(2026, 1, 1, 12);
+      final stale = StreamDescriptor(
+        id: 'stale',
+        providerId: 'p1',
+        kind: StreamSourceKind.extensionStream,
+        uri: 'https://example.test/stale',
+        expiresAt: now.add(const Duration(minutes: 2)), // inside lead time
+        validFrom: now.subtract(const Duration(minutes: 30)),
+      );
+      final outcome = session.resolve([stale], now: now);
+      expect(outcome.resolved?.id, 'stale');
+      expect(outcome.needsUrlRefresh, isTrue);
+      expect(session.state.phase, StreamPhase.refreshingUrl);
+    });
+
+    test('proceedWithoutRefresh moves a refreshing session to preflighting', () {
+      final health = ProviderHealthRegistry();
+      final log = EngineEventLog();
+      final session = StreamingSessionController(
+        resolver: StreamSourceResolver(health: health),
+        health: health,
+        log: log,
+      );
+      final now = DateTime.utc(2026, 1, 1, 12);
+      final stale = StreamDescriptor(
+        id: 'stale',
+        providerId: 'p1',
+        kind: StreamSourceKind.extensionStream,
+        uri: 'https://example.test/stale',
+        expiresAt: now.add(const Duration(minutes: 2)),
+        validFrom: now.subtract(const Duration(minutes: 30)),
+      );
+      session.resolve([stale], now: now);
+      expect(session.state.phase, StreamPhase.refreshingUrl);
+      session.proceedWithoutRefresh(stale);
+      expect(session.state.phase, StreamPhase.preflighting);
+      expect(session.state.active?.id, 'stale');
+    });
   });
 
   group('StreamUrlRefreshPolicy', () {
@@ -521,6 +629,25 @@ void main() {
         input(candidates: [stream('a')], mode: PlaybackModePreference.localOnly),
       );
       expect(decision.mode, SmartPlayMode.unavailable);
+    });
+
+    test('unavailable decisions carry a human-readable reason', () {
+      final decision = engine.decide(
+        input(candidates: [stream('a')], network: NetworkProfile.offline),
+      );
+      expect(decision.mode, SmartPlayMode.unavailable);
+      expect(decision.reason, isNotNull);
+      expect(decision.reason, isNotEmpty);
+      expect(decision.summary, contains(decision.reason!));
+      expect(decision.toJson()['reason'], decision.reason);
+    });
+
+    test('playable decisions have no reason', () {
+      final decision = engine.decide(input(localPath: '/music/a.flac'));
+      expect(decision.mode, SmartPlayMode.local);
+      expect(decision.reason, isNull);
+      expect(decision.summary, 'Local playback');
+      expect(decision.toJson().containsKey('reason'), isFalse);
     });
   });
 
@@ -723,6 +850,29 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(preloader.jobFor('t1')?.state, PreloadJobState.ready);
       expect(preloader.isReady('t1'), isTrue);
+    });
+
+    test('keeps the job registry bounded', () async {
+      final log = EngineEventLog();
+      final preloader = StreamPreloader(
+        validator: _OkValidator(),
+        log: log,
+      );
+      for (var i = 0; i < 300; i++) {
+        await preloader.plan(
+          ['track-$i'],
+          window: 1,
+          resolver: (id) => StreamDescriptor(
+            id: id,
+            providerId: 'p',
+            kind: StreamSourceKind.httpStream,
+            uri: 'https://example.test/$id',
+          ),
+        );
+      }
+      await Future<void>.delayed(Duration.zero);
+      // Completed jobs must be pruned; the registry stays bounded.
+      expect(preloader.jobCount, lessThanOrEqualTo(130));
     });
   });
 }

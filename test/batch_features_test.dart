@@ -46,6 +46,42 @@ void main() {
       expect(settings.endLabel, '07:00');
     });
 
+    test('nextOpenMoment is always in the future', () {
+      const dayWindow = DownloadScheduleSettings(
+        enabled: true,
+        startMinute: 9 * 60,
+        endMinute: 17 * 60,
+      );
+      // Inside the window: no resume moment.
+      expect(
+        dayWindow.nextOpenMoment(DateTime(2026, 9, 1, 12)),
+        isNull,
+      );
+      // Before the window opens: today at 09:00.
+      expect(
+        dayWindow.nextOpenMoment(DateTime(2026, 9, 1, 8)),
+        DateTime(2026, 9, 1, 9),
+      );
+      // After the window closed: *tomorrow* at 09:00, never a past moment.
+      expect(
+        dayWindow.nextOpenMoment(DateTime(2026, 9, 1, 18)),
+        DateTime(2026, 9, 2, 9),
+      );
+
+      const nightlyWindow = DownloadScheduleSettings(
+        enabled: true,
+        startMinute: 22 * 60,
+        endMinute: 7 * 60,
+      );
+      // After the nightly window ended this morning: tonight at 22:00.
+      expect(
+        nightlyWindow.nextOpenMoment(DateTime(2026, 9, 1, 12)),
+        DateTime(2026, 9, 1, 22),
+      );
+      // Mid-window: no resume moment.
+      expect(nightlyWindow.nextOpenMoment(DateTime(2026, 9, 1, 23)), isNull);
+    });
+
     test('legacy json roundtrips with defaults', () {
       const settings = DownloadScheduleSettings(
         enabled: true,

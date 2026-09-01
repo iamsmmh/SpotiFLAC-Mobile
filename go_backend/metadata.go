@@ -114,6 +114,11 @@ func encodeJPEGUnder(img stdimage.Image, quality, limit int) ([]byte, bool) {
 func downscaleImage(img stdimage.Image, maxDim int) stdimage.Image {
 	bounds := img.Bounds()
 	width, height := bounds.Dx(), bounds.Dy()
+	if width <= 0 || height <= 0 {
+		// A degenerate image cannot be scaled; return it unchanged so the
+		// caller's encoder decides whether it is usable.
+		return img
+	}
 	if width <= maxDim && height <= maxDim {
 		return img
 	}
