@@ -7,6 +7,7 @@ import 'package:spotiflac_android/providers/engine_settings_provider.dart';
 import 'package:spotiflac_android/providers/playback_statistics_provider.dart';
 import 'package:spotiflac_android/providers/streaming_engine_provider.dart';
 import 'package:spotiflac_android/screens/settings/listening_statistics_page.dart';
+import 'package:spotiflac_android/screens/settings/streaming_integrity_page.dart';
 import 'package:spotiflac_android/theme/app_tokens.dart';
 import 'package:spotiflac_android/widgets/app_sliver_header.dart';
 import 'package:spotiflac_android/widgets/liquid/liquid_glass.dart';
@@ -369,6 +370,19 @@ class _StreamingSettingsPageState
                 title: 'Engine status',
                 subtitle: diagnostics.summaryLine,
                 onTap: () => _showDiagnostics(context, diagnostics),
+              ),
+              SettingsItem(
+                icon: Icons.route_outlined,
+                title: 'Streaming integrity',
+                subtitle:
+                    '${diagnostics.integrityFailures} failures · '
+                    '${diagnostics.integritySuccesses} ok — per-URL reasons',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => const StreamingIntegrityPage(),
+                  ),
+                ),
               ),
               SettingsSwitchItem(
                 icon: Icons.terminal_outlined,

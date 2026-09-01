@@ -4,6 +4,16 @@
 
 ### Added
 
+- **Download scheduling**: allow downloads to run only inside a configurable
+  time window (Settings → Download → Download scheduling). The queue pauses
+  outside the window and resumes itself when the window reopens.
+- **Queue transfer**: Share the active download queue as a portable JSON file
+  and import it on another device from the Library/Queue header actions.
+- **Storage breakdown**: per-format / per-artist / per-album disk usage for
+  downloaded and local-library files (Settings → Files → Storage breakdown).
+- **Streaming integrity reporting**: per-source-url stream attempt records
+  (preflight successes, failures, fallbacks) with readable reasons, shown in
+  Settings → Streaming & Glass → Streaming integrity.
 - **Listening Statistics**: per-track plays/listened time recorded locally via
   a `PlaybackStatsObserver` in the audio handler, persisted in
   SharedPreferences, and surfaced in a new **Listening Statistics** page

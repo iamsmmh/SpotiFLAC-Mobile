@@ -33,7 +33,7 @@ becoming-noisy, route changes (unchanged and verified)
 🚀 Smart-Play "download & play" integration hooks (watch queue completion)
 
 ## 7. Smart download
-✅ Wi-Fi-only mode exists · 🧱 scheduling/charging hooks (settings model in place) · ⏳ provider failover download ranking (engine-side ranking reusable)
+✅ Wi-Fi-only mode exists · ✅ time-window download scheduling (pause/resume) · 🧱 charging hooks · ⏳ provider failover download ranking (engine-side ranking reusable)
 
 ## 8. Audio quality
 🚀 Auto/Low/Normal/High/Lossless/Hi-Res ladder + per-network profiles + `AudioCharacteristics`
@@ -116,10 +116,10 @@ provider-id map, duplicate merging — the "ONE TRACK" backbone
 ✅ resume/retry/partial cleanup/checksums (existing)
 
 ## 42–43. Diagnostics & logs
-🚀 Diagnostics Center section in Streaming & Glass settings (provider health, success rates, latency, event log)
+🚀 Diagnostics Center section in Streaming & Glass settings (provider health, success rates, latency, event log) · ✅ Streaming integrity (per-URL success/failure/fallback reasons)
 
 ## 44–45. Backup/restore & import/export
-✅ backup/restore, M3U/M3U8/JSON/CSV (existing)
+✅ backup/restore, M3U/M3U8/JSON/CSV (existing) · ✅ queue share/import (portable JSON)
 
 ## 46–47. Sharing & deep links
 ✅ share_plus, receive_sharing_intent, SongLink (existing) · ⏳ `spotiflac://` deep-link routes
@@ -151,7 +151,7 @@ provider-id map, duplicate merging — the "ONE TRACK" backbone
 
 ## 58–59. Storage & battery
 ✅ cache management, duplicate review (existing) · 🚀 visualizer battery mode, adaptive art resolution hints
-⏳ storage breakdown UI
+✅ storage breakdown UI (per-format/artist/album disk usage)
 
 ## 60. Quality assurance
 🚀 engine unit tests (identity, smart play, failover, refresh, savepoint, stats, preloader)

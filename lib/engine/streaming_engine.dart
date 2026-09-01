@@ -804,6 +804,106 @@ class EngineEvent {
   };
 }
 
+/// One recorded stream attempt used by the Streaming Integrity screen.
+///
+/// Unlike the general [EngineEventLog] (a short diagnostic message stream),
+/// integrity records are keyed and counted per source URL so the UI can answer
+/// "why did this source fail?" without hunting through log text.
+class StreamIntegrityRecord {
+  final DateTime at;
+  final String providerId;
+  final String uri;
+  final StreamIntegrityOutcome outcome;
+  final String? category;
+  final String message;
+
+  const StreamIntegrityRecord({
+    required this.at,
+    required this.providerId,
+    required this.uri,
+    required this.outcome,
+    this.category,
+    required this.message,
+  });
+
+  factory StreamIntegrityRecord.success({
+    required String providerId,
+    required String uri,
+    String? category,
+    String message = '',
+  }) => StreamIntegrityRecord(
+    at: DateTime.now(),
+    providerId: providerId,
+    uri: uri,
+    outcome: StreamIntegrityOutcome.success,
+    category: category,
+    message: message,
+  );
+
+  factory StreamIntegrityRecord.failure({
+    required String providerId,
+    required String uri,
+    required String category,
+    String message,
+  }) => StreamIntegrityRecord(
+    at: DateTime.now(),
+    providerId: providerId,
+    uri: uri,
+    outcome: StreamIntegrityOutcome.failure,
+    category: category,
+    message: message,
+  );
+
+  factory StreamIntegrityRecord.fallback({
+    required String providerId,
+    required String uri,
+    String? category,
+    String message = '',
+  }) => StreamIntegrityRecord(
+    at: DateTime.now(),
+    providerId: providerId,
+    uri: uri,
+    outcome: StreamIntegrityOutcome.fallback,
+    category: category,
+    message: message,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'at': at.toUtc().toIso8601String(),
+    'provider': providerId,
+    'uri': uri,
+    'outcome': outcome.name,
+    if (category != null) 'category': category,
+    'message': message,
+  };
+}
+
+enum StreamIntegrityOutcome { success, failure, fallback }
+
+/// Bounded log of [StreamIntegrityRecord]s (newest first).
+class StreamIntegrityLog {
+  final List<StreamIntegrityRecord> _records = [];
+  static const int _maxRecords = 128;
+
+  List<StreamIntegrityRecord> get records => List.unmodifiable(_records.reversed);
+
+  void add(StreamIntegrityRecord record) {
+    _records.add(record);
+    if (_records.length > _maxRecords) {
+      _records.removeAt(0);
+    }
+  }
+
+  int countOutcome(StreamIntegrityOutcome outcome) =>
+      _records.where((r) => r.outcome == outcome).length;
+
+  void clear() => _records.clear();
+
+  Map<String, dynamic> toJson() => {
+    'records': _records.reversed.map((r) => r.toJson()).toList(growable: false),
+  };
+}
+
 /// A planned preload: which next track, which source, and its current state.
 class PreloadJob {
   final String trackId;
@@ -916,12 +1016,14 @@ class StreamingDiagnostics {
   final EngineEventLog log;
   final StreamSessionState session;
   final BandwidthMonitor bandwidth;
+  final StreamIntegrityLog integrity;
 
   const StreamingDiagnostics({
     required this.health,
     required this.log,
     required this.session,
     required this.bandwidth,
+    required this.integrity,
   });
 
   int get failures =>
@@ -929,6 +1031,12 @@ class StreamingDiagnostics {
 
   int get successes =>
       health.snapshot().fold(0, (sum, h) => sum + h.successCount);
+
+  int get integrityFailures =>
+      integrity.countOutcome(StreamIntegrityOutcome.failure);
+
+  int get integritySuccesses =>
+      integrity.countOutcome(StreamIntegrityOutcome.success);
 
   /// Smoothed effective throughput estimate in bytes/sec, if available.
   int? get effectiveBandwidthBytesPerSecond => bandwidth.smoothedBytesPerSecond;
@@ -942,6 +1050,7 @@ class StreamingDiagnostics {
     'events': log.toJson(),
     'session': session.toJson(),
     'bandwidth': bandwidth.toJson(),
+    'integrity': integrity.toJson(),
   };
 
   /// Human-readable one-line summary for status chips.
@@ -953,7 +1062,10 @@ class StreamingDiagnostics {
         '$online/${providers.length} providers available · '
         '$successes ok · $failures failed';
     final bw = effectiveBandwidthLabel;
-    return bw == null ? base : '$base · ~$bw';
+    final integrityText = integrityFailures == 0
+        ? ''
+        : ' · $integrityFailures integrity failures';
+    return bw == null ? '$base$integrityText' : '$base · ~$bw$integrityText';
   }
 }
 

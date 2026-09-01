@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:spotiflac_android/app.dart';
 import 'package:spotiflac_android/models/settings.dart';
 import 'package:spotiflac_android/providers/download_queue_provider.dart';
+import 'package:spotiflac_android/providers/download_schedule_settings_provider.dart';
 import 'package:spotiflac_android/providers/engine_settings_provider.dart';
 import 'package:spotiflac_android/providers/extension_provider.dart';
 import 'package:spotiflac_android/providers/local_library_provider.dart';
@@ -333,6 +334,13 @@ class _EagerInitializationState extends ConsumerState<_EagerInitialization>
     unawaited(ref.read(engineSavepointProvider.notifier).load());
     unawaited(
       ref.read(streamingEngineControllerProvider).ensureFailureHook(),
+    );
+
+    // Download scheduling settings must be restored before the queue can
+    // decide whether a new download should wait behind a closed window.
+    unawaited(
+      SharedPreferences.getInstance()
+          .then(ref.read(downloadScheduleSettingsProvider.notifier).attach),
     );
 
     // Privacy-first listening statistics: restore stored stats and install

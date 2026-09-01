@@ -30,6 +30,37 @@ the remaining work)
   now shows "Effective bandwidth".
 - **Related**: `ROADMAP.md` §29 "live bandwidth sampling".
 
+### ✅ Download scheduling
+- **Status**: Implemented in
+  `lib/providers/download_schedule_settings_provider.dart` +
+  `lib/screens/settings/download_schedule_settings_page.dart` +
+  `lib/providers/download_queue_provider_schedule.dart` — a configurable local
+  time window pauses the queue outside it and resumes automatically when the
+  window reopens (supports nightly windows that cross midnight).
+- **Related**: `ROADMAP.md` §7 "scheduling/charging hooks" (time-window part).
+
+### ✅ Shared queue / cross-device export
+- **Status**: Implemented in
+  `lib/services/queue_transfer_service.dart` + queue header actions —
+  export the active queue as a portable JSON payload and import it on another
+  device.
+- **Related**: `ROADMAP.md` §44–45 "backup/restore & import/export".
+
+### ✅ Storage breakdown UI
+- **Status**: Implemented in
+  `lib/services/storage_breakdown_service.dart` +
+  `lib/screens/settings/storage_breakdown_page.dart` — disk usage aggregated
+  by format, artist and album for downloaded + local-library files.
+- **Related**: `ROADMAP.md` §58–59 "storage breakdown UI".
+
+### ✅ Streaming integrity reporting
+- **Status**: Implemented in
+  `lib/engine/streaming_engine.dart` (`StreamIntegrityLog`) +
+  `lib/providers/streaming_engine_provider.dart` +
+  `lib/screens/settings/streaming_integrity_page.dart` — per-URL stream
+  attempt records with success/failure/fallback outcomes and readable reasons.
+- **Related**: `ROADMAP.md` §42–43 "diagnostics & logs".
+
 ### 💡 Crossfade + loudness-normalization knobs
 - **Why**: ReplayGain/R128 already applies in the built-in player, but
   users have no crossfade or loudness-aggressiveness control.

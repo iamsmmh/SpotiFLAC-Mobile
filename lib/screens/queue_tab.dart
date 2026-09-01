@@ -35,6 +35,7 @@ import 'package:spotiflac_android/services/music_player_service.dart';
 import 'package:spotiflac_android/services/library_database.dart';
 import 'package:spotiflac_android/services/local_track_redownload_service.dart';
 import 'package:spotiflac_android/services/batch_track_actions.dart';
+import 'package:spotiflac_android/services/queue_transfer_service.dart';
 import 'package:spotiflac_android/services/batch_metadata_re_enrich.dart';
 import 'package:spotiflac_android/services/downloaded_embedded_cover_resolver.dart';
 import 'package:spotiflac_android/screens/track_metadata_screen.dart';
@@ -66,6 +67,7 @@ part 'queue_tab_collection_items.dart';
 part 'queue_tab_filter_widgets.dart';
 part 'queue_tab_batch_actions.dart';
 part 'queue_tab_item_widgets.dart';
+part 'queue_tab_transfer.dart';
 
 String _formatDownloadSizeMB(num bytes) => '${formatMegabytes(bytes)} MB';
 
@@ -1708,6 +1710,25 @@ class _QueueTabState extends ConsumerState<QueueTab> {
                           tooltip: isPaused
                               ? context.l10n.actionResume
                               : context.l10n.actionPause,
+                          color: colorScheme.onSurfaceVariant,
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        IconButton(
+                          onPressed: () =>
+                              _shareQueueTransfer(context, ref),
+                          icon: const Icon(Icons.ios_share_rounded, size: 20),
+                          tooltip: 'Share queue',
+                          color: colorScheme.onSurfaceVariant,
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        IconButton(
+                          onPressed: () =>
+                              _importQueueTransfer(context, ref),
+                          icon: const Icon(
+                            Icons.file_upload_outlined,
+                            size: 20,
+                          ),
+                          tooltip: 'Import queue',
                           color: colorScheme.onSurfaceVariant,
                           visualDensity: VisualDensity.compact,
                         ),
