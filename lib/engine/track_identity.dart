@@ -1,3 +1,4 @@
+library;
 import 'dart:math' as math;
 
 import 'package:spotiflac_android/models/track.dart';
@@ -11,7 +12,6 @@ import 'package:spotiflac_android/models/track.dart';
 /// scored by [TrackIdentityMatcher], so provider A's hit and provider B's hit
 /// for the same song collapse to one entry in the library, one download
 /// candidate list, and one streaming source ranking.
-library;
 
 /// Normalizes free-text metadata for matching.
 ///
@@ -217,8 +217,10 @@ class TrackIdentityInput {
   /// recording and are what the streaming/download providers key on when they
   /// expose them.
   String? get strongestId {
-    final isrc = TrackTextNormalizer.normalize(isrc);
-    if (isrc.isNotEmpty && isrc.length >= 8) return 'isrc:$isrc';
+    final normalizedIsrc = TrackTextNormalizer.normalize(isrc);
+    if (normalizedIsrc.isNotEmpty && normalizedIsrc.length >= 8) {
+      return 'isrc:$normalizedIsrc';
+    }
     return null;
   }
 }

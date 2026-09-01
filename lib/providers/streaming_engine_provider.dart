@@ -153,7 +153,8 @@ class NetworkStatusMonitor {
         ConnectivityResult.wifi || ConnectivityResult.ethernet ||
         ConnectivityResult.vpn => NetworkProfile.wifi,
         ConnectivityResult.mobile || ConnectivityResult.bluetooth ||
-        ConnectivityResult.other => NetworkProfile.mobile,
+        ConnectivityResult.other || ConnectivityResult.satellite =>
+            NetworkProfile.mobile,
         ConnectivityResult.none => NetworkProfile.offline,
       });
     } catch (_) {
@@ -285,7 +286,7 @@ class StreamingEngineController {
 
   ProviderHealthRegistry get providerHealth => health;
   EngineEventLog get eventLog => log;
-  StreamingSessionState get sessionState => _session.state;
+  StreamSessionState get sessionState => _session.state;
   StreamPreloader get preloader => _preloader;
   BandwidthMonitor get bandwidthMonitor => bandwidth;
   StreamIntegrityLog get integrityLog => integrity;
@@ -1029,7 +1030,7 @@ class SleepTimerNotifier extends Notifier<SleepTimerState> {
       final remaining = deadline.difference(DateTime.now());
       if (remaining <= Duration.zero) {
         stop();
-        _ref.read(musicPlayerControllerProvider).pause();
+        ref.read(musicPlayerControllerProvider).pause();
         return;
       }
       state = SleepTimerState(
@@ -1055,16 +1056,9 @@ class SleepTimerNotifier extends Notifier<SleepTimerState> {
 /// Provider wiring
 /// ---------------------------------------------------------------------------
 
-final streamingEngineControllerProvider =
-    Provider<StreamingEngineController>(_StreamingEngineControllerFactory.new);
-
-class _StreamingEngineControllerFactory {
-  const _StreamingEngineControllerFactory(this._ref);
-
-  final Ref _ref;
-
-  StreamingEngineController call() => StreamingEngineController._(_ref);
-}
+final streamingEngineControllerProvider = Provider<StreamingEngineController>(
+  (ref) => StreamingEngineController._(ref),
+);
 
 final engineDiagnosticsProvider = Provider<StreamingDiagnostics>(
   (ref) {

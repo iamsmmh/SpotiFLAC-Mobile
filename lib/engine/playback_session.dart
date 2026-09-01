@@ -1,3 +1,4 @@
+library;
 import 'dart:math' as math;
 
 /// Playback session state: queue, shuffle/repeat, transport savepoints, and
@@ -8,7 +9,6 @@ import 'dart:math' as math;
 /// *engine* dimensions the player does not know about — playback mode, quality
 /// level, provider, volume/rate/balance — plus honest recovery semantics:
 /// a savepoint restores paused, and the UI asks the user before resuming.
-library;
 
 enum SessionRepeatMode {
   none('Off'),
@@ -32,7 +32,14 @@ enum SessionRepeatMode {
       );
 }
 
-enum SessionShuffleMode { off('Off'), on('On') }
+enum SessionShuffleMode {
+  off('Off'),
+  on('On');
+
+  const SessionShuffleMode(this.label);
+
+  final String label;
+}
 
 /// One queue entry at engine level. Mirrors `PlayableMedia` but is
 /// engine-owned so the savepoint never depends on the audio player's schema.

@@ -1,3 +1,4 @@
+library;
 import 'dart:async';
 import 'dart:collection';
 import 'dart:math' as math;
@@ -13,7 +14,6 @@ import 'package:spotiflac_android/utils/string_utils.dart';
 /// [StreamDescriptor]s and decides what to do next; the Riverpod layer
 /// (streaming_engine_provider.dart) performs the actual HTTP/preflight work and
 /// feeds playback into the existing audio_service player.
-library;
 
 /// What a source is. [StreamSourceKind] drives both the ranking policy and the
 /// terms-of-use checks — protected commercial streams are never promoted to
@@ -439,9 +439,9 @@ class StreamSourceResolver {
 }
 
 /// Exponential backoff with full jitter (AWS-style), deterministic under an
-/// injected [Random] so tests can assert the sequence.
+/// injected [math.Random] so tests can assert the sequence.
 class BackoffScheduler {
-  final Random _random;
+  final math.Random _random;
   final Duration base;
   final Duration max;
   final double jitter;
@@ -450,7 +450,7 @@ class BackoffScheduler {
     this.base = const Duration(milliseconds: 750),
     this.max = const Duration(seconds: 30),
     this.jitter = 0.5,
-    Random? random,
+    math.Random? random,
   }) : _random = random ?? const _SecureRandom();
 
   Duration next(int attempt) {
@@ -460,13 +460,15 @@ class BackoffScheduler {
     final high = capMs;
     final span = math.max(1, high - low);
     final value = low + _random.nextInt(span + 1);
-    return Duration(milliseconds: value.clamp(1, max.inMilliseconds));
+    // `clamp` on int returns num; stay in int space with explicit bounds.
+    final bounded = math.max(1, math.min(value, max.inMilliseconds));
+    return Duration(milliseconds: bounded);
   }
 }
 
 /// Stateless PRNG suitable for tests (system randomness is injected elsewhere
 /// where a seeded sequence matters).
-class _SecureRandom implements Random {
+class _SecureRandom implements math.Random {
   const _SecureRandom();
 
   @override
@@ -855,7 +857,7 @@ class StreamIntegrityRecord {
     required String providerId,
     required String uri,
     required String category,
-    String message,
+    String message = '',
   }) => StreamIntegrityRecord(
     at: DateTime.now(),
     providerId: providerId,
@@ -985,7 +987,7 @@ class StreamPreloader {
       if (skipIds?.contains(trackId) ?? false) continue;
       if (_jobs.containsKey(trackId)) continue;
       final source = resolve(trackId);
-      if (source == null || source.kind == StreamSourceKind.localFile) continue;
+      if (source.kind == StreamSourceKind.localFile) continue;
       final job = PreloadJob(trackId: trackId, source: source);
       _jobs[trackId] = job;
       unawaited(_run(job));
@@ -1345,10 +1347,10 @@ class StreamResolutionOutcome {
 extension StreamDescriptorText on StreamDescriptor {
   /// Short human label: "Provider · 320kbps".
   String get displayLabel {
-    final quality = characteristics.compactLabel.isNotEmpty
+    final qualityLabel = characteristics.compactLabel.isNotEmpty
         ? characteristics.compactLabel
         : quality.label;
-    return '$providerId · $quality';
+    return '$providerId · $qualityLabel';
   }
 
   String get safeUriLabel {

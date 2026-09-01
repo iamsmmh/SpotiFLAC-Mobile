@@ -106,11 +106,13 @@ class MusicPlayerController {
   Future<void> setBalance(double balance) async =>
       _handler?.setBalance(balance);
 
-  Future<void> seekForward([Duration offset = const Duration(seconds: 15)]) =>
-      _handler?.seekRelative(offset);
+  Future<void> seekForward([Duration offset = const Duration(seconds: 15)]) async {
+    await _handler?.seekRelative(offset);
+  }
 
-  Future<void> seekBackward([Duration offset = const Duration(seconds: 15)]) =>
-      _handler?.seekRelative(-offset);
+  Future<void> seekBackward([Duration offset = const Duration(seconds: 15)]) async {
+    await _handler?.seekRelative(-offset);
+  }
 
   Future<void> replaceCurrentAndPlay(PlayableMedia item) async =>
       _handler?.replaceCurrentAndPlay(item);

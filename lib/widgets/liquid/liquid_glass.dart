@@ -1,3 +1,5 @@
+library;
+
 import 'dart:math' as math;
 import 'dart:ui' show ImageFilter;
 
@@ -20,7 +22,6 @@ import 'package:spotiflac_android/providers/runtime_profile_provider.dart';
 /// Every layer degrades independently: no blur support → stronger tinted body;
 /// reduced motion → sheen and pointer glow disabled; low-end devices → no
 /// backdrop filter at all. Widgets never crash on a device without blur.
-library;
 
 /// Immutable configuration for one glass surface.
 @immutable
@@ -590,7 +591,7 @@ class _AuroraPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final blob = (Offset center, double radius, Color color, double alphaLook) {
+    void blob(Offset center, double radius, Color color, double alphaLook) {
       final paint = Paint()
         ..shader = RadialGradient(
           colors: [
@@ -599,7 +600,7 @@ class _AuroraPainter extends CustomPainter {
           ],
         ).createShader(Rect.fromCircle(center: center, radius: radius));
       canvas.drawCircle(center, radius, paint);
-    };
+    }
 
     final driftX = math.sin(t * math.pi * 2) * size.width * 0.18;
     final driftY = math.cos(t * math.pi * 2) * size.height * 0.12;
@@ -740,6 +741,7 @@ class GlassIconButton extends StatelessWidget {
         child: IconButton(
           onPressed: onPressed,
           tooltip: tooltip,
+          icon: Icon(icon),
           padding: EdgeInsets.zero,
           iconSize: size * 0.46,
           color: prominent ? scheme.onPrimaryContainer : scheme.onSurface,

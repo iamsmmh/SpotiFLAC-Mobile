@@ -27,8 +27,6 @@ const String kLiquidNowPlayingArtworkHeroTag = 'liquid-now-playing-artwork';
 class LiquidNowPlayingRoute extends PageRoute<void> {
   LiquidNowPlayingRoute() : super(fullscreenDialog: true);
 
-  bool _dragging = false;
-
   @override
   Color? get barrierColor => null;
 
@@ -44,8 +42,19 @@ class LiquidNowPlayingRoute extends PageRoute<void> {
   @override
   Duration get reverseTransitionDuration => const Duration(milliseconds: 300);
 
+  @override
+  Widget buildPage(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+  ) =>
+      const LiquidPlayerScreen();
+
+  /// Exposes the (protected) [PageRoute] transition controller to the screen,
+  /// which drives the drag-to-dismiss gesture.
+  Animation<double>? get transitionAnimation => controller;
+
   void startDrag() {
-    _dragging = true;
     controller?.stop();
     changedInternalState();
   }
@@ -55,7 +64,6 @@ class LiquidNowPlayingRoute extends PageRoute<void> {
   }
 
   void endDrag(DragEndDetails details, double pageHeight) {
-    _dragging = false;
     changedInternalState();
     final velocity = (details.primaryVelocity ?? 0) / pageHeight;
     final value = controller?.value ?? 1.0;
@@ -67,7 +75,6 @@ class LiquidNowPlayingRoute extends PageRoute<void> {
   }
 
   void cancelDrag() {
-    _dragging = false;
     changedInternalState();
     controller?.fling();
   }
@@ -83,8 +90,6 @@ class LiquidPlayerScreen extends ConsumerStatefulWidget {
 class _LiquidPlayerScreenState extends ConsumerState<LiquidPlayerScreen>
     with SingleTickerProviderStateMixin {
   double? _dragPositionMs;
-  double _seekPreview = 0;
-
   LiquidNowPlayingRoute? get _route =>
       ModalRoute.of(context) as LiquidNowPlayingRoute?;
 
@@ -127,9 +132,10 @@ class _LiquidPlayerScreenState extends ConsumerState<LiquidPlayerScreen>
             _route?.endDrag(details, MediaQuery.sizeOf(context).height),
         onVerticalDragCancel: _route?.cancelDrag,
         child: AnimatedBuilder(
-          animation: _route?.controller ?? const AlwaysStoppedAnimation(1.0),
+          animation:
+              _route?.transitionAnimation ?? const AlwaysStoppedAnimation(1.0),
           builder: (context, child) {
-            final value = _route?.controller?.value ?? 1.0;
+            final value = _route?.transitionAnimation?.value ?? 1.0;
             return Opacity(
               opacity: value.clamp(0.0, 1.0),
               child: Transform.translate(
@@ -324,7 +330,6 @@ class _LiquidPlayerScreenState extends ConsumerState<LiquidPlayerScreen>
             value: progress,
             onChanged: (value) {
               setState(() {
-                _seekPreview = value;
                 _dragPositionMs = value * duration.inMilliseconds;
               });
             },
@@ -332,7 +337,6 @@ class _LiquidPlayerScreenState extends ConsumerState<LiquidPlayerScreen>
               final target = value * duration.inMilliseconds;
               setState(() {
                 _dragPositionMs = null;
-                _seekPreview = 0;
               });
               controller.seek(Duration(milliseconds: target.round()));
             },

@@ -1,5 +1,5 @@
-import 'package:spotiflac_android/providers/download_history_models.dart';
-import 'package:spotiflac_android/services/library_database_models.dart';
+import 'package:spotiflac_android/providers/download_history_provider.dart';
+import 'package:spotiflac_android/services/library_database.dart';
 import 'package:spotiflac_android/utils/file_access.dart';
 
 /// One aggregated storage bucket (by format, artist or album).

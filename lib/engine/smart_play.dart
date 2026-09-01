@@ -1,3 +1,4 @@
+library;
 import 'package:spotiflac_android/engine/audio_characteristics.dart';
 import 'package:spotiflac_android/engine/streaming_engine.dart';
 
@@ -16,7 +17,6 @@ import 'package:spotiflac_android/engine/streaming_engine.dart';
 /// "Playing from local — offline" or "Streaming Deezer FLAC" instead of an
 /// opaque spinner. The flow stays pure and testable; the Riverpod layer wires
 /// real sources into it.
-library;
 
 /// User-selected playback mode. `smart` follows the ladder automatically;
 /// the others lock it to one branch (used by "Play as" menus and by the

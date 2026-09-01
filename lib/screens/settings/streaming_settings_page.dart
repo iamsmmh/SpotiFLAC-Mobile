@@ -296,7 +296,7 @@ class _StreamingSettingsPageState
                 onChanged: notifier.setGlassUiEnabled,
               ),
               _GlassSliderItem(
-                icon: Icons.diffuse_outlined,
+                icon: Icons.blur_on_outlined,
                 title: 'Frost blur',
                 subtitle: 'Backdrop blur strength of glass surfaces',
                 value: settings.glassBlurSigma,
