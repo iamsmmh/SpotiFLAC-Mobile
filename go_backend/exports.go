@@ -16,6 +16,8 @@ var (
 // "en-US" or "id"), used as Accept-Language on metadata API requests so
 // providers localize names by the app language instead of IP geolocation.
 func SetMetadataLanguage(tag string) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	metadataLanguageMu.Lock()
 	metadataLanguageTag = strings.TrimSpace(tag)
 	metadataLanguageMu.Unlock()
@@ -36,6 +38,8 @@ func metadataAcceptLanguage() string {
 // when backgrounded, so the Go side's RSS doesn't sit at its high-water mark
 // after large downloads/tag writes.
 func ReleaseMemory() {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	releaseMemory(false)
 }
 
@@ -43,6 +47,8 @@ func ReleaseMemory() {
 // reserved for an OS memory-pressure signal; ordinary backgrounding keeps
 // network-backed caches warm.
 func ReleaseMemoryUnderPressure() {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	releaseMemory(true)
 }
 
@@ -60,12 +66,20 @@ func releaseMemory(underPressure bool) {
 
 // SetSongLinkNetworkOptions is kept for backward compatibility.
 func SetSongLinkNetworkOptions(allowHTTP, insecureTLS bool) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	SetNetworkCompatibilityOptions(allowHTTP, insecureTLS)
 }
 
 // GetTrackPlatformLinksJSON returns {"platforms": {platformID: url}} for a
 // track, resolved via song.link (memory-cached; either ID may be empty).
-func GetTrackPlatformLinksJSON(spotifyTrackID string, isrc string) (string, error) {
+func GetTrackPlatformLinksJSON(spotifyTrackID string, isrc string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	links, err := NewSongLinkClient().GetTrackPlatformLinks(spotifyTrackID, isrc)
 	if err != nil {
 		return "", err
@@ -73,30 +87,58 @@ func GetTrackPlatformLinksJSON(spotifyTrackID string, isrc string) (string, erro
 	return marshalJSONString(map[string]any{"platforms": links})
 }
 
-func SetDownloadDirectory(path string) error {
+func SetDownloadDirectory(path string) (bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	return setDownloadDir(path)
 }
 
 func AllowDownloadDir(path string) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	if strings.TrimSpace(path) == "" {
 		return
 	}
 	AddAllowedDownloadDir(path)
 }
 
-func CheckDuplicatesBatch(outputDir, tracksJSON string) (string, error) {
+func CheckDuplicatesBatch(outputDir, tracksJSON string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	return CheckFilesExistParallel(outputDir, tracksJSON)
 }
 
-func PreBuildDuplicateIndex(outputDir string) error {
+func PreBuildDuplicateIndex(outputDir string) (bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	return PreBuildISRCIndex(outputDir)
 }
 
 func InvalidateDuplicateIndex(outputDir string) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	InvalidateISRCCache(outputDir)
 }
 
-func BuildFilename(template string, metadataJSON string) (string, error) {
+func BuildFilename(template string, metadataJSON string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	var metadata map[string]any
 	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
 		return "", err
@@ -106,6 +148,8 @@ func BuildFilename(template string, metadataJSON string) (string, error) {
 	return filename, nil
 }
 
-func SanitizeFilename(filename string) string {
+func SanitizeFilename(filename string) (bridgeOut string) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	return sanitizeFilename(filename)
 }

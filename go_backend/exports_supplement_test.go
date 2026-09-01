@@ -208,6 +208,12 @@ func TestSearchTracksWithMetadataProviderUsesOnlySelectedExtension(t *testing.T)
 }
 
 func TestExportsJSONWrappersAndExtensionManagerSurface(t *testing.T) {
+	// This test cancels the fixed request id "req-home". Cancel state is
+	// process-global, so without a reset a second run in the same process
+	// (`go test -count=2`) starts with that id already cancelled.
+	resetCancelRegistriesForTest()
+	t.Cleanup(resetCancelRegistriesForTest)
+
 	dir := t.TempDir()
 	dataDir := filepath.Join(dir, "data")
 	extensionsDir := filepath.Join(dir, "extensions")

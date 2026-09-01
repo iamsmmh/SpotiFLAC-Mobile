@@ -58,7 +58,13 @@ func clearExtensionHealthCache() {
 	extensionHealthCacheMu.Unlock()
 }
 
-func CheckExtensionHealthJSON(extensionID string) (string, error) {
+func CheckExtensionHealthJSON(extensionID string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	manager := getExtensionManager()
 	ext, err := manager.GetExtension(extensionID)
 	if err != nil {

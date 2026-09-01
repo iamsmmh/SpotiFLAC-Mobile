@@ -210,8 +210,10 @@ Root causes addressed:
    + `build-tools;37.0.0`. This fork only installed API 35. Debug Kotlin
    compile only needs `android.jar` (often cached/auto-downloaded); release
    packaging needs the full platform + matching build-tools.
-   **Fix:** `scripts/install_android_sdk.sh` tries `android-37.0` then
-   `android-37`, plus 36/35 and build-tools 37/36/35.
+   **Fix:** `.github/scripts/setup-android-sdk.sh` tries `android-37.0` then
+   `android-37`, plus 36/35 and build-tools 37/36/35, and exports the
+   resolved level as `ANDROID_COMPILE_SDK` (consumed by
+   `android/app/build.gradle.kts`) together with `ANDROID_NDK_HOME`.
 3. **Duplicate `libc++_shared.so`.** FFmpeg Kit full + gomobile + audio
    plugins each ship the NDK C++ runtime. `mergeReleaseNativeLibs` fails
    after compilation with "2 files found with path ...".

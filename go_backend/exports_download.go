@@ -460,14 +460,20 @@ func GetAllDownloadProgressDelta(sinceSeq int64) (resp string) {
 }
 
 func InitItemProgress(itemID string) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	StartItemProgress(itemID)
 }
 
 func ClearItemProgress(itemID string) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	RemoveItemProgress(itemID)
 }
 
 func CancelDownload(itemID string) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	cancelDownload(itemID)
 }
 
@@ -475,10 +481,14 @@ func CancelDownload(itemID string) {
 // with no active download, so a user-initiated retry does not consume a stale
 // cancel and abort instantly. Entries with live references are left alone.
 func ResetDownloadCancel(itemID string) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	resetDownloadCancel(itemID)
 }
 
 func CleanupConnections() {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	CloseIdleConnections()
 }
 

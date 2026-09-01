@@ -26,7 +26,13 @@ type goRuntimeMetrics struct {
 
 // GetRuntimeMetricsJSON reports Go-owned runtime memory. Native allocations
 // from Flutter, FFmpeg, SQLite, and the OS are intentionally outside it.
-func GetRuntimeMetricsJSON() string {
+func GetRuntimeMetricsJSON() (bridgeOut string) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeOut = bridgePanicJSON(r)
+		}
+	}()
+
 	var stats runtime.MemStats
 	runtime.ReadMemStats(&stats)
 	metrics := goRuntimeMetrics{

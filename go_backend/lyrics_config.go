@@ -70,6 +70,8 @@ var (
 )
 
 func SetAppVersion(version string) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	normalized := strings.TrimSpace(version)
 
 	appVersionMu.Lock()

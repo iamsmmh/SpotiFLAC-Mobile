@@ -1,6 +1,8 @@
 package gobackend
 
 func SetLibraryCoverCacheDirJSON(cacheDir string) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	SetLibraryCoverCacheDir(cacheDir)
 }
 

@@ -243,7 +243,13 @@ func firstNonEmptyTrimmed(values ...string) string {
 	return ""
 }
 
-func GetProviderMetadataJSON(providerID, resourceType, resourceID string) (string, error) {
+func GetProviderMetadataJSON(providerID, resourceType, resourceID string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	trimmedProviderID := strings.TrimSpace(providerID)
 	if trimmedProviderID == "" {
 		return "", fmt.Errorf("empty provider ID")
@@ -281,7 +287,13 @@ func getEnabledExtensionProviderMetadataResponse(providerID, resourceType, resou
 	return response, true, nil
 }
 
-func InitExtensionSystem(extensionsDir, dataDir string) error {
+func InitExtensionSystem(extensionsDir, dataDir string) (bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	manager := getExtensionManager()
 	if err := manager.SetDirectories(extensionsDir, dataDir); err != nil {
 		return err
@@ -295,7 +307,13 @@ func InitExtensionSystem(extensionsDir, dataDir string) error {
 	return nil
 }
 
-func LoadExtensionsFromDir(dirPath string) (string, error) {
+func LoadExtensionsFromDir(dirPath string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	manager := getExtensionManager()
 	loaded, errors := manager.LoadExtensionsFromDirectory(dirPath)
 
@@ -311,7 +329,13 @@ func LoadExtensionsFromDir(dirPath string) (string, error) {
 	return marshalJSONString(result)
 }
 
-func LoadExtensionFromPath(filePath string) (string, error) {
+func LoadExtensionFromPath(filePath string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	manager := getExtensionManager()
 	ext, err := manager.LoadExtensionFromFile(filePath)
 	if err != nil {
@@ -329,17 +353,35 @@ func LoadExtensionFromPath(filePath string) (string, error) {
 	return marshalJSONString(result)
 }
 
-func UnloadExtensionByID(extensionID string) error {
+func UnloadExtensionByID(extensionID string) (bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	manager := getExtensionManager()
 	return manager.UnloadExtension(extensionID)
 }
 
-func RemoveExtensionByID(extensionID string) error {
+func RemoveExtensionByID(extensionID string) (bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	manager := getExtensionManager()
 	return manager.RemoveExtension(extensionID)
 }
 
-func UpgradeExtensionFromPath(filePath string) (string, error) {
+func UpgradeExtensionFromPath(filePath string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	manager := getExtensionManager()
 	ext, err := manager.UpgradeExtension(filePath)
 	if err != nil {
@@ -356,22 +398,46 @@ func UpgradeExtensionFromPath(filePath string) (string, error) {
 	return marshalJSONString(result)
 }
 
-func CheckExtensionUpgradeFromPath(filePath string) (string, error) {
+func CheckExtensionUpgradeFromPath(filePath string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	manager := getExtensionManager()
 	return manager.CheckExtensionUpgradeJSON(filePath)
 }
 
-func GetInstalledExtensions() (string, error) {
+func GetInstalledExtensions() (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	manager := getExtensionManager()
 	return manager.GetInstalledExtensionsJSON()
 }
 
-func SetExtensionEnabledByID(extensionID string, enabled bool) error {
+func SetExtensionEnabledByID(extensionID string, enabled bool) (bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	manager := getExtensionManager()
 	return manager.SetExtensionEnabled(extensionID, enabled)
 }
 
-func SetProviderPriorityJSON(priorityJSON string) error {
+func SetProviderPriorityJSON(priorityJSON string) (bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	var priority []string
 	if err := json.Unmarshal([]byte(priorityJSON), &priority); err != nil {
 		return err
@@ -381,12 +447,24 @@ func SetProviderPriorityJSON(priorityJSON string) error {
 	return nil
 }
 
-func GetProviderPriorityJSON() (string, error) {
+func GetProviderPriorityJSON() (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	priority := GetProviderPriority()
 	return marshalJSONString(priority)
 }
 
-func SetExtensionFallbackProviderIDsJSON(providerIDsJSON string) error {
+func SetExtensionFallbackProviderIDsJSON(providerIDsJSON string) (bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	if strings.TrimSpace(providerIDsJSON) == "" {
 		SetExtensionFallbackProviderIDs(nil)
 		return nil
@@ -401,7 +479,13 @@ func SetExtensionFallbackProviderIDsJSON(providerIDsJSON string) error {
 	return nil
 }
 
-func SetMetadataProviderPriorityJSON(priorityJSON string) error {
+func SetMetadataProviderPriorityJSON(priorityJSON string) (bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	var priority []string
 	if err := json.Unmarshal([]byte(priorityJSON), &priority); err != nil {
 		return err
@@ -411,19 +495,37 @@ func SetMetadataProviderPriorityJSON(priorityJSON string) error {
 	return nil
 }
 
-func GetMetadataProviderPriorityJSON() (string, error) {
+func GetMetadataProviderPriorityJSON() (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	priority := GetMetadataProviderPriority()
 	return marshalJSONString(priority)
 }
 
-func GetExtensionSettingsJSON(extensionID string) (string, error) {
+func GetExtensionSettingsJSON(extensionID string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	store := GetExtensionSettingsStore()
 	settings := store.GetAll(extensionID)
 
 	return marshalJSONString(settings)
 }
 
-func SetExtensionSettingsJSON(extensionID, settingsJSON string) error {
+func SetExtensionSettingsJSON(extensionID, settingsJSON string) (bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	var settings map[string]any
 	if err := json.Unmarshal([]byte(settingsJSON), &settings); err != nil {
 		return err
@@ -438,7 +540,13 @@ func SetExtensionSettingsJSON(extensionID, settingsJSON string) error {
 	return manager.InitializeExtension(extensionID, settings)
 }
 
-func SearchTracksWithMetadataProvidersJSON(query string, limit int, includeExtensions bool) (string, error) {
+func SearchTracksWithMetadataProvidersJSON(query string, limit int, includeExtensions bool) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	manager := getExtensionManager()
 	tracks, err := manager.SearchTracksWithMetadataProviders(query, limit, includeExtensions)
 	if err != nil {
@@ -448,7 +556,13 @@ func SearchTracksWithMetadataProvidersJSON(query string, limit int, includeExten
 	return marshalJSONString(tracks)
 }
 
-func SearchTracksWithMetadataProviderJSON(providerID, query string, limit int) (string, error) {
+func SearchTracksWithMetadataProviderJSON(providerID, query string, limit int) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	manager := getExtensionManager()
 	tracks, err := manager.SearchTracksWithMetadataProvider(providerID, query, limit)
 	if err != nil {
@@ -580,11 +694,19 @@ func DownloadWithExtensionsJSON(requestJSON string) (resp string, err error) {
 }
 
 func CleanupExtensions() {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	manager := getExtensionManager()
 	manager.UnloadAllExtensions()
 }
 
-func InvokeExtensionActionJSON(extensionID, actionName string) (string, error) {
+func InvokeExtensionActionJSON(extensionID, actionName string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	manager := getExtensionManager()
 	result, err := manager.InvokeAction(extensionID, actionName)
 	if err != nil {
@@ -594,7 +716,13 @@ func InvokeExtensionActionJSON(extensionID, actionName string) (string, error) {
 	return marshalJSONString(result)
 }
 
-func GetExtensionPendingAuthJSON(extensionID string) (string, error) {
+func GetExtensionPendingAuthJSON(extensionID string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	req, err := ensureExtensionPendingAuthRequest(extensionID)
 	if err != nil {
 		return "", err
@@ -652,14 +780,20 @@ func ensureExtensionPendingAuthRequest(extensionID string) (*PendingAuthRequest,
 }
 
 func SetExtensionAuthCodeByID(extensionID, authCode string) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	SetExtensionAuthCode(extensionID, authCode)
 }
 
 func SetExtensionSessionGrantByID(extensionID, grant string) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	setPendingSignedSessionGrant(extensionID, grant)
 }
 
 func SetExtensionTokensByID(extensionID, accessToken, refreshToken string, expiresIn int) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	var expiresAt time.Time
 	if expiresIn > 0 {
 		expiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second)
@@ -668,10 +802,14 @@ func SetExtensionTokensByID(extensionID, accessToken, refreshToken string, expir
 }
 
 func ClearExtensionPendingAuthByID(extensionID string) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	ClearPendingAuthRequest(extensionID)
 }
 
-func IsExtensionAuthenticatedByID(extensionID string) bool {
+func IsExtensionAuthenticatedByID(extensionID string) (bridgeRet0 bool) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	extensionAuthStateMu.RLock()
 	defer extensionAuthStateMu.RUnlock()
 
@@ -687,7 +825,13 @@ func IsExtensionAuthenticatedByID(extensionID string) bool {
 	return state.IsAuthenticated
 }
 
-func GetAllPendingAuthRequestsJSON() (string, error) {
+func GetAllPendingAuthRequestsJSON() (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	pendingAuthRequestsMu.RLock()
 	defer pendingAuthRequestsMu.RUnlock()
 
@@ -703,7 +847,13 @@ func GetAllPendingAuthRequestsJSON() (string, error) {
 	return marshalJSONString(requests)
 }
 
-func GetPendingFFmpegCommandJSON(commandID string) (string, error) {
+func GetPendingFFmpegCommandJSON(commandID string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	cmd := GetPendingFFmpegCommand(commandID)
 	if cmd == nil {
 		return "", nil
@@ -721,10 +871,18 @@ func GetPendingFFmpegCommandJSON(commandID string) (string, error) {
 }
 
 func SetFFmpegCommandResultByID(commandID string, success bool, output, errorMsg string) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	SetFFmpegCommandResult(commandID, success, output, errorMsg)
 }
 
-func GetAllPendingFFmpegCommandsJSON() (string, error) {
+func GetAllPendingFFmpegCommandsJSON() (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	ffmpegCommandsMu.RLock()
 	defer ffmpegCommandsMu.RUnlock()
 
@@ -742,7 +900,13 @@ func GetAllPendingFFmpegCommandsJSON() (string, error) {
 	return marshalJSONString(commands)
 }
 
-func EnrichTrackWithExtensionJSON(extensionID, trackJSON string) (string, error) {
+func EnrichTrackWithExtensionJSON(extensionID, trackJSON string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	manager := getExtensionManager()
 	ext, err := manager.GetExtension(extensionID)
 	if err != nil {
@@ -772,11 +936,23 @@ func EnrichTrackWithExtensionJSON(extensionID, trackJSON string) (string, error)
 	return string(jsonBytes), nil
 }
 
-func CustomSearchWithExtensionJSON(extensionID, query string, optionsJSON string) (string, error) {
+func CustomSearchWithExtensionJSON(extensionID, query string, optionsJSON string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	return CustomSearchWithExtensionJSONWithRequestID(extensionID, query, optionsJSON, "")
 }
 
-func CustomSearchWithExtensionJSONWithRequestID(extensionID, query string, optionsJSON string, requestID string) (string, error) {
+func CustomSearchWithExtensionJSONWithRequestID(extensionID, query string, optionsJSON string, requestID string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	manager := getExtensionManager()
 	ext, err := manager.GetExtension(extensionID)
 	if err != nil {
@@ -808,7 +984,13 @@ func CustomSearchWithExtensionJSONWithRequestID(extensionID, query string, optio
 	return marshalJSONString(result)
 }
 
-func HandleURLWithExtensionJSON(url string) (string, error) {
+func HandleURLWithExtensionJSON(url string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	manager := getExtensionManager()
 	resultWithID, err := manager.HandleURLWithExtension(url)
 	if err != nil {
@@ -929,7 +1111,13 @@ func HandleURLWithExtensionJSON(url string) (string, error) {
 	return marshalJSONString(response)
 }
 
-func FindURLHandlerJSON(url string) string {
+func FindURLHandlerJSON(url string) (bridgeOut string) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeOut = bridgePanicJSON(r)
+		}
+	}()
+
 	manager := getExtensionManager()
 	handler := manager.FindURLHandler(url)
 	if handler == nil {
@@ -1041,14 +1229,28 @@ func callExtensionFunctionJSONWithRequestID(extensionID, functionName string, ti
 	return string(jsonBytes), nil
 }
 
-func GetExtensionHomeFeedJSON(extensionID string) (string, error) {
+func GetExtensionHomeFeedJSON(extensionID string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	return callExtensionFunctionJSON(extensionID, "getHomeFeed", 60*time.Second)
 }
 
-func GetExtensionHomeFeedJSONWithRequestID(extensionID, requestID string) (string, error) {
+func GetExtensionHomeFeedJSONWithRequestID(extensionID, requestID string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	return callExtensionFunctionJSONWithRequestID(extensionID, "getHomeFeed", 60*time.Second, requestID)
 }
 
 func CancelExtensionRequestJSON(requestID string) {
+	defer func() { _ = recoverBridgePanic(recover()) }()
+
 	cancelExtensionRequest(requestID)
 }

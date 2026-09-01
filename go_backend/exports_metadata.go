@@ -265,7 +265,13 @@ func ParseCueSheet(cuePath string, audioDir string) (resp string, err error) {
 //   - audioDir overrides where the referenced audio file is resolved
 //   - virtualPathPrefix replaces cuePath in filePath / id fields (e.g. a content:// URI)
 //   - fileModTime is stamped on every result (pass 0 to stat cuePath instead)
-func ScanCueSheetForLibrary(cuePath, audioDir, virtualPathPrefix string, fileModTime int64) (string, error) {
+func ScanCueSheetForLibrary(cuePath, audioDir, virtualPathPrefix string, fileModTime int64) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	scanTime := time.Now().UTC().Format(time.RFC3339)
 	results, err := ScanCueFileForLibraryExt(cuePath, audioDir, virtualPathPrefix, fileModTime, scanTime)
 	if err != nil {
@@ -278,7 +284,13 @@ func ScanCueSheetForLibrary(cuePath, audioDir, virtualPathPrefix string, fileMod
 	return string(jsonBytes), nil
 }
 
-func ScanCueSheetForLibraryWithCoverCacheKey(cuePath, audioDir, virtualPathPrefix string, fileModTime int64, coverCacheKey string) (string, error) {
+func ScanCueSheetForLibraryWithCoverCacheKey(cuePath, audioDir, virtualPathPrefix string, fileModTime int64, coverCacheKey string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	scanTime := time.Now().UTC().Format(time.RFC3339)
 	results, err := ScanCueFileForLibraryExtWithCoverCacheKey(
 		cuePath,
@@ -302,7 +314,13 @@ func ScanCueSheetForLibraryWithCoverCacheKey(cuePath, audioDir, virtualPathPrefi
 // freeform atoms. FFmpeg's MP4 muxer ignores these keys, so they must be
 // written natively after the FFmpeg metadata pass for the values to persist.
 // Only keys present in the JSON are touched; an empty value clears the tag.
-func WriteM4AFreeformTags(filePath, metadataJSON string) (string, error) {
+func WriteM4AFreeformTags(filePath, metadataJSON string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	var fields map[string]string
 	if err := json.Unmarshal([]byte(metadataJSON), &fields); err != nil {
 		return "", fmt.Errorf("invalid metadata JSON: %w", err)
@@ -318,7 +336,13 @@ func WriteM4AFreeformTags(filePath, metadataJSON string) (string, error) {
 // EnsureAC4Config normalizes a decrypted AC-4 file to a standards-compliant ISO
 // MP4 and injects the dac4 configuration box copied from sourcePath. No-op when
 // the file is not AC-4.
-func EnsureAC4Config(filePath, sourcePath string) (string, error) {
+func EnsureAC4Config(filePath, sourcePath string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	if err := EnsureAC4ConfigBox(filePath, sourcePath); err != nil {
 		return "", fmt.Errorf("failed to finalize AC-4 container: %w", err)
 	}
@@ -328,7 +352,13 @@ func EnsureAC4Config(filePath, sourcePath string) (string, error) {
 // WriteAC4Metadata writes iTunes-style metadata into an AC-4 MP4. The JSON
 // "handled" field reports whether the file was AC-4 (true) so the caller can
 // skip the FFmpeg metadata pass that would re-wrap it as QuickTime.
-func WriteAC4Metadata(filePath, metadataJSON, coverPath string) (string, error) {
+func WriteAC4Metadata(filePath, metadataJSON, coverPath string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	handled, err := WriteAC4MetadataIfApplicable(filePath, metadataJSON, coverPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to write AC-4 metadata: %w", err)
@@ -530,7 +560,13 @@ func hasOnlyM4AReplayGainFields(fields map[string]string) bool {
 // comments in a FLAC file as multiple separate entries (one per artist).
 // Call this after FFmpeg metadata embedding to fix split artist tags,
 // since FFmpeg deduplicates -metadata keys and only keeps the last value.
-func RewriteSplitArtistTagsExport(filePath, artist, albumArtist string) (string, error) {
+func RewriteSplitArtistTagsExport(filePath, artist, albumArtist string) (bridgeOut string, bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	err := RewriteSplitArtistTags(filePath, artist, albumArtist)
 	if err != nil {
 		return errorResponse("Failed to rewrite artist tags: " + err.Error())
@@ -548,7 +584,13 @@ func RewriteSplitArtistTagsExport(filePath, artist, albumArtist string) (string,
 // The final bool is retained for gomobile ABI compatibility with existing
 // native shells. Resolution selection is extension-owned and the value is
 // intentionally ignored.
-func DownloadCoverToFile(coverURL string, outputPath string, _ bool) error {
+func DownloadCoverToFile(coverURL string, outputPath string, _ bool) (bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	if coverURL == "" {
 		return fmt.Errorf("no cover URL provided")
 	}
@@ -566,7 +608,13 @@ func DownloadCoverToFile(coverURL string, outputPath string, _ bool) error {
 	return nil
 }
 
-func ExtractCoverToFile(audioPath string, outputPath string) error {
+func ExtractCoverToFile(audioPath string, outputPath string) (bridgeErr error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			bridgeErr = r
+		}
+	}()
+
 	lower := strings.ToLower(audioPath)
 
 	var coverData []byte
