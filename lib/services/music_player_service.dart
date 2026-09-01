@@ -971,6 +971,9 @@ class MusicPlayerHandler extends BaseAudioHandler
       _broadcastPosition(effectiveStartPosition, force: true);
       _broadcastState(playerState: PlayerState.playing);
       _lastPeriodicPersistAt = DateTime.now();
+      if (recordHistory) {
+        playbackStatsObserver?.onStarted(media);
+      }
       unawaited(_persistSession(position: effectiveStartPosition));
       _log.i('Playing: ${media.title}');
       // Some files do not emit onDurationChanged reliably (stuck at 0:00);
@@ -1123,6 +1126,15 @@ class MusicPlayerHandler extends BaseAudioHandler
       return;
     }
 
+    final current = _index >= 0 && _index < _media.length
+        ? _media[_index]
+        : null;
+    if (current != null) {
+      // Non-blocking: duration may already be known from the media item or a
+      // duration-changed event; a missing value is simply skipped upstream.
+      playbackStatsObserver?.onCompleted(current, current.duration);
+    }
+
     await _onComplete();
   }
 
@@ -1231,11 +1243,20 @@ class MusicPlayerHandler extends BaseAudioHandler
 
   @override
   Future<void> skipToNext() async {
+    final current = _index >= 0 && _index < _media.length
+        ? _media[_index]
+        : null;
     if (_shuffle) {
-      if (_media.length > 1) await _playIndex(_pickNextShuffle());
+      if (_media.length > 1) {
+        if (current != null) playbackStatsObserver?.onSkip?.call(current);
+        await _playIndex(_pickNextShuffle());
+      }
       return;
     }
-    if (_index < _media.length - 1) await _playIndex(_index + 1);
+    if (_index < _media.length - 1) {
+      if (current != null) playbackStatsObserver?.onSkip?.call(current);
+      await _playIndex(_index + 1);
+    }
   }
 
   @override
@@ -1245,10 +1266,14 @@ class MusicPlayerHandler extends BaseAudioHandler
       _broadcastPosition(Duration.zero, force: true);
       return;
     }
+    final current = _index >= 0 && _index < _media.length
+        ? _media[_index]
+        : null;
     if (_shuffle) {
       if (_playHistory.length >= 2) {
         _playHistory.removeLast();
         final prev = _playHistory.last;
+        if (current != null) playbackStatsObserver?.onSkip?.call(current);
         await _playIndex(prev, recordHistory: false);
       } else {
         await _player.seek(Duration.zero);
@@ -1256,7 +1281,10 @@ class MusicPlayerHandler extends BaseAudioHandler
       }
       return;
     }
-    if (_index > 0) await _playIndex(_index - 1);
+    if (_index > 0) {
+      if (current != null) playbackStatsObserver?.onSkip?.call(current);
+      await _playIndex(_index - 1);
+    }
   }
 
   @override
@@ -1392,6 +1420,27 @@ PlaybackFailureListener? playbackFailureListener;
 
 void setPlaybackFailureListener(PlaybackFailureListener listener) {
   playbackFailureListener = listener;
+}
+
+/// Runtime observer for privacy-first listening statistics. The callback is
+/// installed by the statistics provider at app bootstrap; it is a plain
+/// function pointer so the audio handler never needs to know about Riverpod.
+class PlaybackStatsObserver {
+  final void Function(PlayableMedia media) onStarted;
+  final void Function(PlayableMedia media, Duration? listened) onCompleted;
+  final void Function(PlayableMedia media)? onSkip;
+
+  const PlaybackStatsObserver({
+    required this.onStarted,
+    required this.onCompleted,
+    this.onSkip,
+  });
+}
+
+PlaybackStatsObserver? playbackStatsObserver;
+
+void setPlaybackStatsObserver(PlaybackStatsObserver? observer) {
+  playbackStatsObserver = observer;
 }
 
 /// Flushes the current playback position if the player has been initialized.

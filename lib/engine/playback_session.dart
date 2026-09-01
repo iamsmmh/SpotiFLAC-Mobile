@@ -270,16 +270,98 @@ class PlaybackSavepoint {
   }
 }
 
+/// Identity of a track as observed by the player (used for per-track stats).
+class TrackPlayIdentity {
+  final String trackId;
+  final String title;
+  final String artist;
+  final String album;
+
+  const TrackPlayIdentity({
+    required this.trackId,
+    required this.title,
+    required this.artist,
+    this.album = '',
+  });
+}
+
+/// Per-track listening record. Local only — never leaves the device.
+class TrackPlayStat {
+  final String trackId;
+  final String title;
+  final String artist;
+  final String album;
+  final int playCount;
+  final int listenedMs;
+  final DateTime? lastPlayedAt;
+
+  const TrackPlayStat({
+    required this.trackId,
+    required this.title,
+    required this.artist,
+    this.album = '',
+    this.playCount = 0,
+    this.listenedMs = 0,
+    this.lastPlayedAt,
+  });
+
+  TrackPlayStat recordPlay(DateTime at) => TrackPlayStat(
+    trackId: trackId,
+    title: title,
+    artist: artist,
+    album: album,
+    playCount: playCount + 1,
+    listenedMs: listenedMs,
+    lastPlayedAt: at,
+  );
+
+  TrackPlayStat recordListen(Duration elapsed, DateTime at) =>
+      TrackPlayStat(
+        trackId: trackId,
+        title: title,
+        artist: artist,
+        album: album,
+        playCount: playCount,
+        listenedMs: listenedMs + elapsed.inMilliseconds,
+        lastPlayedAt: at,
+      );
+
+  Map<String, dynamic> toJson() => {
+    'track_id': trackId,
+    'title': title,
+    'artist': artist,
+    if (album.isNotEmpty) 'album': album,
+    'play_count': playCount,
+    'listened_ms': listenedMs,
+    if (lastPlayedAt != null)
+      'last_played_at': lastPlayedAt!.toUtc().toIso8601String(),
+  };
+
+  factory TrackPlayStat.fromJson(Map<String, dynamic> json) =>
+      TrackPlayStat(
+        trackId: json['track_id']?.toString() ?? '',
+        title: json['title']?.toString() ?? 'Unknown title',
+        artist: json['artist']?.toString() ?? 'Unknown artist',
+        album: json['album']?.toString() ?? '',
+        playCount: (json['play_count'] as num?)?.toInt() ?? 0,
+        listenedMs: (json['listened_ms'] as num?)?.toInt() ?? 0,
+        lastPlayedAt: DateTime.tryParse(json['last_played_at']?.toString() ?? ''),
+      );
+}
+
 /// Very small listening-statistics accumulator backed by the settings store.
 ///
 /// Privacy-first: never leaves the device, no account, no telemetry. The
-/// tracker records only anonymous counters and UTC day buckets.
+/// tracker records only anonymous counters, UTC day buckets, and lightweight
+/// per-track counts so the app can show Recently Played / Most Played without
+/// uploading anything.
 class ListeningStats {
   final int plays;
   final int skips;
   final int listenedMs;
   final Map<String, int> listenedMsPerDay;
   final Map<String, int> playsPerDay;
+  final Map<String, TrackPlayStat> trackStats;
   final DateTime? lastPlayedAt;
 
   const ListeningStats({
@@ -288,6 +370,7 @@ class ListeningStats {
     this.listenedMs = 0,
     this.listenedMsPerDay = const {},
     this.playsPerDay = const {},
+    this.trackStats = const {},
     this.lastPlayedAt,
   });
 
@@ -307,6 +390,7 @@ class ListeningStats {
       listenedMs: listenedMs,
       listenedMsPerDay: listenedMsPerDay,
       playsPerDay: _increment(playsPerDay, day),
+      trackStats: trackStats,
       lastPlayedAt: time,
     );
   }
@@ -317,6 +401,7 @@ class ListeningStats {
     listenedMs: listenedMs,
     listenedMsPerDay: listenedMsPerDay,
     playsPerDay: playsPerDay,
+    trackStats: trackStats,
     lastPlayedAt: lastPlayedAt,
   );
 
@@ -333,8 +418,89 @@ class ListeningStats {
         day,
       ),
       playsPerDay: playsPerDay,
+      trackStats: trackStats,
       lastPlayedAt: lastPlayedAt,
     );
+  }
+
+  /// Records a track start (increments both the total and the per-track count).
+  ListeningStats recordTrackPlay(
+    TrackPlayIdentity identity, {
+    DateTime? at,
+  }) {
+    final time = (at ?? DateTime.now()).toUtc();
+    final base = recordPlay(at: time);
+    final stat = _trackStat(identity).recordPlay(time);
+    return base.copyWithTrackStats(_upsertTrack(stat));
+  }
+
+  /// Records listened time for a specific track.
+  ListeningStats recordTrackListen(
+    TrackPlayIdentity identity,
+    Duration elapsed, {
+    DateTime? at,
+  }) {
+    if (elapsed <= Duration.zero) return this;
+    final time = (at ?? DateTime.now()).toUtc();
+    final base = recordListen(elapsed, at: time);
+    final stat = _trackStat(identity).recordListen(elapsed, time);
+    return base.copyWithTrackStats(_upsertTrack(stat));
+  }
+
+  TrackPlayStat _trackStat(TrackPlayIdentity identity) =>
+      trackStats[identity.trackId] ??
+      TrackPlayStat(
+        trackId: identity.trackId,
+        title: identity.title,
+        artist: identity.artist,
+        album: identity.album,
+      );
+
+  Map<String, TrackPlayStat> _upsertTrack(TrackPlayStat stat) {
+    final copy = Map<String, TrackPlayStat>.from(trackStats);
+    copy[stat.trackId] = stat;
+    return Map.unmodifiable(copy);
+  }
+
+  ListeningStats copyWithTrackStats(Map<String, TrackPlayStat> stats) =>
+      ListeningStats(
+        plays: plays,
+        skips: skips,
+        listenedMs: listenedMs,
+        listenedMsPerDay: listenedMsPerDay,
+        playsPerDay: playsPerDay,
+        trackStats: stats,
+        lastPlayedAt: lastPlayedAt,
+      );
+
+  /// Tracks ordered by most recently played (descending).
+  List<TrackPlayStat> get recentTracks {
+    final list = trackStats.values.toList(growable: false);
+    list.sort((a, b) {
+      final at = a.lastPlayedAt;
+      final bt = b.lastPlayedAt;
+      if (at == null && bt == null) return 0;
+      if (at == null) return 1;
+      if (bt == null) return -1;
+      return bt.compareTo(at);
+    });
+    return list;
+  }
+
+  /// Tracks ordered by play count (descending), then most recently played.
+  List<TrackPlayStat> get mostPlayedTracks {
+    final list = trackStats.values.toList(growable: false);
+    list.sort((a, b) {
+      final byCount = b.playCount.compareTo(a.playCount);
+      if (byCount != 0) return byCount;
+      final at = a.lastPlayedAt;
+      final bt = b.lastPlayedAt;
+      if (at == null && bt == null) return 0;
+      if (at == null) return 1;
+      if (bt == null) return -1;
+      return bt.compareTo(at);
+    });
+    return list;
   }
 
   static Map<String, int> _increment(Map<String, int> source, String day) {
@@ -377,6 +543,9 @@ class ListeningStats {
     'listened_ms': listenedMs,
     'listened_ms_per_day': listenedMsPerDay,
     'plays_per_day': playsPerDay,
+    'track_stats': trackStats.map(
+      (key, value) => MapEntry(key, value.toJson()),
+    ),
     if (lastPlayedAt != null)
       'last_played_at': lastPlayedAt!.toUtc().toIso8601String(),
   };
@@ -391,12 +560,25 @@ class ListeningStats {
       });
     }
 
+    Map<String, TrackPlayStat> readTracks() {
+      final raw = json['track_stats'];
+      if (raw is! Map) return const {};
+      return Map<String, TrackPlayStat>.unmodifiable({
+        for (final entry in raw.entries)
+          if (entry.value is Map)
+            entry.key: TrackPlayStat.fromJson(
+              Map<String, dynamic>.from(entry.value as Map),
+            ),
+      });
+    }
+
     return ListeningStats(
       plays: (json['plays'] as num?)?.toInt() ?? 0,
       skips: (json['skips'] as num?)?.toInt() ?? 0,
       listenedMs: (json['listened_ms'] as num?)?.toInt() ?? 0,
       listenedMsPerDay: readMap('listened_ms_per_day'),
       playsPerDay: readMap('plays_per_day'),
+      trackStats: readTracks(),
       lastPlayedAt: DateTime.tryParse(json['last_played_at']?.toString() ?? ''),
     );
   }

@@ -259,6 +259,7 @@ class StreamingEngineController {
 
   final ProviderHealthRegistry health = ProviderHealthRegistry();
   final EngineEventLog log = EngineEventLog();
+  final BandwidthMonitor bandwidth = BandwidthMonitor();
   late final StreamSourceResolver _resolver = StreamSourceResolver(
     health: health,
   );
@@ -285,6 +286,7 @@ class StreamingEngineController {
   EngineEventLog get eventLog => log;
   StreamingSessionState get sessionState => _session.state;
   StreamPreloader get preloader => _preloader;
+  BandwidthMonitor get bandwidthMonitor => bandwidth;
 
   /// The engine-owned track for a playing media id (used by "details" flows).
   Track? trackFor(String mediaId) => _trackByMediaId[mediaId];
@@ -570,6 +572,11 @@ class StreamingEngineController {
   ) async {
     final preflight = await _validator.validate(source);
     _network.noteLatency(preflight.latencyMs);
+    bandwidth.recordPreflight(
+      latencyMs: preflight.latencyMs,
+      contentLengthBytes: preflight.contentLengthBytes,
+      providerId: source.providerId,
+    );
     if (!preflight.ok) {
       health.recordFailure(source.providerId, latencyMs: preflight.latencyMs);
       log.add(
@@ -997,6 +1004,7 @@ final engineDiagnosticsProvider = Provider<StreamingDiagnostics>(
       health: engine.providerHealth,
       log: engine.eventLog,
       session: state,
+      bandwidth: engine.bandwidthMonitor,
     );
   },
 );

@@ -1,5 +1,26 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Listening Statistics**: per-track plays/listened time recorded locally via
+  a `PlaybackStatsObserver` in the audio handler, persisted in
+  SharedPreferences, and surfaced in a new **Listening Statistics** page
+  (Settings → Streaming & Glass) with Recently Played / Most Played, totals,
+  streak, and a confirmed reset action.
+- **History/privacy controls**: "Clear restore memory" now clears the engine
+  savepoint from Settings → Streaming & Glass, and listening statistics can be
+  reset from the new Listening Statistics page.
+- **Roaming quality profile**: Settings → Streaming & Glass now exposes an
+  editable per-network quality row for Roaming (alongside Wi-Fi / Mobile /
+  Poor).
+- **Live bandwidth sampling**: the streaming engine records bounded preflight
+  throughput samples (`BandwidthMonitor`) and shows an effective-bandwidth
+  estimate in the Diagnostics Center.
+
+---
+
 ## [4.9.1] - 2026-08-31
 
 ### Added — Streaming Engine & Liquid Glass

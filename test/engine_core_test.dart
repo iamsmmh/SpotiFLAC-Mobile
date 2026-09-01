@@ -637,6 +637,70 @@ void main() {
       expect(restored.listenedMs, stats.listenedMs);
       expect(restored.streakDays, stats.streakDays);
     });
+
+    test('tracks per-track plays and recent/most played ordering', () {
+      final identityA = const TrackPlayIdentity(
+        trackId: 'a',
+        title: 'Alpha',
+        artist: 'Artist',
+      );
+      final identityB = const TrackPlayIdentity(
+        trackId: 'b',
+        title: 'Beta',
+        artist: 'Artist',
+      );
+      final at = DateTime.utc(2026, 9, 1, 12);
+      final stats = ListeningStats.empty()
+          .recordTrackPlay(identityA, at: at)
+          .recordTrackPlay(identityB, at: at.add(const Duration(seconds: 5)))
+          .recordTrackPlay(identityA, at: at.add(const Duration(seconds: 10)))
+          .recordTrackListen(
+            identityA,
+            const Duration(minutes: 3),
+            at: at.add(const Duration(seconds: 12)),
+          );
+      expect(stats.trackStats['a']?.playCount, 2);
+      expect(stats.trackStats['b']?.playCount, 1);
+      expect(stats.recentTracks.first.trackId, 'a');
+      expect(stats.mostPlayedTracks.first.trackId, 'a');
+      expect(stats.mostPlayedTracks.first.listenedMs, 180000);
+    });
+
+    test('track stats json roundtrip', () {
+      final identity = const TrackPlayIdentity(
+        trackId: 'a',
+        title: 'Alpha',
+        artist: 'Artist',
+        album: 'Album',
+      );
+      final stats = ListeningStats.empty().recordTrackPlay(identity);
+      final restored = ListeningStats.fromJson(stats.toJson());
+      expect(restored.trackStats['a']?.playCount, 1);
+      expect(restored.trackStats['a']?.title, 'Alpha');
+    });
+  });
+
+  group('BandwidthMonitor', () {
+    test('computes effective throughput from preflight metadata', () {
+      final monitor = BandwidthMonitor();
+      monitor.recordPreflight(
+        latencyMs: 100,
+        contentLengthBytes: 128000,
+        providerId: 'preview',
+      );
+      // 128000 bytes over 0.1s = 1,280,000 B/s ≈ 10.24 Mbps.
+      expect(monitor.latestBytesPerSecond, 1280000);
+      expect(monitor.smoothedBytesPerSecond, 1280000);
+      expect(formatBandwidth(monitor.smoothedBytesPerSecond), '10.2 Mbps');
+    });
+
+    test('median smooths a single noisy sample', () {
+      final monitor = BandwidthMonitor();
+      monitor.recordPreflight(latencyMs: 200, contentLengthBytes: 2000);
+      monitor.recordPreflight(latencyMs: 200, contentLengthBytes: 4000);
+      monitor.recordPreflight(latencyMs: 200, contentLengthBytes: 6000);
+      expect(monitor.smoothedBytesPerSecond, 20000);
+    });
   });
 
   group('StreamPreloader', () {

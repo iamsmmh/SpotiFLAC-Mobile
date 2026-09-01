@@ -5,7 +5,7 @@ Legend: ✅ exists in this repo · 🚀 shipped in this upgrade · 🧱 scaffold
 ## 1. Core music playback
 ✅ Play/pause/next/previous/seek · ✅ shuffle/repeat/favorite/queue/playlist/notifications
 🚀 resume position (existing audio-service savepoint + new engine savepoint) · 🚀 playback history & statistics
-⏳ recently played / most played aggregation UI
+✅ recently played / most played aggregation UI (Settings → Streaming & Glass → Listening Statistics)
 
 ## 2. Streaming engine
 🚀 instant progressive playback (`UrlSource` in MusicPlayerHandler) · 🚀 source ranking & quality ladder
@@ -13,7 +13,7 @@ Legend: ✅ exists in this repo · 🚀 shipped in this upgrade · 🧱 scaffold
 🚀 preflight validation · 🚀 URL-expiry refresh policy · 🚀 next-track preloading / adaptive quality / network profiles
 🚀 manual quality selection · 🚀 stream state monitoring (phase machine + diagnostics)
 🧱 multiple streaming providers via `StreamSourceAdapter` (extensions)
-⏳ Wi-Fi/mobile quality profiles UI (settings model ready)
+✅ Wi-Fi/mobile/poor/roaming quality profiles UI
 
 ## 3. Smart playback
 🚀 Smart Play ladder (local → stream → download&play → unavailable) with decision traces
@@ -77,9 +77,10 @@ provider-id map, duplicate merging — the "ONE TRACK" backbone
 
 ## 24. Listening statistics
 🚀 `ListeningStats` (plays, skips, listened time, per-day buckets, streak) persisted locally
+✅ per-track plays/listened time + Recently Played / Most Played (Listening Statistics page)
 
 ## 25. Privacy
-✅ no account, local-only data, logging toggle · 🚀 stats opt-out, savepoint opt-out · ⏳ history clearing UI wiring
+✅ no account, local-only data, logging toggle · 🚀 stats opt-out, savepoint opt-out ✅ history clearing UI wiring (clear restore memory + reset statistics)
 
 ## 26. Sleep timer
 🚀 15/30/45/60 + end-of-track + stop, in the glass player
@@ -91,7 +92,7 @@ provider-id map, duplicate merging — the "ONE TRACK" backbone
 ✅ existing cover/metadata cache · 🧱 streaming cache gated by provider `cachePermitted` (default off — terms guardrail)
 
 ## 29. Adaptive streaming
-🚀 quality step policy + preflight latency + preloading · ⏳ live bandwidth sampling
+🚀 quality step policy + preflight latency + preloading · ✅ live bandwidth sampling (preflight-based estimate in Diagnostics)
 
 ## 30–32. Provider system / failover / source intelligence
 ✅ extension manager, priority, health checks (existing Go runtime)

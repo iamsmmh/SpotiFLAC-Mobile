@@ -52,9 +52,11 @@ player.
 
 See [`docs/streaming_engine.md`](docs/streaming_engine.md) for the
 architecture and [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full feature
-map. Streaming provider integrations are extensions implementing the
-`StreamSourceAdapter` API — the engine never extracts DRM audio from
-commercial services (authorized APIs/accounts only).
+map. Community-suggested improvements are catalogued in
+[`docs/SUGGESTED_FEATURES.md`](docs/SUGGESTED_FEATURES.md). Streaming provider
+integrations are extensions implementing the `StreamSourceAdapter` API — the
+engine never extracts DRM audio from commercial services (authorized
+APIs/accounts only).
 
 ---
 

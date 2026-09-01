@@ -549,6 +549,111 @@ class StreamPreflightResult {
       );
 }
 
+/// One bandwidth observation used by adaptive quality / diagnostics.
+///
+/// Samples are derived from preflight metadata (content length + measured
+/// latency) and from provider-reported transfer rates. The engine never
+/// downloads a full stream to measure bandwidth — it keeps estimates bounded
+/// and only for sources that already expose a content length.
+class BandwidthSample {
+  final DateTime at;
+  final int? bytes;
+  final int? latencyMs;
+  final int? bytesPerSecond;
+  final String providerId;
+
+  const BandwidthSample({
+    required this.at,
+    this.bytes,
+    this.latencyMs,
+    this.bytesPerSecond,
+    this.providerId = 'unknown',
+  });
+
+  /// Estimate from a preflight result: a single-byte probe gives us a useful
+  /// latency reading, while content-length lets us estimate the effective
+  /// throughput for the full asset.
+  factory BandwidthSample.fromPreflight({
+    required int? latencyMs,
+    required int? contentLengthBytes,
+    String providerId = 'unknown',
+  }) {
+    final bytes = contentLengthBytes;
+    final latency = latencyMs;
+    int? bps;
+    if (bytes != null && bytes > 0 && latency != null && latency > 0) {
+      bps = ((bytes / (latency / 1000)).round()).clamp(0, 1 << 40);
+    }
+    return BandwidthSample(
+      at: DateTime.now(),
+      bytes: bytes,
+      latencyMs: latency,
+      bytesPerSecond: bps,
+      providerId: providerId,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'at': at.toUtc().toIso8601String(),
+    if (bytes != null) 'bytes': bytes,
+    if (latencyMs != null) 'latency_ms': latencyMs,
+    if (bytesPerSecond != null) 'bytes_per_second': bytesPerSecond,
+    'provider': providerId,
+  };
+}
+
+/// Rolling bandwidth monitor exposed through [StreamingDiagnostics].
+///
+/// Keeps the most recent samples (bounded) plus a smoothed estimate so the
+/// Diagnostics Center and adaptive-quality logic can answer "how fast is the
+/// current link without a full-file download?".
+class BandwidthMonitor {
+  final List<BandwidthSample> _samples = [];
+  static const int _maxSamples = 12;
+
+  List<BandwidthSample> get samples => List.unmodifiable(_samples.reversed);
+
+  int? get latestBytesPerSecond =>
+      _samples.isEmpty ? null : _samples.last.bytesPerSecond;
+
+  /// Median of the last samples (robust against one noisy sample).
+  int? get smoothedBytesPerSecond {
+    final values = _samples
+        .map((s) => s.bytesPerSecond)
+        .whereType<int>()
+        .where((v) => v > 0)
+        .toList(growable: false);
+    if (values.isEmpty) return null;
+    values.sort();
+    return values[values.length ~/ 2];
+  }
+
+  void record(BandwidthSample? sample) {
+    if (sample == null) return;
+    _samples.add(sample);
+    if (_samples.length > _maxSamples) {
+      _samples.removeAt(0);
+    }
+  }
+
+  void recordPreflight({
+    required int? latencyMs,
+    required int? contentLengthBytes,
+    String providerId = 'unknown',
+  }) =>
+      record(
+        BandwidthSample.fromPreflight(
+          latencyMs: latencyMs,
+          contentLengthBytes: contentLengthBytes,
+          providerId: providerId,
+        ),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'samples': _samples.reversed.map((s) => s.toJson()).toList(growable: false),
+  };
+}
+
 /// URL-expiration handling policy.
 class StreamUrlRefreshPolicy {
   final Duration refreshLeadTime;
@@ -810,11 +915,13 @@ class StreamingDiagnostics {
   final ProviderHealthRegistry health;
   final EngineEventLog log;
   final StreamSessionState session;
+  final BandwidthMonitor bandwidth;
 
   const StreamingDiagnostics({
     required this.health,
     required this.log,
     required this.session,
+    required this.bandwidth,
   });
 
   int get failures =>
@@ -823,10 +930,18 @@ class StreamingDiagnostics {
   int get successes =>
       health.snapshot().fold(0, (sum, h) => sum + h.successCount);
 
+  /// Smoothed effective throughput estimate in bytes/sec, if available.
+  int? get effectiveBandwidthBytesPerSecond => bandwidth.smoothedBytesPerSecond;
+
+  /// Human-readable throughput label (e.g. "1.2 Mbps").
+  String? get effectiveBandwidthLabel =>
+      formatBandwidth(effectiveBandwidthBytesPerSecond);
+
   Map<String, dynamic> toJson() => {
     'health': health.toJson(),
     'events': log.toJson(),
     'session': session.toJson(),
+    'bandwidth': bandwidth.toJson(),
   };
 
   /// Human-readable one-line summary for status chips.
@@ -834,9 +949,21 @@ class StreamingDiagnostics {
     final providers = health.snapshot();
     if (providers.isEmpty) return 'No streaming providers registered';
     final online = providers.where((h) => h.isAvailable).length;
-    return '$online/${providers.length} providers available · '
+    final base =
+        '$online/${providers.length} providers available · '
         '$successes ok · $failures failed';
+    final bw = effectiveBandwidthLabel;
+    return bw == null ? base : '$base · ~$bw';
   }
+}
+
+/// Formats a bytes/sec rate into a compact human label.
+String formatBandwidth(int? bytesPerSecond) {
+  if (bytesPerSecond == null || bytesPerSecond <= 0) return '';
+  final kbps = bytesPerSecond * 8 / 1000; // network bits, decimal units
+  if (kbps >= 1000) return '${(kbps / 1000).toStringAsFixed(1)} Mbps';
+  if (kbps >= 1) return '${kbps.round()} kbps';
+  return '${bytesPerSecond.round()} B/s';
 }
 
 /// The engine session controller: owns the state machine for one playback

@@ -4,7 +4,9 @@ import 'package:spotiflac_android/engine/audio_characteristics.dart';
 import 'package:spotiflac_android/engine/smart_play.dart';
 import 'package:spotiflac_android/engine/streaming_engine.dart';
 import 'package:spotiflac_android/providers/engine_settings_provider.dart';
+import 'package:spotiflac_android/providers/playback_statistics_provider.dart';
 import 'package:spotiflac_android/providers/streaming_engine_provider.dart';
+import 'package:spotiflac_android/screens/settings/listening_statistics_page.dart';
 import 'package:spotiflac_android/theme/app_tokens.dart';
 import 'package:spotiflac_android/widgets/app_sliver_header.dart';
 import 'package:spotiflac_android/widgets/liquid/liquid_glass.dart';
@@ -60,7 +62,7 @@ class _StreamingSettingsPageState
   static String _qualityPolicyDescription(EngineSettings settings) {
     final policy = settings.qualityPolicy;
     if (policy.autoProfile) {
-      return 'Auto: Wi-Fi lossless · mobile high · poor normal';
+      return 'Auto: Wi-Fi lossless · mobile high · poor normal · roaming high';
     }
     return 'Wi-Fi ${policy.wifiProfile.label}, '
         'mobile ${policy.mobileProfile.label}, '
@@ -150,6 +152,14 @@ class _StreamingSettingsPageState
                 'Smaller buffers, stepped-down quality',
                 settings.poorProfile,
                 'poor',
+                notifier,
+              ),
+              _networkProfileItem(
+                context,
+                'Roaming',
+                'More conservative quality while roaming',
+                settings.roamingProfile,
+                'roaming',
                 notifier,
               ),
               SettingsSwitchItem(
@@ -251,6 +261,21 @@ class _StreamingSettingsPageState
                     'Plays, skips and minutes — stored only on this device',
                 value: settings.trackListeningStats,
                 onChanged: notifier.setTrackListeningStats,
+              ),
+              SettingsItem(
+                icon: Icons.query_stats_outlined,
+                title: 'Listening Statistics',
+                subtitle: _listeningSummary(),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _openListeningStatistics(context),
+              ),
+              SettingsItem(
+                icon: Icons.clear_all_outlined,
+                title: 'Clear restore memory',
+                subtitle:
+                    'Forget the last queue/savepoint (keeps downloaded files)',
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _clearSavepoint(context),
                 showDivider: false,
               ),
             ],
@@ -443,6 +468,51 @@ class _StreamingSettingsPageState
     PlaybackModePreference.localOnly => 'Never touch the network',
   };
 
+  String _listeningSummary() {
+    final stats = ref.watch(playbackStatisticsProvider);
+    final listened = formatListenedMs(stats.listenedMs);
+    return '${stats.plays} plays · ${stats.skips} skips · $listened listened · '
+        '${stats.streakDays}d streak';
+  }
+
+  void _openListeningStatistics(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const ListeningStatisticsPage(),
+      ),
+    );
+  }
+
+  Future<void> _clearSavepoint(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Clear restore memory?'),
+        content: const Text(
+          'The saved queue and volume/position snapshot will be forgotten. '
+          'Downloaded files are not affected.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await ref.read(engineSavepointProvider.notifier).clear();
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Restore memory cleared')),
+      );
+    }
+  }
+
   Future<void> _pickMode(
     BuildContext context,
     EngineSettings settings,
@@ -567,6 +637,7 @@ class _StreamingSettingsPageState
   ) async {
     final providers = diagnostics.health.snapshot();
     final events = diagnostics.log.events.take(12).toList(growable: false);
+    final bandwidthLabel = diagnostics.effectiveBandwidthLabel;
     await showLiquidBottomSheet<void>(
       context: context,
       title: 'Diagnostics Center',
@@ -574,12 +645,32 @@ class _StreamingSettingsPageState
         'Phase: ${diagnostics.session.phase.name} · '
         'providers: ${providers.length} · '
         'ok ${diagnostics.successes} · '
-        'failed ${diagnostics.failures}',
+        'failed ${diagnostics.failures}'
+        '${bandwidthLabel == null ? '' : ' · ~$bandwidthLabel'}',
       ),
       builder: (sheetContext) => Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              children: [
+                const Icon(Icons.speed_outlined, size: 18),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Effective bandwidth',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ),
+                Text(
+                  bandwidthLabel ?? '—',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
           if (providers.isEmpty)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 8),

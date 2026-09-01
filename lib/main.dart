@@ -10,8 +10,8 @@ import 'package:spotiflac_android/models/settings.dart';
 import 'package:spotiflac_android/providers/download_queue_provider.dart';
 import 'package:spotiflac_android/providers/engine_settings_provider.dart';
 import 'package:spotiflac_android/providers/extension_provider.dart';
-import 'package:spotiflac_android/providers/engine_settings_provider.dart';
 import 'package:spotiflac_android/providers/local_library_provider.dart';
+import 'package:spotiflac_android/providers/playback_statistics_provider.dart';
 import 'package:spotiflac_android/providers/runtime_profile_provider.dart';
 import 'package:spotiflac_android/providers/settings_provider.dart';
 import 'package:spotiflac_android/providers/streaming_engine_provider.dart';
@@ -334,6 +334,12 @@ class _EagerInitializationState extends ConsumerState<_EagerInitialization>
     unawaited(
       ref.read(streamingEngineControllerProvider).ensureFailureHook(),
     );
+
+    // Privacy-first listening statistics: restore stored stats and install
+    // the player observer so play/completion events are recorded locally.
+    final statsNotifier = ref.read(playbackStatisticsProvider.notifier);
+    unawaited(statsNotifier.load());
+    installPlaybackStatisticsRecording(ref);
   }
 
   Timer _scheduleProviderWarmup(Duration delay, VoidCallback action) {
