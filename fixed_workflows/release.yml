@@ -104,7 +104,7 @@ jobs:
 
           # Install NDK r29 (supports 16KB page size for Android 15+)
           # compileSdk/targetSdk aligned to 35 for stability (Flutter default)
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;29.0.14206865" "platforms;android-35.0" "build-tools;35.0.0"
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;29.0.14206865" "platforms;android-35" "build-tools;35.0.0"
 
           # Set NDK path
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> $GITHUB_ENV
@@ -121,10 +121,10 @@ jobs:
         working-directory: go_backend
         run: |
           mkdir -p ../android/app/libs
-          # arm/arm64 only: ndk.abiFilters in app/build.gradle.kts strips
-          # every other ABI from all outputs (universal APK included), so an
-          # amd64 slice would never reach a shipped APK — it only bloats the
-          # aar and slows this step.
+          # arm/arm64 only: the --target-platform flag below restricts the ABIs
+          # (the app no longer sets ndk.abiFilters, so a non-arm slice would
+          # never reach a shipped APK — it would only bloat the aar and slow
+          # this step).
           gomobile bind -target=android/arm,android/arm64 -androidapi 24 -o ../android/app/libs/gobackend.aar .
         env:
           CGO_ENABLED: 1

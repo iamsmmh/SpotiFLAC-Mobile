@@ -54,10 +54,6 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         multiDexEnabled = true
-        
-        ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
-        }
     }
 
     buildTypes {
@@ -97,9 +93,13 @@ android {
         }
     }
     
-    // APK splits are handled by Flutter's --split-per-abi flag.
-    // Keeping Gradle's splits disabled avoids double-splitting and
-    // R8 issues when both mechanisms are active.
+    // ABI filtering is handled entirely by Flutter:
+    //   * --split-per-abi     : produces one APK per ABI
+    //   * --target-platform   : restricts the ABIs (android-arm, android-arm64)
+    // Do NOT add an ndk.abiFilters block here — it conflicts with the
+    // splits that --split-per-abi enables and breaks the release build
+    // ("conflicting configuration in ndk abiFilters cannot be present when
+    //  splits abi filters are set").
 }
 
 flutter {
