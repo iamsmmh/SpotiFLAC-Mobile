@@ -29,4 +29,14 @@ if [ ! -s "$BUNDLE" ]; then
   echo "::error::Release AAB is missing or empty: $BUNDLE"
   exit 1
 fi
+
+# Validate the ZIP structure, mandatory bundle entries, and JAR signature.
+# Flutter's bundleRelease task already runs bundletool while producing this
+# file; these independent checks catch truncation or broken artifact copying.
+ENTRIES="${RUNNER_TEMP:-/tmp}/aab-entries.txt"
+unzip -t "$BUNDLE"
+unzip -Z1 "$BUNDLE" > "$ENTRIES"
+grep -qx 'BundleConfig.pb' "$ENTRIES"
+grep -qx 'base/manifest/AndroidManifest.xml' "$ENTRIES"
+jarsigner -verify "$BUNDLE"
 ls -la "$BUNDLE"
