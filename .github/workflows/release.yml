@@ -16,7 +16,6 @@ on:
         default: "v1.0.0"
 
 jobs:
-  # Get version first (quick job)
   get-version:
     runs-on: ubuntu-latest
     outputs:
@@ -33,17 +32,13 @@ jobs:
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-          # Check if version contains -preview, -beta, -rc, or -alpha (NOT -hotfix)
           VERSION_LOWER=$(echo "$VERSION" | tr '[:upper:]' '[:lower:]')
           if [[ "$VERSION_LOWER" == *"-preview"* ]] || [[ "$VERSION_LOWER" == *"-beta"* ]] || [[ "$VERSION_LOWER" == *"-rc"* ]] || [[ "$VERSION_LOWER" == *"-alpha"* ]]; then
             echo "is_prerelease=true" >> $GITHUB_OUTPUT
-            echo "Detected pre-release version: $VERSION"
           else
             echo "is_prerelease=false" >> $GITHUB_OUTPUT
-            echo "Detected stable version: $VERSION"
           fi
 
-  # Android and iOS build in PARALLEL
   build-android:
     runs-on: ubuntu-latest
     needs: get-version
@@ -51,15 +46,8 @@ jobs:
     steps:
       - name: Free disk space
         run: |
-          # Remove large unused tools (~15GB total). Docker prune was dropped:
-          # it took 1-2 minutes and the rm below already frees enough.
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo rm -rf /usr/local/share/boost
-          sudo rm -rf /usr/share/swift
-          sudo rm -rf /usr/local/.ghcup
-          # Show available space
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/share/boost /usr/share/swift /usr/local/.ghcup
           df -h
 
       - name: Checkout repository
@@ -77,7 +65,6 @@ jobs:
           go-version-file: go_backend/go.mod
           cache-dependency-path: go_backend/go.sum
 
-      # Cache Gradle for faster builds
       - name: Cache Gradle
         uses: actions/cache@v5
         with:
@@ -95,25 +82,14 @@ jobs:
 
       - name: Install Android SDK & NDK
         run: |
-          # Use pre-installed Android SDK on GitHub runners
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-
-          # Accept licenses
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-
-          # Install NDK r29 (supports 16KB page size for Android 15+)
-          # compileSdk/targetSdk aligned to 35 for stability (Flutter default)
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;29.0.14206865" "platforms;android-35" "build-tools;35.0.0"
-
-          # Set NDK path
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+            "ndk;29.0.14206865" "platforms;android-35" "build-tools;35.0.0"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> $GITHUB_ENV
 
       - name: Install gomobile
         working-directory: go_backend
         run: |
-          # Installed from inside the module so the go.mod-pinned x/mobile
-          # version is used (reproducible + covered by the setup-go cache).
           go install golang.org/x/mobile/cmd/gomobile
           gomobile init
 
@@ -121,10 +97,6 @@ jobs:
         working-directory: go_backend
         run: |
           mkdir -p ../android/app/libs
-          # arm/arm64 only: the --target-platform flag below restricts the ABIs
-          # (the app no longer sets ndk.abiFilters, so a non-arm slice would
-          # never reach a shipped APK — it would only bloat the aar and slow
-          # this step).
           gomobile bind -target=android/arm,android/arm64 -androidapi 24 -o ../android/app/libs/gobackend.aar .
         env:
           CGO_ENABLED: 1
@@ -175,25 +147,15 @@ jobs:
           cd build/app/outputs/flutter-apk
 
           rename_required_apk() {
-            unsigned="$1"
-            destination="$2"
+            unsigned="$1"; destination="$2"
             signed="${unsigned%.apk}-signed.apk"
-            if [ -f "$signed" ]; then
-              mv "$signed" "$destination"
-            elif [ -f "$unsigned" ]; then
-              mv "$unsigned" "$destination"
-            else
-              echo "ERROR: Missing APK: $unsigned"
-              exit 1
-            fi
+            if [ -f "$signed" ]; then mv "$signed" "$destination"
+            elif [ -f "$unsigned" ]; then mv "$unsigned" "$destination"
+            else echo "ERROR: Missing APK: $unsigned"; exit 1; fi
           }
 
-          rename_required_apk \
-            app-arm64-v8a-release.apk \
-            "SpotiFLAC-${VERSION}-arm64.apk"
-          rename_required_apk \
-            app-armeabi-v7a-release.apk \
-            "SpotiFLAC-${VERSION}-arm32.apk"
+          rename_required_apk app-arm64-v8a-release.apk   "SpotiFLAC-${VERSION}-arm64.apk"
+          rename_required_apk app-armeabi-v7a-release.apk "SpotiFLAC-${VERSION}-arm32.apk"
           ls -la
 
       - name: Upload APK artifact
@@ -204,7 +166,7 @@ jobs:
 
   build-ios:
     runs-on: macos-15
-    needs: get-version # Only depends on version, NOT android build!
+    needs: get-version
 
     steps:
       - name: Checkout repository
@@ -234,7 +196,6 @@ jobs:
       - name: Install gomobile
         working-directory: go_backend
         run: |
-          # go.mod-pinned x/mobile version (reproducible + cached by setup-go).
           go install golang.org/x/mobile/cmd/gomobile
           gomobile init
 
@@ -256,8 +217,7 @@ jobs:
           gem list -i xcodeproj >/dev/null || sudo gem install xcodeproj
           cat > add_framework.rb << 'EOF'
           require 'xcodeproj'
-          project_path = 'ios/Runner.xcodeproj'
-          project = Xcodeproj::Project.open(project_path)
+          project = Xcodeproj::Project.open('ios/Runner.xcodeproj')
           target = project.targets.find { |t| t.name == 'Runner' }
           frameworks_group = project.main_group.find_subpath('Frameworks', true)
           frameworks_group ||= project.main_group.new_group('Frameworks')
@@ -307,7 +267,6 @@ jobs:
             while IFS= read -r -d '' f; do
               perl -pi -e 's/\r$//' "$f"
               chmod +x "$f"
-              echo "Normalized line endings: $f"
             done
 
       - name: Generate app icons
@@ -315,16 +274,15 @@ jobs:
 
       - name: Build iOS (unsigned)
         run: |
-          # Build Flutter iOS without codesigning (config only)
           flutter build ios --release --no-codesign --config-only
-          # Ensure pods are still in sync after config generation
           cd ios
           pod install
-          # Archive with signing disabled and sandboxing disabled for Xcode 16+/26+
+          # NOTE: Do NOT pass both -sdk iphoneos and -destination together.
+          # Xcode 16+ rejects that combination with exit code 70 and an empty log.
+          # Use -destination 'generic/platform=iOS' alone.
           xcodebuild -workspace Runner.xcworkspace \
             -scheme Runner \
             -configuration Release \
-            -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -archivePath build/Runner.xcarchive \
             archive \
@@ -341,7 +299,6 @@ jobs:
           cd ios/build/Runner.xcarchive/Products/Applications
           mkdir Payload
           cp -r Runner.app Payload/
-          # Use absolute path to avoid relative path issues
           zip -r $GITHUB_WORKSPACE/build/ios/ipa/SpotiFLAC-${VERSION}-ios-unsigned.ipa Payload
           rm -rf Payload
 
@@ -370,7 +327,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0  # Full history needed for git-cliff
+          fetch-depth: 0
 
       - name: Generate changelog with git-cliff
         id: changelog
@@ -381,11 +338,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OUTPUT: /tmp/changelog.txt
-
-      - name: Show generated changelog
-        run: |
-          echo "Generated changelog:"
-          cat /tmp/changelog.txt
 
       - name: Download Android APK
         uses: actions/download-artifact@v7
@@ -407,8 +359,6 @@ jobs:
           CURRENT_REF=$(git rev-list -n 1 "$VERSION" 2>/dev/null || git rev-parse HEAD)
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 "${CURRENT_REF}^" 2>/dev/null || true)
 
-          # Start with git-cliff changelog, but replace its compare footer with a
-          # deterministic previous-tag lookup from git.
           sed '/^## [0-9][0-9.[:alpha:]-]*$/d; /^\*\*Full Changelog\*\*/d' /tmp/changelog.txt > /tmp/release_body.txt
 
           if [ -n "$PREVIOUS_TAG" ]; then
@@ -417,7 +367,6 @@ jobs:
               >> /tmp/release_body.txt
           fi
 
-          # Append download section
           cat >> /tmp/release_body.txt << FOOTER
 
           ---
@@ -435,9 +384,6 @@ jobs:
           **Android**: Enable "Install from unknown sources" and install the APK
           **iOS**: Use AltStore, Sideloadly, or similar tools to sideload the IPA
           FOOTER
-
-          echo "Release body:"
-          cat /tmp/release_body.txt
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -496,9 +442,6 @@ jobs:
              '.apps[0].version = $ver | .apps[0].versionDate = $date | .apps[0].downloadURL = $url | .apps[0].size = $size' \
              apps.json > apps.json.tmp && mv apps.json.tmp apps.json
 
-          echo "Updated apps.json:"
-          cat apps.json
-
       - name: Commit and push
         run: |
           VERSION="${{ needs.get-version.outputs.version }}"
@@ -546,14 +489,13 @@ jobs:
           if [ ! -s /tmp/cliff_tg.txt ]; then
             echo "See release notes on GitHub for details." > /tmp/changelog.txt
           else
-            # Convert Markdown to Telegram HTML
             CHANGELOG=$(cat /tmp/cliff_tg.txt | \
               sed '/^## [0-9][0-9.[:alpha:]-]*$/d' | \
               sed '/^\*\*Full Changelog\*\*/d' | \
               sed 's/ by \[@[^]]*\](https:\/\/github\.com\/[^)]*)//g' | \
               sed 's/ by @[A-Za-z0-9_-]\+//g' | \
-              sed 's/\[#\([0-9]*\)\]([^)]*)/#\1/g' | \
-              sed 's/\[@\([^]]*\)\]([^)]*)/@\1/g' | \
+              sed 's/\[#\([0-9]*\)\]([^)]*)/\1/g' | \
+              sed 's/\[@\([^]]*\)\]([^]*)/\1/g' | \
               sed 's/&/\&amp;/g' | \
               sed 's/</\&lt;/g' | \
               sed 's/>/\&gt;/g' | \
@@ -561,14 +503,9 @@ jobs:
               sed 's/^### \(.*\)$/<b>\1<\/b>/g' | \
               sed 's/^## \(.*\)$/<b>\1<\/b>/g' | \
               sed 's/^- /• /g')
-
-            # Truncate for Telegram 4096 char limit
             CHANGELOG=$(echo "$CHANGELOG" | head -c 2500 | sed '$d')
             echo "$CHANGELOG" > /tmp/changelog.txt
           fi
-
-          echo "Telegram changelog:"
-          cat /tmp/changelog.txt
 
       - name: Send to Telegram Channel
         env:
@@ -577,12 +514,9 @@ jobs:
         run: |
           VERSION=${{ needs.get-version.outputs.version }}
           CHANGELOG=$(cat /tmp/changelog.txt)
-          
-          # Find APK files
           ARM64_APK=$(find ./release -name "*arm64*.apk" | head -1)
           ARM32_APK=$(find ./release -name "*arm32*.apk" | head -1)
-          
-          # Prepare message with changelog (HTML format)
+
           printf '%s\n' \
             "<b>SpotiFLAC Mobile ${VERSION} Released!</b>" \
             "" \
@@ -592,43 +526,30 @@ jobs:
             "<a href=\"https://github.com/${{ github.repository }}/releases/tag/${VERSION}\">View Release Notes</a>" \
             > /tmp/telegram_message.txt
 
-          MESSAGE=$(cat /tmp/telegram_message.txt)
-
-          # Send message first (using HTML parse mode)
-          # Use --data-urlencode for proper encoding of special chars (+, &, etc.)
-          # Use || true to ensure file uploads continue even if message fails
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TELEGRAM_CHANNEL_ID}" \
-            --data-urlencode "text=${MESSAGE}" \
+            --data-urlencode "text=$(cat /tmp/telegram_message.txt)" \
             --data-urlencode "parse_mode=HTML" \
             --data-urlencode "disable_web_page_preview=true" || true
 
-          # Upload arm64 APK to channel
           if [ -f "$ARM64_APK" ]; then
-            echo "Uploading arm64 APK to Telegram..."
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
               -F chat_id="${TELEGRAM_CHANNEL_ID}" \
               -F document=@"${ARM64_APK}" \
               -F caption="SpotiFLAC Mobile ${VERSION} - arm64 (recommended)"
           fi
 
-          # Upload arm32 APK to channel
           if [ -f "$ARM32_APK" ]; then
-            echo "Uploading arm32 APK to Telegram..."
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
               -F chat_id="${TELEGRAM_CHANNEL_ID}" \
               -F document=@"${ARM32_APK}" \
               -F caption="SpotiFLAC Mobile ${VERSION} - arm32"
           fi
 
-          # Upload iOS IPA to channel
           IOS_IPA=$(find ./release -name "*ios*.ipa" | head -1)
           if [ -f "$IOS_IPA" ]; then
-            echo "Uploading iOS IPA to Telegram..."
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
               -F chat_id="${TELEGRAM_CHANNEL_ID}" \
               -F document=@"${IOS_IPA}" \
               -F caption="SpotiFLAC Mobile ${VERSION} - iOS (unsigned, sideload required)"
           fi
-
-          echo "Telegram notification sent!"
