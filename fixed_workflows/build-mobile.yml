@@ -1,101 +1,84 @@
-name: Unsigned Release
+name: Build Mobile
 
-# Builds installable, developer-account-free artifacts and publishes them to a
-# GitHub Release:
-#   * Android  -> .apk  (arm64, arm32, universal)
-#   * iOS      -> .ipa  (unsigned, for AltStore / Sideloadly / TrollStore)
+# ---------------------------------------------------------------------------
+# Unified cross-platform mobile build.
 #
-# No secrets are required: GITHUB_TOKEN is provisioned automatically, the
-# Android release build falls back to the debug signing config (see
-# android/app/build.gradle.kts) and the iOS archive is produced with code
-# signing disabled.
+#   * Android  -> ubuntu-latest   -> release APKs (arm64, arm32)
+#   * iOS      -> macos-latest    -> unsigned .ipa (sideload with AltStore /
+#                                    Sideloadly / TrollStore)
+#
+# The app is a Flutter (Dart) client backed by a Go module that must be baked
+# into each binary via gomobile:
+#   * Android  ->  go_backend  ->  android/app/libs/gobackend.aar
+#   * iOS      ->  go_backend  ->  ios/Frameworks/Gobackend.xcframework
+#
+# This workflow therefore sets up the toolchain per platform (JDK/Gradle/NDK +
+# SDK for Android; Xcode/CocoaPods + gomobile for iOS), caches the heavy
+# dependency caches (pub, Gradle, CocoaPods, NDK), runs the two platform jobs
+# in parallel, and uploads both artifacts to a single build run.
+#
+# No secrets are required: the Android release build falls back to the debug
+# signing config (see android/app/build.gradle.kts) and the iOS archive is
+# produced with code signing disabled.
+# ---------------------------------------------------------------------------
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
+  pull_request:
   workflow_dispatch:
-    inputs:
-      version:
-        description: "Version tag to build/publish (defaults to pubspec.yaml version)"
-        required: false
-        type: string
-      publish:
-        description: "Publish a GitHub Release (off = build artifacts only)"
-        required: false
-        default: true
-        type: boolean
 
 concurrency:
-  group: unsigned-release-${{ github.ref }}
-  cancel-in-progress: false
+  group: mobile-build-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
+# Shared, easily-tuned constants. Change these to match the repo's toolchain.
 env:
   APP_NAME: SpotiFLAC
+  FLUTTER_VERSION_FILE: .fvmrc           # FVM pin -> "3.44.8"
+  # Android SDK / NDK (matching android/app/build.gradle.kts)
   ANDROID_NDK_VERSION: "29.0.14206865"
   ANDROID_PLATFORM: "platforms;android-37.0"
   ANDROID_BUILD_TOOLS: "build-tools;37.0.0"
+  # iOS (Xcode 16+/26+ compatible; see ios/Podfile, platform :ios, '15.0')
   XCODE_VERSION: "26.1.1"
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # Resolve the version once so every downstream job names its output the same.
-  # ---------------------------------------------------------------------------
-  meta:
-    name: Resolve version
+  # -------------------------------------------------------------------------
+  # Resolve the app version once so every job names its artifacts identically.
+  # A tiny, fast job that both platform jobs wait on; the platform jobs still
+  # run in parallel with respect to each other.
+  # -------------------------------------------------------------------------
+  get-version:
+    name: Resolve app version
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.resolve.outputs.version }}
-      prerelease: ${{ steps.resolve.outputs.prerelease }}
-      publish: ${{ steps.resolve.outputs.publish }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Resolve version and release channel
-        id: resolve
-        env:
-          INPUT_VERSION: ${{ inputs.version }}
-          INPUT_PUBLISH: ${{ inputs.publish }}
+      - name: Read version
+        id: version
         run: |
           set -euo pipefail
+          VERSION="$(sed -n 's/^version: *\([^+]*\).*/\1/p' pubspec.yaml | tr -d '[:space:]')"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Resolved app version: ${VERSION}"
 
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            VERSION="${GITHUB_REF_NAME}"
-          elif [ -n "${INPUT_VERSION}" ]; then
-            VERSION="${INPUT_VERSION}"
-          else
-            VERSION="v$(sed -n 's/^version: *\([^+]*\).*/\1/p' pubspec.yaml | tr -d '[:space:]')"
-          fi
-          case "$VERSION" in v*) ;; *) VERSION="v${VERSION}" ;; esac
-
-          case "$(printf '%s' "$VERSION" | tr '[:upper:]' '[:lower:]')" in
-            *-alpha*|*-beta*|*-rc*|*-preview*) PRERELEASE=true ;;
-            *) PRERELEASE=false ;;
-          esac
-
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            PUBLISH="${INPUT_PUBLISH}"
-          else
-            PUBLISH=true
-          fi
-
-          {
-            echo "version=${VERSION}"
-            echo "prerelease=${PRERELEASE}"
-            echo "publish=${PUBLISH}"
-          } | tee -a "$GITHUB_OUTPUT"
-
-  # ---------------------------------------------------------------------------
-  # Android: gomobile AAR -> Flutter release APKs (debug-key signed => sideloadable)
-  # ---------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
+  # ANDROID  (ubuntu-latest): JDK 17 + Gradle/AGP + NDK, gomobile AAR, APKs
+  # -------------------------------------------------------------------------
   android:
-    name: Android APK
+    name: Android build
     runs-on: ubuntu-latest
-    needs: meta
+    needs: get-version
     timeout-minutes: 60
     steps:
       - name: Free disk space
@@ -107,11 +90,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      # --- Environment setup: JDK, Go, Flutter -----------------------------
       - name: Setup Java
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "17"            # matches android/*.gradle.kts (Java 17)
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -123,16 +107,17 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version-file: .fvmrc
+          flutter-version-file: ${{ env.FLUTTER_VERSION_FILE }}
           cache: true
 
+      # --- Dependency caching ----------------------------------------------
       - name: Cache Gradle
         uses: actions/cache@v5
         with:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', 'android/gradle.properties') }}
           restore-keys: gradle-${{ runner.os }}-
 
       - name: Cache pub dependencies
@@ -148,25 +133,29 @@ jobs:
           path: /usr/local/lib/android/sdk/ndk/${{ env.ANDROID_NDK_VERSION }}
           key: ndk-${{ env.ANDROID_NDK_VERSION }}
 
-      - name: Install Android SDK components
+      # --- Android SDK components ------------------------------------------
+      - name: Install Android SDK & NDK
         run: bash scripts/install_android_sdk.sh
 
+      # --- Bake the Go backend into an AAR --------------------------------
       - name: Build Go backend (gomobile AAR)
         working-directory: go_backend
         env:
           CGO_ENABLED: 1
         run: |
           set -euo pipefail
+          export PATH="$(go env GOPATH)/bin:$PATH"
           # Installed from inside the module so the go.mod-pinned x/mobile is used.
           go install golang.org/x/mobile/cmd/gomobile
           gomobile init
           mkdir -p ../android/app/libs
-          # arm/arm64 only: the --target-platform flag below restricts the ABIs
-          # (the app no longer sets ndk.abiFilters, which would conflict with
-          # Flutter's --split-per-abi).
+          # arm/arm64 only; the app builds with --split-per-abi which uses
+          # --target-platform to restrict ABIs (no ndk.abiFilters is set).
           gomobile bind -target=android/arm,android/arm64 -androidapi 24 \
             -o ../android/app/libs/gobackend.aar .
+          test -f ../android/app/libs/gobackend.aar
 
+      # --- Flutter build ---------------------------------------------------
       - name: Get Flutter dependencies
         run: flutter pub get
 
@@ -187,7 +176,7 @@ jobs:
 
       - name: Collect and rename APKs
         env:
-          VERSION: ${{ needs.meta.outputs.version }}
+          VERSION: ${{ needs.get-version.outputs.version }}
         run: |
           set -euo pipefail
           SRC=build/app/outputs/flutter-apk
@@ -200,24 +189,23 @@ jobs:
 
           copy_apk app-arm64-v8a-release.apk   arm64
           copy_apk app-armeabi-v7a-release.apk arm32
-          # The universal APK is optional: only present when the ABI split emits it.
+          # Universal APK is only emitted when the ABI split does not restrict it.
           if [ -f "$SRC/app-release.apk" ]; then
             cp "$SRC/app-release.apk" "dist/${APP_NAME}-${VERSION}-universal.apk"
           fi
-
           ls -la dist
 
       - name: Verify APK integrity
         run: |
           set -euo pipefail
-          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)"
           for apk in dist/*.apk; do
             echo "::group::$(basename "$apk")"
             "$APKSIGNER" verify --print-certs "$apk"
             echo "::endgroup::"
           done
 
-      - name: Upload APK artifacts
+      - name: Upload Android APKs
         uses: actions/upload-artifact@v6
         with:
           name: android-apk
@@ -225,18 +213,19 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # ---------------------------------------------------------------------------
-  # iOS: gomobile XCFramework -> unsigned xcarchive -> real .ipa (Payload/*.app)
-  # ---------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
+  # iOS  (macos-latest): Xcode + CocoaPods + gomobile XCFramework -> unsigned ipa
+  # -------------------------------------------------------------------------
   ios:
-    name: iOS IPA (unsigned)
-    runs-on: macos-15
-    needs: meta
+    name: iOS build
+    runs-on: macos-latest
+    needs: get-version
     timeout-minutes: 90
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      # --- Environment setup: Xcode, Go, Flutter ---------------------------
       - name: Select Xcode ${{ env.XCODE_VERSION }}
         run: |
           set -e
@@ -250,7 +239,7 @@ jobs:
             sudo xcode-select -s /Applications/Xcode.app || true
           fi
           xcodebuild -version
-          ls /Applications/ | grep Xcode
+          ls /Applications/ | grep Xcode || true
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -262,9 +251,10 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version-file: .fvmrc
+          flutter-version-file: ${{ env.FLUTTER_VERSION_FILE }}
           cache: true
 
+      # --- Dependency caching ----------------------------------------------
       - name: Cache pub dependencies
         uses: actions/cache@v5
         with:
@@ -276,22 +266,36 @@ jobs:
         uses: actions/cache@v5
         with:
           path: |
+            ~/.cocoapods
             ios/Pods
-            ~/Library/Caches/CocoaPods
-          key: pods-${{ runner.os }}-${{ hashFiles('ios/Podfile', 'pubspec.lock') }}
-          restore-keys: pods-${{ runner.os }}-
+            ios/Runner.xcworkspace/xcshareddata
+          key: pods-${{ runner.os }}-${{ hashFiles('ios/Podfile', 'ios/Podfile.lock', 'pubspec.lock') }}
+          restore-keys: |
+            pods-${{ runner.os }}-
+            pods-ios-
 
-      - name: Build Go backend (gomobile XCFramework)
+      # --- Bake the Go backend into an XCFramework -------------------------
+      - name: Install gomobile
+        working-directory: go_backend
+        run: |
+          set -euo pipefail
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          # go.mod-pinned x/mobile version (reproducible + cached by setup-go).
+          go install golang.org/x/mobile/cmd/gomobile
+          gomobile init
+
+      - name: Build Go backend for iOS
         working-directory: go_backend
         env:
           CGO_ENABLED: 1
         run: |
           set -euo pipefail
-          go install golang.org/x/mobile/cmd/gomobile
-          gomobile init
+          export PATH="$(go env GOPATH)/bin:$PATH"
           mkdir -p ../ios/Frameworks
-          gomobile bind -target=ios -tags ios -o ../ios/Frameworks/Gobackend.xcframework .
+          gomobile bind -target=ios -tags ios \
+            -o ../ios/Frameworks/Gobackend.xcframework .
           test -d ../ios/Frameworks/Gobackend.xcframework
+          ls -la ../ios/Frameworks/
 
       - name: Link XCFramework into the Xcode project
         run: |
@@ -331,6 +335,7 @@ jobs:
 
           ruby /tmp/add_framework.rb
 
+      # --- Flutter + CocoaPods --------------------------------------------
       - name: Get Flutter dependencies
         run: flutter pub get
 
@@ -350,6 +355,7 @@ jobs:
       - name: Generate app icons
         run: dart run flutter_launcher_icons
 
+      # --- Archive Runner without code signing ----------------------------
       - name: Archive Runner without code signing
         run: |
           set -euo pipefail
@@ -395,9 +401,10 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      # --- Package the unsigned .ipa --------------------------------------
       - name: Package IPA
         env:
-          VERSION: ${{ needs.meta.outputs.version }}
+          VERSION: ${{ needs.get-version.outputs.version }}
         run: |
           set -euo pipefail
           APP="$RUNNER_TEMP/Runner.xcarchive/Products/Applications/Runner.app"
@@ -417,110 +424,14 @@ jobs:
           ( cd "$STAGE" && zip -qry "$IPA" Payload )
 
           # An IPA is a zip whose first entry is Payload/<App>.app - assert it.
-          unzip -l "$IPA" | head -20
           unzip -l "$IPA" | grep -q 'Payload/Runner.app/Info.plist' \
             || { echo "::error::IPA payload is malformed"; exit 1; }
           du -h "$IPA"
 
-      - name: Upload IPA artifact
+      - name: Upload iOS IPA
         uses: actions/upload-artifact@v6
         with:
           name: ios-ipa
           path: dist/*.ipa
           if-no-files-found: error
           retention-days: 14
-
-  # ---------------------------------------------------------------------------
-  # Publish every artifact to a single GitHub Release.
-  # ---------------------------------------------------------------------------
-  release:
-    name: Publish GitHub Release
-    runs-on: ubuntu-latest
-    needs: [meta, android, ios]
-    if: needs.meta.outputs.publish == 'true'
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Download build artifacts
-        uses: actions/download-artifact@v7
-        with:
-          path: dist
-          merge-multiple: true
-
-      - name: Generate checksums
-        working-directory: dist
-        run: |
-          set -euo pipefail
-          sha256sum ./*.apk ./*.ipa | sed 's| \./| |' > SHA256SUMS.txt
-          cat SHA256SUMS.txt
-
-      - name: Generate changelog
-        uses: orhun/git-cliff-action@v4
-        continue-on-error: true
-        with:
-          config: cliff.toml
-          args: --latest --strip header
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OUTPUT: /tmp/changelog.md
-
-      - name: Compose release notes
-        env:
-          VERSION: ${{ needs.meta.outputs.version }}
-        run: |
-          set -euo pipefail
-          NOTES=/tmp/release_notes.md
-          : > "$NOTES"
-
-          if [ -s /tmp/changelog.md ]; then
-            sed '/^## [0-9]/d; /^\*\*Full Changelog\*\*/d' /tmp/changelog.md >> "$NOTES"
-          fi
-
-          PREV_TAG=$(git describe --tags --abbrev=0 "$(git rev-list -n 1 "$VERSION" 2>/dev/null || git rev-parse HEAD)^" 2>/dev/null || true)
-          if [ -n "$PREV_TAG" ]; then
-            printf '\n**Full Changelog**: https://github.com/%s/compare/%s...%s\n' \
-              "$GITHUB_REPOSITORY" "$PREV_TAG" "$VERSION" >> "$NOTES"
-          fi
-
-          cat >> "$NOTES" <<EOF
-
-          ---
-
-          ### Downloads
-
-          | Platform | File | Notes |
-          | --- | --- | --- |
-          | Android (arm64) | \`${APP_NAME}-${VERSION}-arm64.apk\` | Recommended for all modern devices |
-          | Android (arm32) | \`${APP_NAME}-${VERSION}-arm32.apk\` | Older 32-bit devices |
-          | Android (universal) | \`${APP_NAME}-${VERSION}-universal.apk\` | Both ABIs in one, larger download |
-          | iOS | \`${APP_NAME}-${VERSION}-ios-unsigned.ipa\` | Unsigned, sideload required |
-
-          ### Installation
-
-          - **Android** — enable *Install unknown apps* for your browser/file manager, then open the APK.
-          - **iOS** — sideload the IPA with AltStore, SideStore, Sideloadly or TrollStore. The build is
-            intentionally unsigned, so your sideloader signs it with your own Apple ID on-device.
-
-          Verify your download against \`SHA256SUMS.txt\`.
-          EOF
-
-          cat "$NOTES"
-
-      - name: Publish release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.meta.outputs.version }}
-          name: ${{ env.APP_NAME }} Mobile ${{ needs.meta.outputs.version }}
-          body_path: /tmp/release_notes.md
-          files: |
-            dist/*.apk
-            dist/*.ipa
-            dist/SHA256SUMS.txt
-          prerelease: ${{ needs.meta.outputs.prerelease == 'true' }}
-          draft: false
-          fail_on_unmatched_files: true

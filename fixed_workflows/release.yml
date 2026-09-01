@@ -94,20 +94,12 @@ jobs:
           key: ndk-29.0.14206865
 
       - name: Install Android SDK & NDK
+        env:
+          ANDROID_NDK_VERSION: "29.0.14206865"
         run: |
-          # Use pre-installed Android SDK on GitHub runners
           echo "ANDROID_HOME=$ANDROID_HOME"
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-
-          # Accept licenses
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-
-          # Install NDK r29 (supports 16KB page size for Android 15+)
-          # compileSdk/targetSdk aligned to 35 for stability (Flutter default)
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;29.0.14206865" "platforms;android-35" "build-tools;35.0.0"
-
-          # Set NDK path
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> $GITHUB_ENV
+          bash scripts/install_android_sdk.sh
 
       - name: Install gomobile
         working-directory: go_backend
@@ -151,9 +143,7 @@ jobs:
 
       - name: Build APK (Release - unsigned)
         run: |
-          flutter build apk --release --split-per-abi \
-            --target-platform android-arm,android-arm64
-          ls -la build/app/outputs/flutter-apk/
+          bash scripts/flutter_build_apk.sh
           test -f build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
           test -f build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
 
