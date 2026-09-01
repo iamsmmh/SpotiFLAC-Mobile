@@ -479,12 +479,12 @@ func EditFileMetadata(filePath, metadataJSON string) (resp string, err error) {
 		}
 	}
 
-	resp := map[string]any{
+	response := map[string]any{
 		"success": true,
 		"method":  "ffmpeg",
 		"fields":  fields,
 	}
-	s, _ := marshalJSONString(resp)
+	s, _ := marshalJSONString(response)
 	return s, nil
 }
 
