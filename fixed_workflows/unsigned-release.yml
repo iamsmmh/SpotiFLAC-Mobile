@@ -356,6 +356,11 @@ jobs:
           flutter build ios --release --no-codesign --config-only
           cd ios
           pod install
+
+          # No -quiet on purpose: when the archive fails we need the actual
+          # compiler/linker diagnostic, not a bare "exit code 65".
+          LOG="$RUNNER_TEMP/xcodebuild-archive.log"
+          set +o pipefail
           xcodebuild archive \
             -workspace Runner.xcworkspace \
             -scheme Runner \
@@ -363,13 +368,32 @@ jobs:
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/Runner.xcarchive" \
-            -quiet \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
             EXPANDED_CODE_SIGN_IDENTITY="" \
-            ENABLE_USER_SCRIPT_SANDBOXING=NO
+            ENABLE_USER_SCRIPT_SANDBOXING=NO \
+            2>&1 | tee "$LOG"
+          STATUS="${PIPESTATUS[0]}"
+          set -o pipefail
+
+          if [ "$STATUS" -ne 0 ]; then
+            echo "::group::xcodebuild diagnostics"
+            grep -nE "error:|fatal error:|Undefined symbol|ld: |clang: error|Command .* failed" "$LOG" | head -100 || true
+            echo "::endgroup::"
+            echo "::error::xcodebuild archive failed with exit code $STATUS - see the diagnostics above and the ios-xcodebuild-log artifact"
+            exit "$STATUS"
+          fi
+
+      - name: Upload xcodebuild log
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ios-xcodebuild-log
+          path: ${{ runner.temp }}/xcodebuild-archive.log
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Package IPA
         env:
