@@ -20,16 +20,12 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.zarz.spotiflac"
-    // compileSdk = 35 (Android 15): matches platforms;android-35 installed by CI.
-    // AGP requires the EXACT compileSdk API level to be installed on the build
-    // machine — it cannot fall back to a lower platform, so compileSdk must stay
-    // aligned with the CI workflow's ANDROID_PLATFORM env var.
-    // Plugins that ship their own compileSdkVersion (audioplayers, connectivity_plus,
-    // file_picker, receive_sharing_intent) compile against their own declared SDK;
-    // the app's compileSdk only governs the Kotlin source in android/app/src/.
-    // targetSdk stays 35 to match compileSdk and avoid opting in to Android 16+
-    // runtime behavior until the app is deliberately migrated.
-    compileSdk = 35
+    // compileSdk 37: the current dependency set (androidx.core 1.18,
+    // activity 1.13, audioplayers_android, connectivity_plus, file_picker,
+    // receive_sharing_intent) requires compiling against API 37+.
+    // targetSdk stays 35 to avoid opting in to newer runtime behavior until
+    // the app is deliberately migrated.
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     buildFeatures {

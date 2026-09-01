@@ -129,3 +129,61 @@ After applying all fixes:
 - Consider replacing `ffmpeg_kit_flutter_new_full` (which bundles large binaries) with a more lightweight FFmpeg solution or `ffmpeg_kit_flutter_new_min` if full codecs not needed
 - Commit `ios/Podfile.lock` to repo to make CocoaPods cache key work (currently gitignored, so cache always misses)
 - Update `.fvmrc` Flutter version 3.44.8 - verify it exists, otherwise use stable 3.35.x
+
+---
+
+## Android: `Gradle task assembleRelease failed with exit code 1` — `compileSdk 37` vs `platforms;android-35` (2026-09-01)
+
+### Root Cause
+
+`android/app/build.gradle.kts` sets `compileSdk = 37` (the current Flutter plugin
+dependency set — `audioplayers_android 5.3.0`, `connectivity_plus 7.3.1`,
+`file_picker 12.0.0`, `receive_sharing_intent 1.9.0` — genuinely requires API 37
+to compile). The `build-mobile.yml` workflow installs only `platforms;android-35`.
+AGP cannot fall back to a lower platform; the exact `compileSdk` API level must be
+installed, causing `assembleRelease` to fail with exit code 1.
+
+Note: `compileDebugKotlin` (the CI task) succeeds because GitHub Actions
+`ubuntu-latest` runners already have `android-37` pre-installed; the explicit
+`sdkmanager` step in `ci.yml` only adds NDK and build-tools on top of the
+pre-installed baseline SDK. `assembleRelease` (in `build-mobile.yml`) requires the
+full platform to be explicitly available.
+
+### Fix (requires `workflows` permission to push)
+
+In `.github/workflows/build-mobile.yml`, change:
+```yaml
+ANDROID_PLATFORM: "platforms;android-35"
+```
+to:
+```yaml
+ANDROID_PLATFORM: "platforms;android-37"
+```
+
+The fixed workflow is saved in `fixed_workflows/build-mobile.yml`.
+Apply it by copying it to `.github/workflows/build-mobile.yml` after granting
+Arena the `workflows` GitHub App permission, or apply it manually.
+
+### Why `compileSdk` cannot simply be lowered to 35
+
+An attempt to set `compileSdk = 35` to match the workflow's `android-35` install
+was tested (PR #11) but caused `compileDebugKotlin` to fail — confirming that the
+plugin dependency set genuinely requires API 37 at compile time.
+
+---
+
+## iOS: `xcodebuild archive failed with exit code 70` — conflicting `-sdk` and `-destination` flags (2026-09-01)
+
+### Root Cause
+
+The archive command in `build-mobile.yml` passed both `-sdk iphoneos` **and**
+`-destination 'generic/platform=iOS'`. Xcode 16+ rejects this combination with
+exit code 70 and writes virtually nothing to the log (observed: 1 312-byte
+compressed artifact).
+
+### Fix (requires `workflows` permission to push)
+
+Remove `-sdk iphoneos` from the `xcodebuild archive` call. The
+`-destination 'generic/platform=iOS'` flag automatically selects the correct SDK.
+The fixed workflow (in `fixed_workflows/build-mobile.yml`) includes this change
+plus improved on-failure diagnostics (dumps the last 200 log lines).
