@@ -20,32 +20,40 @@ func NewRateLimiter(maxRequests int, window time.Duration) *RateLimiter {
 	}
 }
 
+// WaitForSlot blocks until a request slot is available. It is safe for
+// concurrent callers: when multiple waiters wake at the same moment the
+// capacity is re-checked under the lock, so a thundering herd cannot admit
+// more than maxRequests in a window (the previous implementation released
+// the lock around the sleep and then appended unconditionally after
+// re-locking, letting N sleepers all admit at once).
 func (r *RateLimiter) WaitForSlot() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	now := time.Now()
+	for {
+		now := time.Now()
+		r.cleanOldTimestamps(now)
 
-	r.cleanOldTimestamps(now)
+		if len(r.timestamps) < r.maxRequests {
+			r.timestamps = append(r.timestamps, now)
+			return
+		}
 
-	if len(r.timestamps) < r.maxRequests {
-		r.timestamps = append(r.timestamps, now)
-		return
-	}
+		oldestTimestamp := r.timestamps[0]
+		waitUntil := oldestTimestamp.Add(r.window)
+		waitDuration := waitUntil.Sub(now)
+		if waitDuration <= 0 {
+			// Slot already expired relative to the clock; re-evaluate.
+			continue
+		}
 
-	oldestTimestamp := r.timestamps[0]
-	waitUntil := oldestTimestamp.Add(r.window)
-	waitDuration := waitUntil.Sub(now)
-
-	if waitDuration > 0 {
+		// Release the lock while sleeping so other goroutines can acquire
+		// slots, then re-lock and re-check capacity on wake.
+		timer := time.NewTimer(waitDuration)
 		r.mu.Unlock()
-		time.Sleep(waitDuration)
+		<-timer.C
 		r.mu.Lock()
-
-		r.cleanOldTimestamps(time.Now())
 	}
-
-	r.timestamps = append(r.timestamps, time.Now())
 }
 
 func (r *RateLimiter) cleanOldTimestamps(now time.Time) {

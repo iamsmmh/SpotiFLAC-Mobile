@@ -42,7 +42,13 @@ func successMethodJSON(method string) (string, error) {
 	return marshalJSONString(map[string]any{"success": true, "method": method})
 }
 
-func ReadFileMetadata(filePath string) (string, error) {
+func ReadFileMetadata(filePath string) (resp string, err error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			resp = ""
+			err = r
+		}
+	}()
 	lower := strings.ToLower(filePath)
 	isFlac := strings.HasSuffix(lower, ".flac")
 	isM4A := strings.HasSuffix(lower, ".m4a") || strings.HasSuffix(lower, ".mp4") || strings.HasSuffix(lower, ".aac")
@@ -244,7 +250,13 @@ func ReadFileMetadata(filePath string) (string, error) {
 // ParseCueSheet is called from Dart to get track listing and timing data for CUE splitting.
 // audioDir, if non-empty, overrides the directory used for resolving the
 // referenced audio file (useful for SAF temp file scenarios).
-func ParseCueSheet(cuePath string, audioDir string) (string, error) {
+func ParseCueSheet(cuePath string, audioDir string) (resp string, err error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			resp = ""
+			err = r
+		}
+	}()
 	return ParseCueFileJSON(cuePath, audioDir)
 }
 
@@ -327,7 +339,13 @@ func WriteAC4Metadata(filePath, metadataJSON, coverPath string) (string, error) 
 }
 
 // EditFileMetadata writes audio file tags: FLAC via native Go library, MP3/Opus returns map for Dart/FFmpeg.
-func EditFileMetadata(filePath, metadataJSON string) (string, error) {
+func EditFileMetadata(filePath, metadataJSON string) (resp string, err error) {
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			resp, _ = marshalJSONString(map[string]any{"success": false, "error": r.Error()})
+			err = nil
+		}
+	}()
 	var fields map[string]string
 	if err := json.Unmarshal([]byte(metadataJSON), &fields); err != nil {
 		return "", fmt.Errorf("invalid metadata JSON: %w", err)

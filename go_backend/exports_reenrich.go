@@ -639,7 +639,15 @@ func preferredReleaseMetadata(
 // ReEnrichFile re-embeds metadata, cover art, and lyrics into an existing audio file.
 // When search_online is true, searches Spotify/Deezer by track name + artist to fetch
 // complete metadata from the internet before embedding.
-func ReEnrichFile(requestJSON string) (string, error) {
+func ReEnrichFile(requestJSON string) (resp string, err error) {
+	// Tag writers (FLAC/ID3/MP4/Ogg) run on user-supplied files; a malformed
+	// audio file must surface as an error payload, not a native crash.
+	defer func() {
+		if r := recoverBridgePanic(recover()); r != nil {
+			resp, _ = marshalJSONString(map[string]any{"error": r.Error()})
+			err = nil
+		}
+	}()
 	var req reEnrichRequest
 
 	if err := json.Unmarshal([]byte(requestJSON), &req); err != nil {
