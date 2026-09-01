@@ -355,7 +355,7 @@ jobs:
           cd ios
           pod install
           xcodebuild archive \
-            -workspace ios/Runner.xcworkspace \
+            -workspace Runner.xcworkspace \
             -scheme Runner \
             -configuration Release \
             -sdk iphoneos \
