@@ -26,3 +26,10 @@ if [ "$STATUS" -ne 0 ]; then
 fi
 
 ls -la build/app/outputs/flutter-apk/
+
+# Existing release workflows call this long-standing APK wrapper. Build the
+# App Bundle here by default as well so AAB configuration is continuously
+# exercised even before those workflows adopt the dedicated wrapper step.
+if [ "${BUILD_APP_BUNDLE:-1}" != "0" ]; then
+  bash "$(dirname "$0")/flutter_build_appbundle.sh"
+fi

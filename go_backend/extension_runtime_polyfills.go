@@ -67,7 +67,7 @@ func (r *extensionRuntime) fetchPolyfill(call goja.FunctionCall) goja.Value {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readExtensionHTTPResponseBody(resp)
 	if err != nil {
 		return r.createFetchError(err.Error())
 	}

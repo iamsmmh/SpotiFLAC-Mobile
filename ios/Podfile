@@ -60,9 +60,10 @@ def patch_device_info_plus_vision_selector
 end
 
 target 'Runner' do
-  use_frameworks!
-  use_modular_headers!
-
+  # Use Flutter's default static CocoaPods integration. Building every plugin
+  # as a dynamic framework makes Xcode 26 compile those frameworks before the
+  # vendored Flutter engine module is visible, producing `no such module
+  # 'Flutter'` across otherwise unrelated Swift plugins.
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
 end
 
@@ -89,6 +90,11 @@ post_install do |installer|
       definitions = definitions.is_a?(Array) ? definitions.dup : [definitions.to_s]
       definitions << 'PERMISSION_NOTIFICATIONS=1' unless definitions.include?('PERMISSION_NOTIFICATIONS=1')
       config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = definitions
+      # Xcode 26 enables explicit Swift module builds by default. Flutter's
+      # engine is supplied as an xcframework rather than a normal pod target,
+      # so plugin dependency scanning can otherwise fail with "Unable to
+      # resolve module dependency: Flutter" during archive.
+      config.build_settings['SWIFT_ENABLE_EXPLICIT_MODULES'] = 'NO'
       # Fix for Xcode 16+ / iOS 18+ with ffmpeg and other binary pods
       config.build_settings['ENABLE_USER_SCRIPT_SANDBOXING'] = 'NO'
     end

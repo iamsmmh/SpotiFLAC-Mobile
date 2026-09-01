@@ -104,10 +104,20 @@ internal fun NativeDownloadFinalizer.runFFmpeg(command: String, shouldCancel: ()
     val sessionId = session.sessionId
     synchronized(activeFFmpegSessionLock) {
         activeFFmpegSessionIds.add(sessionId)
+        // The global callback normally removes IDs immediately. Keep a hard
+        // ceiling for a vendor/session failure that never emits completion.
+        while (nativeFFmpegSessionIds.size >= MAX_TRACKED_NATIVE_FFMPEG_SESSIONS) {
+            val oldest = nativeFFmpegSessionIds.iterator()
+            if (!oldest.hasNext()) break
+            oldest.next()
+            oldest.remove()
+        }
         nativeFFmpegSessionIds.add(sessionId)
     }
-    FFmpegKitConfig.asyncFFmpegExecute(session)
+    var submitted = false
     try {
+        FFmpegKitConfig.asyncFFmpegExecute(session)
+        submitted = true
         var cancelRequested = false
         while (!latch.await(200, TimeUnit.MILLISECONDS)) {
             if (shouldCancel()) {
@@ -130,6 +140,10 @@ internal fun NativeDownloadFinalizer.runFFmpeg(command: String, shouldCancel: ()
     } finally {
         synchronized(activeFFmpegSessionLock) {
             activeFFmpegSessionIds.remove(sessionId)
+            // No completion callback can arrive if submission itself failed.
+            if (!submitted) {
+                nativeFFmpegSessionIds.remove(sessionId)
+            }
         }
     }
 }

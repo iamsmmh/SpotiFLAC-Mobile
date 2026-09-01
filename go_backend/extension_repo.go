@@ -21,6 +21,9 @@ const (
 	CategoryUtility     = "utility"
 	CategoryLyrics      = "lyrics"
 	CategoryIntegration = "integration"
+
+	maxExtensionRegistryBytes   int64 = 8 * 1024 * 1024
+	maxExtensionRegistryEntries       = 10_000
 )
 
 type repoExtension struct {
@@ -204,6 +207,10 @@ func (s *extensionRepo) loadDiskCache() {
 	}
 
 	cachePath := filepath.Join(s.cacheDir, cacheFileName)
+	info, err := os.Stat(cachePath)
+	if err != nil || info.Size() > maxExtensionRegistryBytes {
+		return
+	}
 	data, err := os.ReadFile(cachePath)
 	if err != nil {
 		return
@@ -301,9 +308,21 @@ func (s *extensionRepo) fetchRegistry(forceRefresh bool) (*repoRegistry, error) 
 		return nil, fmt.Errorf("registry returned HTTP %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	if resp.ContentLength > maxExtensionRegistryBytes {
+		return nil, fmt.Errorf(
+			"registry response exceeds %d byte limit",
+			maxExtensionRegistryBytes,
+		)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxExtensionRegistryBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read registry: %w", err)
+	}
+	if int64(len(body)) > maxExtensionRegistryBytes {
+		return nil, fmt.Errorf(
+			"registry response exceeds %d byte limit",
+			maxExtensionRegistryBytes,
+		)
 	}
 
 	registry, err := parseRegistryBody(body)
@@ -330,6 +349,13 @@ func parseRegistryBody(body []byte) (*repoRegistry, error) {
 			return nil, fmt.Errorf("registry URL returned a web page instead of JSON. Make sure the URL points to a registry.json file or a GitHub repository that contains one")
 		}
 		return nil, fmt.Errorf("failed to parse registry: %w", err)
+	}
+	if len(registry.Extensions) > maxExtensionRegistryEntries {
+		return nil, fmt.Errorf(
+			"registry contains %d extensions, limit is %d",
+			len(registry.Extensions),
+			maxExtensionRegistryEntries,
+		)
 	}
 	validExtensions := make([]repoExtension, 0, len(registry.Extensions))
 	for index := range registry.Extensions {

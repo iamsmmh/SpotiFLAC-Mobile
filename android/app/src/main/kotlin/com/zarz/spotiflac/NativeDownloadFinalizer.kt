@@ -42,13 +42,17 @@ object NativeDownloadFinalizer {
     const val HISTORY_SCHEMA_VERSION = 12
     internal val activeFFmpegSessionIds = mutableSetOf<Long>()
     internal val nativeFFmpegSessionIds = mutableSetOf<Long>()
+    internal const val MAX_TRACKED_NATIVE_FFMPEG_SESSIONS = 256
     internal val activeFFmpegSessionLock = Any()
     internal val ffmpegCompleteCallbackLock = Any()
-    internal val qualityVariantNameLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
+    internal val qualityVariantNameLocks = ReferenceCountedKeyedLock<String>()
     internal var forwardedFFmpegCompleteCallback: FFmpegSessionCompleteCallback? = null
     internal val nativeFilteringFFmpegCompleteCallback = FFmpegSessionCompleteCallback { session ->
         val isNativeSession = synchronized(activeFFmpegSessionLock) {
-            nativeFFmpegSessionIds.contains(session.sessionId)
+            // Completion is the terminal lifecycle event for this filter key.
+            // Removing here keeps the callback race-safe without retaining every
+            // native FFmpeg session ID for the lifetime of the process.
+            nativeFFmpegSessionIds.remove(session.sessionId)
         }
         if (!isNativeSession) {
             val delegate = synchronized(ffmpegCompleteCallbackLock) {
@@ -470,12 +474,12 @@ object NativeDownloadFinalizer {
     private fun outputExt(input: FinalizeInput): String {
         val safExt = input.request.optString("saf_output_ext", "")
         val ext = safExt.ifBlank { input.request.optString("output_ext", "") }
-        return normalizeExt(ext.ifBlank {
+        return normalizeExt(ext).ifBlank {
             when (requestQuality(input)) {
                 "HIGH" -> ".mp3"
                 else -> ".flac"
             }
-        })
+        }
     }
 
     private fun finalizeDecryption(

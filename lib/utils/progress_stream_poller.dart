@@ -58,6 +58,7 @@ class ProgressStreamPoller<T> {
   bool _usingStream = false;
   bool _inFlight = false;
   int _errorCount = 0;
+  int _generation = 0;
 
   bool get usingStream => _usingStream;
 
@@ -65,31 +66,40 @@ class ProgressStreamPoller<T> {
   /// stream (falling back to polling on timeout/error); otherwise starts
   /// polling immediately.
   void start({required bool useStream}) {
+    final generation = ++_generation;
     _timer?.cancel();
+    _timer = null;
     _bootstrapTimer?.cancel();
     _bootstrapTimer = null;
     _sub?.cancel();
     _sub = null;
     _hasReceivedStreamEvent = false;
     _usingStream = false;
+    _inFlight = false;
 
     if (useStream) {
-      _attachStream();
+      _attachStream(generation);
       return;
     }
-    startPollingTimer();
+    startPollingTimer(generation: generation);
   }
 
-  void _attachStream() {
+  void _attachStream(int generation) {
     _sub = streamProvider().listen(
       (progress) async {
+        if (generation != _generation) return;
         _hasReceivedStreamEvent = true;
         _usingStream = true;
         _bootstrapTimer?.cancel();
         _bootstrapTimer = null;
-        await _runGuarded(() async => progress, onStreamProcessingError);
+        await _runGuarded(
+          () async => progress,
+          onStreamProcessingError,
+          generation: generation,
+        );
       },
       onError: (Object error, StackTrace stackTrace) {
+        if (generation != _generation) return;
         if (_usingStream) {
           onStreamFailed(error);
         }
@@ -98,59 +108,80 @@ class ProgressStreamPoller<T> {
         _usingStream = false;
         _bootstrapTimer?.cancel();
         _bootstrapTimer = null;
-        startPollingTimer();
+        startPollingTimer(generation: generation);
       },
       cancelOnError: false,
     );
 
     _bootstrapTimer = Timer(bootstrapTimeout, () {
-      if (_hasReceivedStreamEvent) return;
+      if (generation != _generation || _hasReceivedStreamEvent) return;
       onStreamTimeout();
       _sub?.cancel();
       _sub = null;
       _usingStream = false;
-      startPollingTimer();
+      startPollingTimer(generation: generation);
     });
   }
 
   /// (Re)starts the fallback polling timer.
-  void startPollingTimer() {
+  void startPollingTimer({int? generation}) {
+    final activeGeneration = generation ?? _generation;
+    if (activeGeneration != _generation) return;
     _timer?.cancel();
     _timer = Timer.periodic(pollingInterval, (_) async {
-      await _runGuarded(pollProvider, onPollError, gate: shouldPollTick);
+      await _runGuarded(
+        pollProvider,
+        onPollError,
+        gate: shouldPollTick,
+        generation: activeGeneration,
+      );
     });
   }
 
   /// One-shot immediate fetch reusing the same in-flight guard and error
   /// counter as the periodic poll, with its own error callback.
-  Future<void> pollOnce(void Function(Object error) onError) =>
-      _runGuarded(pollProvider, onError);
+  Future<void> pollOnce(void Function(Object error) onError) => _runGuarded(
+    pollProvider,
+    onError,
+    generation: _generation,
+  );
 
   Future<void> _runGuarded(
     Future<T> Function() fetch,
     void Function(Object error) onError, {
     bool Function()? gate,
+    required int generation,
   }) async {
-    if (_inFlight) return;
+    if (generation != _generation || _inFlight) return;
     _inFlight = true;
     try {
       if (gate != null && !gate()) return;
       final progress = await fetch();
+      // A stopped/restarted poller must never deliver a result from its prior
+      // lifecycle into a newly-created provider or queue state.
+      if (generation != _generation) return;
       await onProgress(progress);
-      _errorCount = 0;
+      if (generation == _generation) {
+        _errorCount = 0;
+      }
     } catch (e) {
+      if (generation != _generation) return;
       _errorCount++;
       if (_errorCount <= _errorLogThreshold) {
         onError(e);
       }
     } finally {
-      _inFlight = false;
+      // A stale completion must not clear the in-flight guard of a newer run.
+      if (generation == _generation) {
+        _inFlight = false;
+      }
     }
   }
 
   /// Cancels timers/subscription and resets guard/counter state, without
   /// releasing the poller for reuse (matches each caller's `_stop*` reset).
   void stop() {
+    _generation++;
     _timer?.cancel();
     _bootstrapTimer?.cancel();
     _sub?.cancel();

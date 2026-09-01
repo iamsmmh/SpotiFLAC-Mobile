@@ -122,19 +122,19 @@ class PlayableMedia {
   };
 
   static PlayableMedia? fromJson(Map<String, dynamic> json) {
-    final id = json['id'] as String?;
-    final source = json['source'] as String?;
-    if (id == null || id.isEmpty || source == null || source.isEmpty) {
+    final id = normalizeOptionalString(json['id']?.toString());
+    final source = normalizeOptionalString(json['source']?.toString());
+    if (id == null || source == null) {
       return null;
     }
-    final durationMs = (json['durationMs'] as num?)?.toInt();
+    final durationMs = readPositiveInt(json['durationMs']);
     return PlayableMedia(
       id: id,
       source: source,
-      title: json['title'] as String? ?? '',
-      artist: json['artist'] as String? ?? '',
-      album: json['album'] as String? ?? '',
-      artUri: json['artUri'] as String?,
+      title: json['title']?.toString() ?? '',
+      artist: json['artist']?.toString() ?? '',
+      album: json['album']?.toString() ?? '',
+      artUri: normalizeCoverReference(json['artUri']?.toString()),
       duration: (durationMs != null && durationMs > 0)
           ? Duration(milliseconds: durationMs)
           : null,
@@ -377,6 +377,10 @@ class MusicPlayerHandler extends BaseAudioHandler
       final session = await AudioSession.instance;
       _audioSession = session;
       await session.configure(const AudioSessionConfiguration.music());
+      // AudioSession initialization is intentionally asynchronous. The handler
+      // may have been disposed while configuration awaited platform setup; do
+      // not attach process-lifetime listeners to a dead player in that case.
+      if (_disposed) return;
 
       _subscriptions.add(
         session.interruptionEventStream.listen((event) {
@@ -1378,7 +1382,11 @@ class MusicPlayerHandler extends BaseAudioHandler
   }
 
   Future<void> dispose() async {
+    if (_disposed) return;
     _disposed = true;
+    if (identical(_activeMusicPlayerHandler, this)) {
+      _activeMusicPlayerHandler = null;
+    }
     _playRequestGeneration++;
     for (final sub in _subscriptions) {
       await sub.cancel();

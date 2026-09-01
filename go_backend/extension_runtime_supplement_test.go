@@ -510,6 +510,12 @@ func TestParseRegistryBody(t *testing.T) {
 	if _, err := parseRegistryBody([]byte("not json")); err == nil || !strings.Contains(err.Error(), "failed to parse registry") {
 		t.Fatalf("expected parse error, got %v", err)
 	}
+
+	oversizedRegistry := `{"version":1,"extensions":[` +
+		strings.Repeat(`{},`, maxExtensionRegistryEntries) + `{}` + `]}`
+	if _, err := parseRegistryBody([]byte(oversizedRegistry)); err == nil || !strings.Contains(err.Error(), "limit") {
+		t.Fatalf("expected oversized registry error, got %v", err)
+	}
 }
 
 func TestExtensionStoreSettingsAndRuntimeStorage(t *testing.T) {
