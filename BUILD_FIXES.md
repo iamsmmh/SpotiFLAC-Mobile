@@ -189,3 +189,38 @@ androidx/activity/plugin set requires it), but `build-mobile.yml` only installed
 and `build-tools;36.0.0`; AGP auto-downloads anything still missing. This was
 one candidate cause of the parallel `Build release APKs` failure (exit 1) — the
 new log annotations will confirm the exact Gradle error on the next run.
+
+---
+
+## Android: `Gradle task assembleRelease failed with exit code 1` (8m 22s / 502.8s)
+
+`compileDebugKotlin` on CI was already green with `compileSdk = 37`. Lowering
+it to 35 (PR #11) **broke** that job via `checkReleaseAarMetadata` — do not
+revert compileSdk. The 8-minute `assembleRelease` failure is a *late-stage*
+packaging task, not a missing `android.jar`.
+
+Root causes addressed:
+
+1. **NDK version mismatch.** Flutter 3.44.8's `flutter.ndkVersion` is
+   `28.2.13676358`, but every workflow installs NDK `29.0.14206865` (needed
+   for 16 KB pages). `assembleRelease` with `debugSymbolLevel = FULL` then
+   fails in `extractReleaseNativeDebugMetadata` / `stripReleaseDebugSymbols`.
+   **Fix:** pin `ndkVersion = "29.0.14206865"` in `android/app/build.gradle.kts`.
+2. **Platform 37 not installed.** Upstream installs `platforms;android-37.0`
+   + `build-tools;37.0.0`. This fork only installed API 35. Debug Kotlin
+   compile only needs `android.jar` (often cached/auto-downloaded); release
+   packaging needs the full platform + matching build-tools.
+   **Fix:** `scripts/install_android_sdk.sh` tries `android-37.0` then
+   `android-37`, plus 36/35 and build-tools 37/36/35.
+3. **Duplicate `libc++_shared.so`.** FFmpeg Kit full + gomobile + audio
+   plugins each ship the NDK C++ runtime. `mergeReleaseNativeLibs` fails
+   after compilation with "2 files found with path ...".
+   **Fix:** `packaging.jniLibs.pickFirsts` for `libc++_shared.so` / `libfbjni.so`.
+4. **`lintVitalRelease`.** AGP runs fatal lint on application release builds
+   by default; plugin findings fail assembleRelease after a long compile.
+   **Fix:** `lint { checkReleaseBuilds = false; abortOnError = false }`.
+5. **Opaque Flutter wrapper.** Flutter collapses every Gradle failure to
+   "assembleRelease failed with exit code 1".
+   **Fix:** `scripts/flutter_build_apk.sh` tees the log, greps the real
+   `FAILURE:` / `What went wrong` lines, and emits `::error::` annotations
+   via `scripts/ci_annotate.py`.

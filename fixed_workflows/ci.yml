@@ -152,13 +152,9 @@ jobs:
           gradle-version: "9.6.1"
 
       - name: Install Android SDK & NDK
-        run: |
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
-            "ndk;29.0.14206865" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+        env:
+          ANDROID_NDK_VERSION: "29.0.14206865"
+        run: bash scripts/install_android_sdk.sh
 
       - name: Build Go backend for Android
         working-directory: go_backend

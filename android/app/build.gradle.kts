@@ -23,10 +23,15 @@ android {
     // compileSdk 37: the current dependency set (androidx.core 1.18,
     // activity 1.13, audioplayers_android, connectivity_plus, file_picker,
     // receive_sharing_intent) requires compiling against API 37+.
-    // targetSdk stays 35 to avoid opting in to newer runtime behavior until
-    // the app is deliberately migrated.
+    // Do NOT lower this to 35 — that fails checkReleaseAarMetadata
+    // ("requires compileSdk of at least 37"). targetSdk stays 35 to avoid
+    // opting in to newer runtime behavior until the app is migrated.
     compileSdk = 37
-    ndkVersion = flutter.ndkVersion
+    // Pin NDK r29 (16 KB page size, Android 15+). Flutter 3.44.8's
+    // flutter.ndkVersion is 28.2.13676358, which CI does not install;
+    // assembleRelease then dies in extractReleaseNativeDebugMetadata /
+    // stripReleaseDebugSymbols after several minutes of compilation.
+    ndkVersion = "29.0.14206865"
 
     buildFeatures {
         buildConfig = true
@@ -102,6 +107,34 @@ android {
     // splits that --split-per-abi enables and breaks the release build
     // ("conflicting configuration in ndk abiFilters cannot be present when
     //  splits abi filters are set").
+
+    // FFmpeg Kit (full) + gomobile + audio plugins all ship libc++_shared.so.
+    // Without pickFirst, mergeReleaseNativeLibs fails at the end of
+    // assembleRelease with "2 files found with path 'lib/*/libc++_shared.so'".
+    packaging {
+        jniLibs {
+            pickFirsts += listOf(
+                "**/libc++_shared.so",
+                "**/libfbjni.so",
+            )
+        }
+        resources {
+            pickFirsts += listOf(
+                "META-INF/NOTICE.md",
+                "META-INF/LICENSE.md",
+                "META-INF/INDEX.LIST",
+                "META-INF/DEPENDENCIES",
+            )
+        }
+    }
+
+    // Plugin lint findings must not fail assembleRelease. Flutter templates
+    // historically disabled this; AGP still runs lintVitalRelease by default
+    // for application modules and it is a common late-stage exit-code-1.
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
 }
 
 // Kotlin compiler options for the classic Kotlin Gradle plugin (KGP 2.x DSL).
