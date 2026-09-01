@@ -1,15 +1,5 @@
 name: Unsigned Release
 
-# Builds installable, developer-account-free artifacts and publishes them to a
-# GitHub Release:
-#   * Android  -> .apk  (arm64, arm32, universal)
-#   * iOS      -> .ipa  (unsigned, for AltStore / Sideloadly / TrollStore)
-#
-# No secrets are required: GITHUB_TOKEN is provisioned automatically, the
-# Android release build falls back to the debug signing config (see
-# android/app/build.gradle.kts) and the iOS archive is produced with code
-# signing disabled.
-
 on:
   push:
     tags:
@@ -36,14 +26,11 @@ permissions:
 env:
   APP_NAME: SpotiFLAC
   ANDROID_NDK_VERSION: "29.0.14206865"
-  ANDROID_PLATFORM: "platforms;android-35"
+  ANDROID_PLATFORM: "platforms;android-37"
   ANDROID_BUILD_TOOLS: "build-tools;35.0.0"
   XCODE_VERSION: "26.1.1"
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # Resolve the version once so every downstream job names its output the same.
-  # ---------------------------------------------------------------------------
   meta:
     name: Resolve version
     runs-on: ubuntu-latest
@@ -89,9 +76,6 @@ jobs:
             echo "publish=${PUBLISH}"
           } | tee -a "$GITHUB_OUTPUT"
 
-  # ---------------------------------------------------------------------------
-  # Android: gomobile AAR -> Flutter release APKs (debug-key signed => sideloadable)
-  # ---------------------------------------------------------------------------
   android:
     name: Android APK
     runs-on: ubuntu-latest
@@ -162,13 +146,9 @@ jobs:
           CGO_ENABLED: 1
         run: |
           set -euo pipefail
-          # Installed from inside the module so the go.mod-pinned x/mobile is used.
           go install golang.org/x/mobile/cmd/gomobile
           gomobile init
           mkdir -p ../android/app/libs
-          # arm/arm64 only: the --target-platform flag below restricts the ABIs
-          # (the app no longer sets ndk.abiFilters, which would conflict with
-          # Flutter's --split-per-abi).
           gomobile bind -target=android/arm,android/arm64 -androidapi 24 \
             -o ../android/app/libs/gobackend.aar .
 
@@ -200,7 +180,6 @@ jobs:
 
           copy_apk app-arm64-v8a-release.apk   arm64
           copy_apk app-armeabi-v7a-release.apk arm32
-          # The universal APK is optional: only present when the ABI split emits it.
           if [ -f "$SRC/app-release.apk" ]; then
             cp "$SRC/app-release.apk" "dist/${APP_NAME}-${VERSION}-universal.apk"
           fi
@@ -225,9 +204,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # ---------------------------------------------------------------------------
-  # iOS: gomobile XCFramework -> unsigned xcarchive -> real .ipa (Payload/*.app)
-  # ---------------------------------------------------------------------------
   ios:
     name: iOS IPA (unsigned)
     runs-on: macos-15
@@ -307,7 +283,6 @@ jobs:
           group = project.main_group.find_subpath('Frameworks', true)
           path  = 'Frameworks/Gobackend.xcframework'
 
-          # Idempotent: skip when a previous run already linked the framework.
           if group.files.any? { |f| f.path == path }
             puts 'Gobackend.xcframework already linked'
             exit 0
@@ -357,15 +332,15 @@ jobs:
           cd ios
           pod install
 
-          # No -quiet on purpose: when the archive fails we need the actual
-          # compiler/linker diagnostic, not a bare "exit code 65".
+          # NOTE: Do NOT pass both -sdk iphoneos and -destination together.
+          # Xcode 16+ rejects that combination with exit code 70 and an empty log.
+          # Use -destination 'generic/platform=iOS' alone; Xcode selects the SDK.
           LOG="$RUNNER_TEMP/xcodebuild-archive.log"
           set +o pipefail
           xcodebuild archive \
             -workspace Runner.xcworkspace \
             -scheme Runner \
             -configuration Release \
-            -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/Runner.xcarchive" \
             CODE_SIGNING_ALLOWED=NO \
@@ -379,7 +354,10 @@ jobs:
           set -o pipefail
 
           if [ "$STATUS" -ne 0 ]; then
-            echo "::group::xcodebuild diagnostics"
+            echo "::group::xcodebuild diagnostics (last 200 lines)"
+            tail -200 "$LOG" || true
+            echo "::endgroup::"
+            echo "::group::xcodebuild errors"
             grep -nE "error:|fatal error:|Undefined symbol|ld: |clang: error|Command .* failed" "$LOG" | head -100 || true
             echo "::endgroup::"
             echo "::error::xcodebuild archive failed with exit code $STATUS - see the diagnostics above and the ios-xcodebuild-log artifact"
@@ -407,8 +385,6 @@ jobs:
           rm -rf "$STAGE" && mkdir -p "$STAGE/Payload"
           cp -R "$APP" "$STAGE/Payload/Runner.app"
 
-          # Sideloading tools re-sign the bundle: drop any stale signature
-          # residue so AltStore/Sideloadly start from a clean payload.
           find "$STAGE/Payload" \( -name _CodeSignature -o -name 'embedded.mobileprovision' \) \
             -prune -exec rm -rf {} +
 
@@ -416,7 +392,6 @@ jobs:
           IPA="$PWD/dist/${APP_NAME}-${VERSION}-ios-unsigned.ipa"
           ( cd "$STAGE" && zip -qry "$IPA" Payload )
 
-          # An IPA is a zip whose first entry is Payload/<App>.app - assert it.
           unzip -l "$IPA" | head -20
           unzip -l "$IPA" | grep -q 'Payload/Runner.app/Info.plist' \
             || { echo "::error::IPA payload is malformed"; exit 1; }
@@ -430,9 +405,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # ---------------------------------------------------------------------------
-  # Publish every artifact to a single GitHub Release.
-  # ---------------------------------------------------------------------------
   release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
@@ -503,8 +475,7 @@ jobs:
           ### Installation
 
           - **Android** — enable *Install unknown apps* for your browser/file manager, then open the APK.
-          - **iOS** — sideload the IPA with AltStore, SideStore, Sideloadly or TrollStore. The build is
-            intentionally unsigned, so your sideloader signs it with your own Apple ID on-device.
+          - **iOS** — sideload the IPA with AltStore, SideStore, Sideloadly or TrollStore.
 
           Verify your download against \`SHA256SUMS.txt\`.
           EOF
