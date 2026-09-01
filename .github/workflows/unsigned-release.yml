@@ -36,7 +36,7 @@ permissions:
 env:
   APP_NAME: SpotiFLAC
   ANDROID_NDK_VERSION: "29.0.14206865"
-  ANDROID_PLATFORM: "platforms;android-35.0"
+  ANDROID_PLATFORM: "platforms;android-35"
   ANDROID_BUILD_TOOLS: "build-tools;35.0.0"
   XCODE_VERSION: "26.1.1"
 
@@ -53,7 +53,7 @@ jobs:
       publish: ${{ steps.resolve.outputs.publish }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Resolve version and release channel
         id: resolve
@@ -105,16 +105,16 @@ jobs:
           df -h /
 
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Setup Java
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v5
         with:
           go-version-file: go_backend/go.mod
           cache-dependency-path: go_backend/go.sum
@@ -127,7 +127,7 @@ jobs:
           cache: true
 
       - name: Cache Gradle
-        uses: actions/cache@v5
+        uses: actions/cache@v4
         with:
           path: |
             ~/.gradle/caches
@@ -136,14 +136,14 @@ jobs:
           restore-keys: gradle-${{ runner.os }}-
 
       - name: Cache pub dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@v4
         with:
           path: ~/.pub-cache
           key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
           restore-keys: pub-${{ runner.os }}-
 
       - name: Cache Android NDK
-        uses: actions/cache@v5
+        uses: actions/cache@v4
         with:
           path: /usr/local/lib/android/sdk/ndk/${{ env.ANDROID_NDK_VERSION }}
           key: ndk-${{ env.ANDROID_NDK_VERSION }}
@@ -216,7 +216,7 @@ jobs:
           done
 
       - name: Upload APK artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: android-apk
           path: dist/*.apk
@@ -233,7 +233,7 @@ jobs:
     timeout-minutes: 90
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Select Xcode ${{ env.XCODE_VERSION }}
         run: |
@@ -251,7 +251,7 @@ jobs:
           ls /Applications/ | grep Xcode
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v5
         with:
           go-version-file: go_backend/go.mod
           cache-dependency-path: go_backend/go.sum
@@ -264,14 +264,14 @@ jobs:
           cache: true
 
       - name: Cache pub dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@v4
         with:
           path: ~/.pub-cache
           key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
           restore-keys: pub-${{ runner.os }}-
 
       - name: Cache CocoaPods
-        uses: actions/cache@v5
+        uses: actions/cache@v4
         with:
           path: |
             ios/Pods
@@ -348,34 +348,18 @@ jobs:
       - name: Generate app icons
         run: dart run flutter_launcher_icons
 
-      - name: Archive Runner without code signing
+      - name: Build iOS app (unsigned)
         run: |
           set -euo pipefail
-          flutter build ios --release --no-codesign --config-only
-          cd ios
-          pod install
-          xcodebuild archive \
-            -workspace Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            -archivePath "$RUNNER_TEMP/Runner.xcarchive" \
-            -quiet \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM="" \
-            EXPANDED_CODE_SIGN_IDENTITY="" \
-            ENABLE_USER_SCRIPT_SANDBOXING=NO
+          flutter build ios --release --no-codesign
 
       - name: Package IPA
         env:
           VERSION: ${{ needs.meta.outputs.version }}
         run: |
           set -euo pipefail
-          APP="$RUNNER_TEMP/Runner.xcarchive/Products/Applications/Runner.app"
-          test -d "$APP" || { echo "::error::Runner.app missing from archive"; exit 1; }
+          APP="build/ios/iphoneos/Runner.app"
+          test -d "$APP" || { echo "::error::Runner.app missing from build/ios/iphoneos/"; exit 1; }
 
           STAGE="$RUNNER_TEMP/ipa"
           rm -rf "$STAGE" && mkdir -p "$STAGE/Payload"
@@ -397,7 +381,7 @@ jobs:
           du -h "$IPA"
 
       - name: Upload IPA artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: ios-ipa
           path: dist/*.ipa
@@ -416,12 +400,12 @@ jobs:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Download build artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
