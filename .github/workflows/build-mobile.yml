@@ -1,0 +1,440 @@
+name: Build Mobile
+
+# ---------------------------------------------------------------------------
+# Unified cross-platform mobile build.
+#
+#   * Android  -> ubuntu-latest   -> release APKs (arm64, arm32)
+#   * iOS      -> macos-latest    -> unsigned .ipa (sideload with AltStore /
+#                                    Sideloadly / TrollStore)
+#
+# The app is a Flutter (Dart) client backed by a Go module that must be baked
+# into each binary via gomobile:
+#   * Android  ->  go_backend  ->  android/app/libs/gobackend.aar
+#   * iOS      ->  go_backend  ->  ios/Frameworks/Gobackend.xcframework
+#
+# This workflow therefore sets up the toolchain per platform (JDK/Gradle/NDK +
+# SDK for Android; Xcode/CocoaPods + gomobile for iOS), caches the heavy
+# dependency caches (pub, Gradle, CocoaPods, NDK), runs the two platform jobs
+# in parallel, and uploads both artifacts to a single build run.
+#
+# No secrets are required: the Android release build falls back to the debug
+# signing config (see android/app/build.gradle.kts) and the iOS archive is
+# produced with code signing disabled.
+# ---------------------------------------------------------------------------
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: mobile-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Shared, easily-tuned constants. Change these to match the repo's toolchain.
+env:
+  APP_NAME: SpotiFLAC
+  FLUTTER_VERSION_FILE: .fvmrc           # FVM pin -> "3.44.8"
+  # Android SDK / NDK (matching android/app/build.gradle.kts & gradle.properties)
+  ANDROID_NDK_VERSION: "29.0.14206865"
+  ANDROID_PLATFORM: "platforms;android-35"
+  ANDROID_BUILD_TOOLS: "build-tools;35.0.0"
+  # iOS (Xcode 16+/26+ compatible; see ios/Podfile, platform :ios, '15.0')
+  XCODE_VERSION: "26.1.1"
+
+jobs:
+  # -------------------------------------------------------------------------
+  # Resolve the app version once so every job names its artifacts identically.
+  # A tiny, fast job that both platform jobs wait on; the platform jobs still
+  # run in parallel with respect to each other.
+  # -------------------------------------------------------------------------
+  get-version:
+    name: Resolve app version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Read version
+        id: version
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^version: *\([^+]*\).*/\1/p' pubspec.yaml | tr -d '[:space:]')"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Resolved app version: ${VERSION}"
+
+  # -------------------------------------------------------------------------
+  # ANDROID  (ubuntu-latest): JDK 17 + Gradle/AGP + NDK, gomobile AAR, APKs
+  # -------------------------------------------------------------------------
+  android:
+    name: Android build
+    runs-on: ubuntu-latest
+    needs: get-version
+    timeout-minutes: 60
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift
+          df -h /
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      # --- Environment setup: JDK, Go, Flutter -----------------------------
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"            # matches android/*.gradle.kts (Java 17)
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go_backend/go.mod
+          cache-dependency-path: go_backend/go.sum
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version-file: ${{ env.FLUTTER_VERSION_FILE }}
+          cache: true
+
+      # --- Dependency caching ----------------------------------------------
+      - name: Cache Gradle
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', 'android/gradle.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Cache pub dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+          restore-keys: pub-${{ runner.os }}-
+
+      - name: Cache Android NDK
+        uses: actions/cache@v5
+        with:
+          path: /usr/local/lib/android/sdk/ndk/${{ env.ANDROID_NDK_VERSION }}
+          key: ndk-${{ env.ANDROID_NDK_VERSION }}
+
+      # --- Android SDK components ------------------------------------------
+      - name: Install Android SDK & NDK
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" \
+            "ndk;${ANDROID_NDK_VERSION}" \
+            "${ANDROID_PLATFORM}" \
+            "${ANDROID_BUILD_TOOLS}"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+
+      # --- Bake the Go backend into an AAR --------------------------------
+      - name: Build Go backend (gomobile AAR)
+        working-directory: go_backend
+        env:
+          CGO_ENABLED: 1
+        run: |
+          set -euo pipefail
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          # Installed from inside the module so the go.mod-pinned x/mobile is used.
+          go install golang.org/x/mobile/cmd/gomobile
+          gomobile init
+          mkdir -p ../android/app/libs
+          # arm/arm64 only; the app builds with --split-per-abi which uses
+          # --target-platform to restrict ABIs (no ndk.abiFilters is set).
+          gomobile bind -target=android/arm,android/arm64 -androidapi 24 \
+            -o ../android/app/libs/gobackend.aar .
+          test -f ../android/app/libs/gobackend.aar
+
+      # --- Flutter build ---------------------------------------------------
+      - name: Get Flutter dependencies
+        run: flutter pub get
+
+      - name: Generate app icons
+        run: dart run flutter_launcher_icons
+
+      - name: Build release APKs
+        run: |
+          set -euo pipefail
+          flutter build apk --release --split-per-abi \
+            --target-platform android-arm,android-arm64
+          ls -la build/app/outputs/flutter-apk/
+
+      - name: Collect and rename APKs
+        env:
+          VERSION: ${{ needs.get-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          SRC=build/app/outputs/flutter-apk
+          mkdir -p dist
+
+          copy_apk() {
+            [ -f "$SRC/$1" ] || { echo "::error::missing APK $1"; exit 1; }
+            cp "$SRC/$1" "dist/${APP_NAME}-${VERSION}-$2.apk"
+          }
+
+          copy_apk app-arm64-v8a-release.apk   arm64
+          copy_apk app-armeabi-v7a-release.apk arm32
+          # Universal APK is only emitted when the ABI split does not restrict it.
+          if [ -f "$SRC/app-release.apk" ]; then
+            cp "$SRC/app-release.apk" "dist/${APP_NAME}-${VERSION}-universal.apk"
+          fi
+          ls -la dist
+
+      - name: Verify APK integrity
+        run: |
+          set -euo pipefail
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)"
+          for apk in dist/*.apk; do
+            echo "::group::$(basename "$apk")"
+            "$APKSIGNER" verify --print-certs "$apk"
+            echo "::endgroup::"
+          done
+
+      - name: Upload Android APKs
+        uses: actions/upload-artifact@v6
+        with:
+          name: android-apk
+          path: dist/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  # -------------------------------------------------------------------------
+  # iOS  (macos-latest): Xcode + CocoaPods + gomobile XCFramework -> unsigned ipa
+  # -------------------------------------------------------------------------
+  ios:
+    name: iOS build
+    runs-on: macos-latest
+    needs: get-version
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      # --- Environment setup: Xcode, Go, Flutter ---------------------------
+      - name: Select Xcode ${{ env.XCODE_VERSION }}
+        run: |
+          set -e
+          if [ -d "/Applications/Xcode_${XCODE_VERSION}.app" ]; then
+            sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app"
+          elif [ -d "/Applications/Xcode_16.4.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_16.4.app
+          elif [ -d "/Applications/Xcode_16.2.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_16.2.app
+          else
+            sudo xcode-select -s /Applications/Xcode.app || true
+          fi
+          xcodebuild -version
+          ls /Applications/ | grep Xcode || true
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go_backend/go.mod
+          cache-dependency-path: go_backend/go.sum
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version-file: ${{ env.FLUTTER_VERSION_FILE }}
+          cache: true
+
+      # --- Dependency caching ----------------------------------------------
+      - name: Cache pub dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+          restore-keys: pub-${{ runner.os }}-
+
+      - name: Cache CocoaPods
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cocoapods
+            ios/Pods
+            ios/Runner.xcworkspace/xcshareddata
+          key: pods-${{ runner.os }}-${{ hashFiles('ios/Podfile', 'ios/Podfile.lock', 'pubspec.lock') }}
+          restore-keys: |
+            pods-${{ runner.os }}-
+            pods-ios-
+
+      # --- Bake the Go backend into an XCFramework -------------------------
+      - name: Install gomobile
+        working-directory: go_backend
+        run: |
+          set -euo pipefail
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          # go.mod-pinned x/mobile version (reproducible + cached by setup-go).
+          go install golang.org/x/mobile/cmd/gomobile
+          gomobile init
+
+      - name: Build Go backend for iOS
+        working-directory: go_backend
+        env:
+          CGO_ENABLED: 1
+        run: |
+          set -euo pipefail
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          mkdir -p ../ios/Frameworks
+          gomobile bind -target=ios -tags ios \
+            -o ../ios/Frameworks/Gobackend.xcframework .
+          test -d ../ios/Frameworks/Gobackend.xcframework
+          ls -la ../ios/Frameworks/
+
+      - name: Link XCFramework into the Xcode project
+        run: |
+          set -euo pipefail
+          gem list -i xcodeproj >/dev/null 2>&1 || sudo gem install xcodeproj --no-document
+
+          cat > /tmp/add_framework.rb <<'RUBY'
+          require 'xcodeproj'
+
+          project = Xcodeproj::Project.open('ios/Runner.xcodeproj')
+          target  = project.targets.find { |t| t.name == 'Runner' } or abort('Runner target not found')
+
+          group = project.main_group.find_subpath('Frameworks', true)
+          path  = 'Frameworks/Gobackend.xcframework'
+
+          # Idempotent: skip when a previous run already linked the framework.
+          if group.files.any? { |f| f.path == path }
+            puts 'Gobackend.xcframework already linked'
+            exit 0
+          end
+
+          ref = group.new_file(path, :project)
+          target.frameworks_build_phase.add_file_reference(ref)
+
+          embed = target.build_phases.find do |p|
+            p.is_a?(Xcodeproj::Project::Object::PBXCopyFilesBuildPhase) && p.name == 'Embed Frameworks'
+          end
+          if embed
+            embed.add_file_reference(ref).settings = {
+              'ATTRIBUTES' => %w[CodeSignOnCopy RemoveHeadersOnCopy]
+            }
+          end
+
+          project.save
+          puts 'Linked Gobackend.xcframework'
+          RUBY
+
+          ruby /tmp/add_framework.rb
+
+      # --- Flutter + CocoaPods --------------------------------------------
+      - name: Get Flutter dependencies
+        run: flutter pub get
+
+      - name: Install CocoaPods dependencies
+        run: |
+          cd ios
+          pod install --repo-update
+
+      - name: Normalize ffmpeg plugin shell scripts (strip CRLF)
+        run: |
+          find "$HOME/.pub-cache/hosted" -path "*ffmpeg_kit_flutter_new_full*/scripts/*.sh" -type f -print0 |
+            while IFS= read -r -d '' f; do
+              perl -pi -e 's/\r$//' "$f"
+              chmod +x "$f"
+            done
+
+      - name: Generate app icons
+        run: dart run flutter_launcher_icons
+
+      # --- Archive Runner without code signing ----------------------------
+      - name: Archive Runner without code signing
+        run: |
+          set -euo pipefail
+          flutter build ios --release --no-codesign --config-only
+          cd ios
+          pod install
+
+          # No -quiet on purpose: when the archive fails we need the actual
+          # compiler/linker diagnostic, not a bare "exit code 65".
+          LOG="$RUNNER_TEMP/xcodebuild-archive.log"
+          set +o pipefail
+          xcodebuild archive \
+            -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Runner.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            EXPANDED_CODE_SIGN_IDENTITY="" \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO \
+            2>&1 | tee "$LOG"
+          STATUS="${PIPESTATUS[0]}"
+          set -o pipefail
+
+          if [ "$STATUS" -ne 0 ]; then
+            echo "::group::xcodebuild diagnostics"
+            grep -nE "error:|fatal error:|Undefined symbol|ld: |clang: error|Command .* failed" "$LOG" | head -100 || true
+            echo "::endgroup::"
+            echo "::error::xcodebuild archive failed with exit code $STATUS - see the diagnostics above and the ios-xcodebuild-log artifact"
+            exit "$STATUS"
+          fi
+
+      - name: Upload xcodebuild log
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ios-xcodebuild-log
+          path: ${{ runner.temp }}/xcodebuild-archive.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # --- Package the unsigned .ipa --------------------------------------
+      - name: Package IPA
+        env:
+          VERSION: ${{ needs.get-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/Runner.xcarchive/Products/Applications/Runner.app"
+          test -d "$APP" || { echo "::error::Runner.app missing from archive"; exit 1; }
+
+          STAGE="$RUNNER_TEMP/ipa"
+          rm -rf "$STAGE" && mkdir -p "$STAGE/Payload"
+          cp -R "$APP" "$STAGE/Payload/Runner.app"
+
+          # Sideloading tools re-sign the bundle: drop any stale signature
+          # residue so AltStore/Sideloadly start from a clean payload.
+          find "$STAGE/Payload" \( -name _CodeSignature -o -name 'embedded.mobileprovision' \) \
+            -prune -exec rm -rf {} +
+
+          mkdir -p dist
+          IPA="$PWD/dist/${APP_NAME}-${VERSION}-ios-unsigned.ipa"
+          ( cd "$STAGE" && zip -qry "$IPA" Payload )
+
+          # An IPA is a zip whose first entry is Payload/<App>.app - assert it.
+          unzip -l "$IPA" | grep -q 'Payload/Runner.app/Info.plist' \
+            || { echo "::error::IPA payload is malformed"; exit 1; }
+          du -h "$IPA"
+
+      - name: Upload iOS IPA
+        uses: actions/upload-artifact@v6
+        with:
+          name: ios-ipa
+          path: dist/*.ipa
+          if-no-files-found: error
+          retention-days: 14
