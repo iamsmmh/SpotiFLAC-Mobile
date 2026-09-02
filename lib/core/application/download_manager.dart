@@ -153,9 +153,9 @@ class _PipelineRunner {
         outputPath: target.finalPath,
         byteSize: outcome.byteSize,
       );
-    } on JobCancelledException catch (error) {
+    } on JobCancelledException {
       await _rollbackQuietly(target);
-      throw error; // Engine settles held/cancelled from the token state.
+      rethrow; // Engine settles held/cancelled from the token state.
     } catch (error) {
       await _rollbackQuietly(target);
       if (error is CoreError) return QueueJobResult.failure(error);

@@ -122,11 +122,10 @@ const Object _sentinel = Object();
 class ExtensionExhaustedError extends CoreError {
   ExtensionExhaustedError({
     required List<CoreError> failures,
-    required String message,
+    required super.message,
   }) : failures = List.unmodifiable(failures),
        super(
          category: _dominantCategory(failures),
-         message: message,
          retryable: failures.any((f) => f.isRetryable),
        );
 

@@ -101,7 +101,7 @@ class BridgeDownloadBackend implements DownloadBackend {
       return const DownloadTaskResult.success();
     }
     final Object? rawError = response['error'] ?? response['message'];
-    final errorMessage = rawError == null ? null : rawError.toString();
+    final errorMessage = rawError?.toString();
     return DownloadTaskResult.failure(
       CoreError(
         category: coreCategoryForBackendError(
