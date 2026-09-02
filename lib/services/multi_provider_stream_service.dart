@@ -813,7 +813,7 @@ class SoundCloudStreamHandler extends StreamProviderHandler {
       Map<String, dynamic>? progressive;
       for (final raw in transcodings) {
         final t = raw as Map<String, dynamic>;
-        final proto = (t['format'] as Map<String, dynamic>)?['protocol']
+        final proto = (t['format'] as Map<String, dynamic>?)?['protocol']
             as String?;
         if (proto == 'progressive') {
           progressive = t;
@@ -830,7 +830,7 @@ class SoundCloudStreamHandler extends StreamProviderHandler {
       final streamUrl = streamBody['url'] as String?;
       if (streamUrl == null || streamUrl.isEmpty) return null;
 
-      final user = (best['user'] as Map<String, dynamic>)?['username']
+      final user = (best['user'] as Map<String, dynamic>?)?['username']
           as String?;
       return ResolvedStream(
         uri: Uri.parse(streamUrl),

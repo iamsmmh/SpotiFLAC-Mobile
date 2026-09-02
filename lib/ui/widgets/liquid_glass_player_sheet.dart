@@ -45,7 +45,7 @@ class LiquidGlassPlayerSheet extends ConsumerStatefulWidget {
         opaque: false,
         barrierColor: Colors.black.withValues(alpha: 0.55),
         transitionDuration: const Duration(milliseconds: 380),
-        pageBuilder: (_, animation, __) {
+        pageBuilder: (context, animation, secondaryAnimation) {
           final curved = CurvedAnimation(
             parent: animation,
             curve: Curves.easeOutCubic,
@@ -440,7 +440,7 @@ class _ProviderChip extends StatelessWidget {
     StreamProviderId.youtube => Icons.smart_display_outlined,
     StreamProviderId.appleMusic => Icons.apple_rounded,
     StreamProviderId.tidal => Icons.waves_rounded,
-    StreamProviderId.qobuz => Icons.studio_quality_rounded,
+    StreamProviderId.qobuz => Icons.high_quality_rounded,
     StreamProviderId.deezer => Icons.library_music_outlined,
     StreamProviderId.amazonMusic => Icons.shopping_bag_outlined,
     StreamProviderId.soundCloud => Icons.graphic_eq_rounded,

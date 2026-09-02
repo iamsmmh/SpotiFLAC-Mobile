@@ -1972,7 +1972,7 @@ func TestBuildSignedSessionChallengeURL(t *testing.T) {
 	if !strings.Contains(got, "id=chal-123") {
 		t.Fatalf("expected challenge id in query: %q", got)
 	}
-	if !strings.Contains(got, "cb=spotiflac%3A%2F%2Fsession-grant") {
+	if !strings.Contains(got, "cb=spotimusic%3A%2F%2Fsession-grant") {
 		t.Fatalf("expected encoded callback URL in query: %q", got)
 	}
 }

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:spotimusic/engine/smart_play.dart';
 import 'package:spotimusic/l10n/l10n.dart';
+import 'package:spotimusic/models/track.dart';
 import 'package:spotimusic/providers/download_history_provider.dart';
 import 'package:spotimusic/providers/engine_settings_provider.dart';
 import 'package:spotimusic/providers/music_player_provider.dart';

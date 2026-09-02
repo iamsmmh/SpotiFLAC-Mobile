@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:spotimusic/l10n/l10n.dart';
 import 'package:spotimusic/providers/download_history_provider.dart';
 import 'package:spotimusic/providers/music_player_provider.dart';
+import 'package:spotimusic/providers/streaming_engine_provider.dart';
 import 'package:spotimusic/ui/widgets/liquid_glass_player_sheet.dart';
 import 'package:spotimusic/screens/downloaded_album_screen.dart';
 import 'package:spotimusic/screens/local_album_screen.dart';
@@ -388,9 +389,12 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
               tooltip: 'Streaming providers',
               icon: const Icon(Icons.travel_explore_rounded),
               onPressed: () {
+                final track = ref
+                    .read(streamingEngineControllerProvider)
+                    .trackFor(mediaItem.id);
                 LiquidGlassPlayerSheet.show(
                   context,
-                  track: trackFor(mediaItem.id),
+                  track: track,
                   mediaItem: mediaItem,
                 );
               },

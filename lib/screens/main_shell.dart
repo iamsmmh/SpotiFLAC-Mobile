@@ -838,8 +838,8 @@ class _MainShellState extends ConsumerState<MainShell>
                 const Positioned.fill(child: LiquidGlassBackground()),
               Positioned.fill(
                 child: Scaffold(
-          extendBody: true,
-          backgroundColor: useLiquidGlass ? Colors.transparent : null,
+                  extendBody: true,
+                  backgroundColor: useLiquidGlass ? Colors.transparent : null,
           // The page view keeps one element across the rail<->bar structure
           // swap via _pageViewKey; without it a rotation past the 600dp
           // breakpoint remounts the PageView and snaps back to the first tab.
