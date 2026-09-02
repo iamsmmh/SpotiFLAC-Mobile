@@ -15,7 +15,10 @@ void main() {
       child: MaterialApp(
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),
-        home: Scaffold(body: Center(child: child)),
+        home: TickerMode(
+          enabled: false,
+          child: Scaffold(body: Center(child: child)),
+        ),
       ),
     );
   }
@@ -41,10 +44,14 @@ void main() {
     testWidgets('LiquidGlassBackground renders descendants', (tester) async {
       await tester.pumpWidget(
         host(
-          const LiquidGlassBackground(child: Text('aurora above glows')),
+          const SizedBox(
+            width: 200,
+            height: 120,
+            child: LiquidGlassBackground(child: Text('aurora above glows')),
+          ),
         ),
       );
-      await tester.pump(const Duration(milliseconds: 50));
+      await tester.pump();
       expect(find.text('aurora above glows'), findsOneWidget);
     });
   });
@@ -58,22 +65,26 @@ void main() {
       duration: 210,
     );
 
-    testWidgets('shows all eight provider chips and the FLAC button', (
-      tester,
-    ) async {
+    Future<void> pumpSheet(WidgetTester tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(
         host(const LiquidGlassPlayerSheet(track: track)),
       );
       await tester.pump();
+    }
 
-      // Section labels are rendered upper-cased.
+    testWidgets('shows all eight provider chips and the FLAC button', (
+      tester,
+    ) async {
+      await pumpSheet(tester);
+
       expect(find.text('STREAM PROVIDER'), findsOneWidget);
       expect(find.text('OFFLINE MODE'), findsOneWidget);
       expect(
         find.text('Download lossless FLAC for offline'),
         findsOneWidget,
       );
-      // The eight provider chips.
       for (final name in [
         'Spotify',
         'YT Music',
@@ -91,12 +102,8 @@ void main() {
     testWidgets('exposes a lossless FLAC download action label', (
       tester,
     ) async {
-      await tester.pumpWidget(
-        host(const LiquidGlassPlayerSheet(track: track)),
-      );
-      await tester.pump();
+      await pumpSheet(tester);
 
-      // The offline/download section surfaces the FLAC action.
       expect(
         find.text('Download lossless FLAC for offline'),
         findsOneWidget,
