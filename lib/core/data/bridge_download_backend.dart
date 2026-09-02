@@ -48,7 +48,7 @@ class BridgeDownloadBackend implements DownloadBackend {
     // side flips a latch the transfer observes on its next read/write cycle.
     unawaited(
       PlatformBridge.cancelDownload(jobId).then<void>(
-        () {},
+        (_) {},
         onError: (Object _) {},
       ),
     );
