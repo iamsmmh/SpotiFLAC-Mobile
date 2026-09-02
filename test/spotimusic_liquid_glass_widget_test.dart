@@ -66,8 +66,9 @@ void main() {
       );
       await tester.pump();
 
-      expect(find.text('Stream provider'), findsOneWidget);
-      expect(find.text('Offline mode'), findsOneWidget);
+      // Section labels are rendered upper-cased.
+      expect(find.text('STREAM PROVIDER'), findsOneWidget);
+      expect(find.text('OFFLINE MODE'), findsOneWidget);
       expect(
         find.text('Download lossless FLAC for offline'),
         findsOneWidget,

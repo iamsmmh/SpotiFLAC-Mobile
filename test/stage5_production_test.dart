@@ -286,11 +286,11 @@ void main() {
       expect(
         artifacts.map((a) => a.fileName),
         containsAll([
-          'SpotiFLAC-v4.9.0-arm64.apk',
-          'SpotiFLAC-v4.9.0-arm32.apk',
-          'SpotiFLAC-v4.9.0-x86_64.apk',
-          'SpotiFLAC-v4.9.0.aab',
-          'SpotiFLAC-v4.9.0-ios-unsigned.ipa',
+          'SpotiMusic-v4.9.0-arm64.apk',
+          'SpotiMusic-v4.9.0-arm32.apk',
+          'SpotiMusic-v4.9.0-x86_64.apk',
+          'SpotiMusic-v4.9.0.aab',
+          'SpotiMusic-v4.9.0-ios-unsigned.ipa',
         ]),
       );
       expect(
@@ -310,11 +310,11 @@ void main() {
 
     test('SHA256SUMS parse + verify round-trips via sha256.dart', () {
       const bytes = <int>[0, 1, 2, 3, 4];
-      final line = ReleaseArtifactPolicy.checksumLine('SpotiFLAC-v4.9.0-arm64.apk', bytes);
+      final line = ReleaseArtifactPolicy.checksumLine('SpotiMusic-v4.9.0-arm64.apk', bytes);
       final parsed = ReleaseArtifactPolicy.parseChecksums('# comment\n$line\n');
       expect(
         ReleaseArtifactPolicy.verify(
-          fileName: 'SpotiFLAC-v4.9.0-arm64.apk',
+          fileName: 'SpotiMusic-v4.9.0-arm64.apk',
           bytes: bytes,
           checksums: parsed,
         ),
