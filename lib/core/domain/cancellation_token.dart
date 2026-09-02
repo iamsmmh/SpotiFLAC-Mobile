@@ -61,7 +61,7 @@ class CancellationToken {
   /// before and after every await boundary inside a pipeline stage.
   void throwIfCancelled({String? jobId}) {
     if (_state.isCancelled) {
-      throw JobCancelledException(jobId: jobId, reason: _state.reason);
+      throw JobCancelledException(jobId: jobId, reason: _state.reason ?? 'cancelled');
     }
   }
 }
@@ -99,9 +99,9 @@ class _CancellationState {
   final Completer<void> _completer = Completer<void>();
   List<void Function()> _listeners = <void Function()>[];
   bool isCancelled = false;
-  String _reason = 'cancelled';
+  String? _reason;
 
-  String get reason => _reason;
+  String? get reason => _reason;
 
   Future<void> get cancelled => _completer.future;
 

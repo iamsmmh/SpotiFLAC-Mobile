@@ -305,6 +305,7 @@ void main() {
       engine.enqueue(spec('third', priority: JobPriority.low));
 
       engine.reorder('third', JobPriority.immediate);
+      await flushQueue();
       expect(
         engine.pendingJobs.map((j) => j.id),
         <String>['third', 'second'],
@@ -313,6 +314,7 @@ void main() {
 
       // Running jobs are never re-laned.
       engine.reorder('first', JobPriority.low);
+      await flushQueue();
       expect(
         events.whereType<QueueJobReordered>().where((e) => e.job.id == 'first'),
         isEmpty,
@@ -412,6 +414,7 @@ void main() {
       runner.finish('j1', const QueueJobResult.success());
       runner.finish('j2', const QueueJobResult.success());
       await drained; // must complete once nothing is pending/running
+      await flushQueue();
       expect(
         events.whereType<QueueEmptied>(),
         hasLength(1),
@@ -431,6 +434,46 @@ void main() {
       final second = engine.enqueue(spec('dup'));
       expect(identical(first.id, second.id), isTrue);
       expect(runner.opened, hasLength(1));
+    });
+
+    test('drained waits for the current batch, not a previous work cycle',
+        () async {
+      final runner = _ControllableRunner();
+      final engine = QueueEngine(
+        runner: runner.call,
+        config: const QueueEngineConfig(maxConcurrent: 1, shutdownGrace: Duration(milliseconds: 50)),
+      );
+      addTearDown(engine.dispose);
+
+      // Drain the first work cycle completely.
+      engine.enqueue(spec('first'));
+      runner.finish('first', const QueueJobResult.success());
+      await engine.drained;
+
+      // A second cycle must hand out a fresh, uncompleted drain future.
+      engine.enqueue(spec('second'));
+      await flushQueue();
+      expect(
+        runner.opened.map((e) => e.job.id),
+        contains('second'),
+      );
+
+      var secondDrainedCompleted = false;
+      final secondDrained = engine.drained;
+      unawaited(
+        secondDrained.then((_) => secondDrainedCompleted = true),
+      );
+      await flushQueue();
+
+      expect(
+        secondDrainedCompleted,
+        isFalse,
+        reason: 'drained must not resolve while the second batch is running',
+      );
+
+      runner.finish('second', const QueueJobResult.success());
+      await secondDrained;
+      expect(secondDrainedCompleted, isTrue);
     });
   });
 }

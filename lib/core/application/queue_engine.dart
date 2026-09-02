@@ -187,7 +187,11 @@ class QueueEngine {
     if (_pending.isEmpty && _running.isEmpty) {
       return Future<void>.value();
     }
-    return (_drainCompleter ??= Completer<void>()).future;
+    final current = _drainCompleter;
+    if (current == null || current.isCompleted) {
+      return (_drainCompleter = Completer<void>()).future;
+    }
+    return current.future;
   }
 
   // -------------------------------------------------------------------------
@@ -428,6 +432,13 @@ class QueueEngine {
       final completer = _drainCompleter;
       if (completer != null && !completer.isCompleted) {
         completer.complete();
+      }
+      // A completed drain completer must not be reused for a later work
+      // cycle. Otherwise a caller that awaits `drained` while a second batch
+      // is running gets an already-completed future and resumes before the
+      // batch actually finished.
+      if (identical(_drainCompleter, completer)) {
+        _drainCompleter = null;
       }
     } else {
       _emptiedSignalled = false;
