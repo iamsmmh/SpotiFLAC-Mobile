@@ -85,10 +85,30 @@ jobs:
         run: flutter pub get
 
       - name: Analyze
-        run: flutter analyze
+        run: |
+          set -o pipefail
+          if ! flutter analyze 2>&1 | tee analyze.log; then
+            # Surface analyzer findings as annotations so failures are
+            # diagnosable from the Checks API (not just the raw log).
+            findings=$(grep -E "^[[:space:]]*(error|warning|info) " analyze.log | head -40)
+            [ -n "$findings" ] || findings=$(tail -n 20 analyze.log)
+            printf '%s\n' "$findings" | while IFS= read -r line; do
+              echo "::error::${line}"
+            done
+            exit 1
+          fi
 
       - name: Run tests
-        run: flutter test
+        run: |
+          set -o pipefail
+          if ! flutter test 2>&1 | tee test.log; then
+            findings=$(grep -E "\[E\]|Error:|Some tests failed" test.log | head -40)
+            [ -n "$findings" ] || findings=$(tail -n 20 test.log)
+            printf '%s\n' "$findings" | while IFS= read -r line; do
+              echo "::error::${line}"
+            done
+            exit 1
+          fi
 
   go:
     name: Go vet & test
