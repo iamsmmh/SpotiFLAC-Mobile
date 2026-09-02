@@ -99,15 +99,9 @@ jobs:
           fi
 
       - name: Run tests
-        run: |
-          set -o pipefail
-          if ! flutter test 2>&1 | tee test.log; then
-            findings=$(grep -E "\[E\]" test.log | head -20; grep -A8 -E "\[E\]" test.log | head -100)
-            [ -n "$findings" ] || findings=$(tail -n 40 test.log)
-            encoded=$(printf '%s' "$findings" | head -c 3500 | sed ':a;N;$!ba;s/\n/%0A/g')
-            echo "::error::${encoded}"
-            exit 1
-          fi
+        # The github reporter emits each failing test as an ::error
+        # annotation, so failures are diagnosable from the Checks API.
+        run: flutter test --reporter github
 
   go:
     name: Go vet & test
