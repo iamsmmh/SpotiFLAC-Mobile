@@ -31,6 +31,18 @@
 
 ---
 
+## [5.0.0] - 2026-09-02
+
+### Added — SpotiMusic Rebrand & Dual-Mode Playback
+
+- Rebranded the application from SpotiFLAC to SpotiMusic.
+- Added the unified streaming engine, Liquid Glass player experience, and
+  resilient multi-provider playback introduced in the 4.9.1 development cycle.
+- Added download scheduling, queue transfer, storage diagnostics, streaming
+  integrity reporting, listening statistics, and privacy controls.
+
+---
+
 ## [4.9.1] - 2026-08-31
 
 ### Added — Streaming Engine & Liquid Glass
