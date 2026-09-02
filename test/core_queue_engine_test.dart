@@ -432,6 +432,46 @@ void main() {
       expect(identical(first.id, second.id), isTrue);
       expect(runner.opened, hasLength(1));
     });
+
+    test('drained waits for the current batch, not a previous work cycle',
+        () async {
+      final runner = _ControllableRunner();
+      final engine = QueueEngine(
+        runner: runner.call,
+        config: const QueueEngineConfig(maxConcurrent: 1, shutdownGrace: Duration(milliseconds: 50)),
+      );
+      addTearDown(engine.dispose);
+
+      // Drain the first work cycle completely.
+      engine.enqueue(spec('first'));
+      runner.finish('first', const QueueJobResult.success());
+      await engine.drained;
+
+      // A second cycle must hand out a fresh, uncompleted drain future.
+      engine.enqueue(spec('second'));
+      await flushQueue();
+      expect(
+        runner.opened.map((e) => e.job.id),
+        contains('second'),
+      );
+
+      var secondDrainedCompleted = false;
+      final secondDrained = engine.drained;
+      unawaited(
+        secondDrained.then((_) => secondDrainedCompleted = true),
+      );
+      await flushQueue();
+
+      expect(
+        secondDrainedCompleted,
+        isFalse,
+        reason: 'drained must not resolve while the second batch is running',
+      );
+
+      runner.finish('second', const QueueJobResult.success());
+      await secondDrained;
+      expect(secondDrainedCompleted, isTrue);
+    });
   });
 }
 

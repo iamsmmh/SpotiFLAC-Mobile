@@ -13,18 +13,39 @@ import (
 	"github.com/dop251/goja"
 )
 
+const maxAllowedDownloadDirs = 256
+
 var (
 	allowedDownloadDirs   []string
 	allowedDownloadDirsMu sync.RWMutex
 )
 
 func AddAllowedDownloadDir(dir string) {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return
+	}
+	absDir = filepath.Clean(absDir)
+
 	allowedDownloadDirsMu.Lock()
 	defer allowedDownloadDirsMu.Unlock()
-	absDir, err := filepath.Abs(dir)
-	if err == nil {
-		allowedDownloadDirs = append(allowedDownloadDirs, absDir)
+
+	for _, existing := range allowedDownloadDirs {
+		if filepath.Clean(existing) == absDir {
+			return
+		}
 	}
+
+	// The replace-allow-list and path validation runs once per download, so
+	// an app that uses a single output folder would otherwise append the same
+	// directory on every job and grow this slice without bound. Keep a bounded
+	// number of distinct directories; older entries fall off first.
+	if len(allowedDownloadDirs) >= maxAllowedDownloadDirs {
+		keep := len(allowedDownloadDirs) - maxAllowedDownloadDirs/2
+		copy(allowedDownloadDirs, allowedDownloadDirs[keep:])
+		allowedDownloadDirs = allowedDownloadDirs[:maxAllowedDownloadDirs/2]
+	}
+	allowedDownloadDirs = append(allowedDownloadDirs, absDir)
 }
 
 // SetAllowedDownloadDirs replaces the whole allow-list in one call (passing nil

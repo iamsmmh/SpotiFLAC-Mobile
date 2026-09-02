@@ -438,6 +438,12 @@ func DownloadByStrategy(requestJSON string) (resp string, err error) {
 		return resp, nil
 	}
 
+	// The non-extension path never reaches DownloadWithExtensionsJSON, which
+	// owns and closes an SAF-detached output FD. Close it here so a download
+	// request that does not use extensions cannot leak one FD per failed
+	// attempt. The success path is unaffected: it took the return above and
+	// the extension export closes the FD in its own defer.
+	closeOwnedOutputFD(req.OutputFD)
 	return errorResponse("Extension providers are disabled; built-in download providers have been retired")
 }
 
