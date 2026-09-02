@@ -3126,6 +3126,14 @@
   "@cacheClearAll": {
     "description": "Button label to clear all caches"
   },
+  "cacheCleanBrokenStreams": "Clean broken streams",
+  "@cacheCleanBrokenStreams": {
+    "description": "Action title for removing interrupted/stale stream artifacts"
+  },
+  "cacheCleanBrokenStreamsDesc": "Remove interrupted and stale stream artifacts from the temporary cache. Downloaded music is never deleted.",
+  "@cacheCleanBrokenStreamsDesc": {
+    "description": "Subtitle for the broken-stream cleanup action"
+  },
   "cacheCleanupUnused": "Cleanup unused data",
   "@cacheCleanupUnused": {
     "description": "Action title for cleaning unused entries"

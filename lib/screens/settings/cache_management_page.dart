@@ -8,8 +8,10 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:spotiflac_android/l10n/l10n.dart';
 import 'package:spotiflac_android/providers/download_queue_provider.dart';
+import 'package:spotiflac_android/providers/engine_settings_provider.dart';
 import 'package:spotiflac_android/providers/local_library_provider.dart';
 import 'package:spotiflac_android/providers/settings_provider.dart';
+import 'package:spotiflac_android/services/cache_auto_cleaner.dart';
 import 'package:spotiflac_android/services/cover_cache_manager.dart';
 import 'package:spotiflac_android/services/platform_bridge.dart';
 import 'package:spotiflac_android/utils/string_utils.dart';
@@ -324,6 +326,23 @@ class _CacheManagementPageState extends ConsumerState<CacheManagementPage> {
     );
   }
 
+  /// Removes broken/partial stream artifacts and stale ephemeral files from
+  /// the app cache and temp directories. Never touches downloaded music.
+  Future<void> _cleanBrokenStreams() async {
+    await _runAction(
+      'clean_broken_streams',
+      () async {
+        final appCache = await getApplicationCacheDirectory();
+        final temp = await getTemporaryDirectory();
+        const cleaner = CacheAutoCleaner();
+        await cleaner.cleanBrokenStreams([appCache, temp]);
+      },
+      successMessage: context.l10n.cacheClearSuccess(
+        context.l10n.cacheCleanBrokenStreams,
+      ),
+    );
+  }
+
   Future<void> _cleanupUnusedData() async {
     await _runAction('cleanup_unused', () async {
       final orphanedDownloads = await ref
@@ -383,6 +402,7 @@ class _CacheManagementPageState extends ConsumerState<CacheManagementPage> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final overview = _overview;
+    final cacheLimitMb = ref.watch(engineMaxCacheSizeMbProvider);
 
     return Scaffold(
       body: CustomScrollView(
@@ -439,6 +459,16 @@ class _CacheManagementPageState extends ConsumerState<CacheManagementPage> {
                         ),
                       ),
                     ),
+                    if (cacheLimitMb > 0) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Cache limit: ${cacheLimitMb} MB',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onPrimaryContainer,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     Wrap(
                       spacing: 8,
@@ -640,6 +670,15 @@ class _CacheManagementPageState extends ConsumerState<CacheManagementPage> {
             SliverToBoxAdapter(
               child: SettingsGroup(
                 children: [
+                  SettingsItem(
+                    icon: Icons.broken_image_outlined,
+                    title: context.l10n.cacheCleanBrokenStreams,
+                    subtitle: context.l10n.cacheCleanBrokenStreamsDesc,
+                    trailing: _buildClearTrailing(
+                      'clean_broken_streams',
+                      _cleanBrokenStreams,
+                    ),
+                  ),
                   SettingsItem(
                     icon: Icons.cleaning_services_outlined,
                     title: context.l10n.cacheCleanupUnused,

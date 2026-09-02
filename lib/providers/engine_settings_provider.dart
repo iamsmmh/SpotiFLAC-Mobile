@@ -40,6 +40,20 @@ class EngineSettings {
   /// follow provider terms.
   final bool cacheStreams;
 
+  // ---- Offline mode & storage policy ----------------------------------------
+  /// Restricts playback strictly to local storage: the engine reports an
+  /// offline network profile, never resolves stream candidates and never
+  /// attempts network-based downloads until the switch is turned off.
+  final bool offlineMode;
+
+  /// Maximum ephemeral cache footprint (app cache + temp dirs) in MiB.
+  /// 0 = unlimited (no automatic pruning).
+  final int maxCacheSizeMb;
+
+  /// Whether the max-cache-size threshold is enforced automatically after
+  /// playback/download activity and at startup.
+  final bool autoCleanCache;
+
   // ---- Real-time audio pipeline --------------------------------------------
   /// Gapless transitions between consecutive queue items (skips source
   /// teardown for compatible lossless tracks).
@@ -86,6 +100,9 @@ class EngineSettings {
     this.autoRefreshExpiredUrls = true,
     this.bufferPreviewStreams = true,
     this.cacheStreams = false,
+    this.offlineMode = false,
+    this.maxCacheSizeMb = 0,
+    this.autoCleanCache = true,
     this.gaplessEnabled = true,
     this.lowBandwidthBufferSeconds = 30,
     this.prebufferHeadBytesKb = 512,
@@ -119,6 +136,9 @@ class EngineSettings {
     bool? autoRefreshExpiredUrls,
     bool? bufferPreviewStreams,
     bool? cacheStreams,
+    bool? offlineMode,
+    int? maxCacheSizeMb,
+    bool? autoCleanCache,
     bool? gaplessEnabled,
     int? lowBandwidthBufferSeconds,
     int? prebufferHeadBytesKb,
@@ -151,6 +171,9 @@ class EngineSettings {
         autoRefreshExpiredUrls ?? this.autoRefreshExpiredUrls,
     bufferPreviewStreams: bufferPreviewStreams ?? this.bufferPreviewStreams,
     cacheStreams: cacheStreams ?? this.cacheStreams,
+    offlineMode: offlineMode ?? this.offlineMode,
+    maxCacheSizeMb: maxCacheSizeMb ?? this.maxCacheSizeMb,
+    autoCleanCache: autoCleanCache ?? this.autoCleanCache,
     gaplessEnabled: gaplessEnabled ?? this.gaplessEnabled,
     lowBandwidthBufferSeconds:
         lowBandwidthBufferSeconds ?? this.lowBandwidthBufferSeconds,
@@ -194,6 +217,9 @@ class EngineSettings {
     'auto_refresh_expired_urls': autoRefreshExpiredUrls,
     'buffer_preview_streams': bufferPreviewStreams,
     'cache_streams': cacheStreams,
+    'offline_mode': offlineMode,
+    'max_cache_size_mb': maxCacheSizeMb,
+    'auto_clean_cache': autoCleanCache,
     'gapless_enabled': gaplessEnabled,
     'low_bandwidth_buffer_seconds': lowBandwidthBufferSeconds,
     'prebuffer_head_bytes_kb': prebufferHeadBytesKb,
@@ -237,6 +263,9 @@ class EngineSettings {
           json['auto_refresh_expired_urls'] as bool? ?? true,
       bufferPreviewStreams: json['buffer_preview_streams'] as bool? ?? true,
       cacheStreams: json['cache_streams'] as bool? ?? false,
+      offlineMode: json['offline_mode'] as bool? ?? false,
+      maxCacheSizeMb: (json['max_cache_size_mb'] as num?)?.toInt() ?? 0,
+      autoCleanCache: json['auto_clean_cache'] as bool? ?? true,
       gaplessEnabled: json['gapless_enabled'] as bool? ?? true,
       lowBandwidthBufferSeconds:
           (json['low_bandwidth_buffer_seconds'] as num?)?.toInt() ?? 30,
@@ -367,6 +396,15 @@ class EngineSettingsNotifier extends Notifier<EngineSettings> {
   Future<void> setCacheStreams(bool value) =>
       _apply(state.copyWith(cacheStreams: value));
 
+  Future<void> setOfflineMode(bool value) =>
+      _apply(state.copyWith(offlineMode: value));
+
+  Future<void> setMaxCacheSizeMb(int value) =>
+      _apply(state.copyWith(maxCacheSizeMb: value.clamp(0, 16384)));
+
+  Future<void> setAutoCleanCache(bool value) =>
+      _apply(state.copyWith(autoCleanCache: value));
+
   Future<void> setGaplessEnabled(bool value) =>
       _apply(state.copyWith(gaplessEnabled: value));
 
@@ -434,4 +472,14 @@ final glassPointerGlowProvider = Provider<bool>(
 final engineStreamingEnabledProvider = Provider<bool>(
   (ref) =>
       ref.watch(engineSettingsProvider.select((s) => s.streamingEnabled)),
+);
+
+/// True while the user has forced local-only playback (offline mode).
+final engineOfflineModeProvider = Provider<bool>(
+  (ref) => ref.watch(engineSettingsProvider.select((s) => s.offlineMode)),
+);
+
+/// The configured max cache size in MiB (0 = unlimited).
+final engineMaxCacheSizeMbProvider = Provider<int>(
+  (ref) => ref.watch(engineSettingsProvider.select((s) => s.maxCacheSizeMb)),
 );

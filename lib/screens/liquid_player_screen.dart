@@ -9,14 +9,19 @@ import 'package:spotiflac_android/l10n/l10n.dart';
 import 'package:spotiflac_android/providers/download_history_provider.dart';
 import 'package:spotiflac_android/providers/engine_settings_provider.dart';
 import 'package:spotiflac_android/providers/music_player_provider.dart';
+import 'package:spotiflac_android/providers/now_playing_lyrics_provider.dart';
+import 'package:spotiflac_android/providers/playback_telemetry_provider.dart';
 import 'package:spotiflac_android/providers/streaming_engine_provider.dart';
 import 'package:spotiflac_android/screens/track_metadata_screen.dart';
 import 'package:spotiflac_android/services/cover_cache_manager.dart';
 import 'package:spotiflac_android/services/history_database.dart';
+import 'package:spotiflac_android/utils/lyrics_parser.dart';
 import 'package:spotiflac_android/utils/string_utils.dart';
 import 'package:spotiflac_android/widgets/liquid/liquid_glass.dart';
 import 'package:spotiflac_android/widgets/liquid/liquid_visualizer.dart';
+import 'package:spotiflac_android/widgets/playback_telemetry_card.dart';
 import 'package:spotiflac_android/widgets/player_artwork.dart';
+import 'package:spotiflac_android/widgets/synced_lyrics_viewer.dart';
 
 /// Hero tag for the Liquid player artwork (kept separate from the classic
 /// player's tag so both routes can coexist).
@@ -285,20 +290,36 @@ class _LiquidPlayerScreenState extends ConsumerState<LiquidPlayerScreen>
           if (contextInfo != null && contextInfo.mode != SmartPlayMode.unavailable)
             Padding(
               padding: const EdgeInsets.only(top: 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  GlassChip(
-                    icon: _modeIcon(contextInfo.mode),
-                    label: _modeLabel(contextInfo),
-                    selected: true,
+              child: Tooltip(
+                message: 'Stream info',
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _openTelemetrySheet,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      GlassChip(
+                        icon: _modeIcon(contextInfo.mode),
+                        label: _modeLabel(contextInfo),
+                        selected: true,
+                      ),
+                      const SizedBox(width: 8),
+                      if (contextInfo.characteristics.compactLabel.isNotEmpty)
+                        GlassChip(
+                          label: contextInfo.characteristics.compactLabel,
+                        ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  if (contextInfo.characteristics.compactLabel.isNotEmpty)
-                    GlassChip(
-                      label: contextInfo.characteristics.compactLabel,
-                    ),
-                ],
+                ),
+              ),
+            ),
+          if (ref.watch(engineOfflineModeProvider))
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: GlassChip(
+                icon: Icons.cloud_off_outlined,
+                label: 'Offline mode',
+                selected: true,
               ),
             ),
         ],
@@ -566,33 +587,20 @@ class _LiquidPlayerScreenState extends ConsumerState<LiquidPlayerScreen>
     await showLiquidBottomSheet<void>(
       context: context,
       title: 'Lyrics',
-      subtitle: const Text('Synced lyrics & translations'),
-      builder: (sheetContext) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.lyrics_outlined, size: 48),
-            const SizedBox(height: 12),
-            const Text('Lyrics for this track'),
-            const SizedBox(height: 4),
-            const Text(
-              'Open Track details for synced lyrics, translations, '
-              'and copy/share actions.',
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            GlassButton(
-              prominent: true,
-              onPressed: () {
-                Navigator.of(sheetContext).pop();
-                _openTrackDetails();
-              },
-              child: const Text('Open track details'),
-            ),
-          ],
-        ),
+      subtitle: const Text('Tap a line to jump to that moment'),
+      builder: (sheetContext) => SizedBox(
+        height: MediaQuery.sizeOf(context).height * 0.62,
+        child: const _LyricsSheetContent(),
       ),
+    );
+  }
+
+  Future<void> _openTelemetrySheet() async {
+    await showLiquidBottomSheet<void>(
+      context: context,
+      title: 'Stream info',
+      subtitle: const Text('Codec · bitrate · sample rate · source'),
+      builder: (sheetContext) => const _TelemetrySheetContent(),
     );
   }
 
@@ -710,6 +718,93 @@ class _AudioAdjustmentRowState extends State<_AudioAdjustmentRow> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Sheet content that renders the synchronized lyrics viewer for the current
+/// track, fed by the live playback providers.
+class _LyricsSheetContent extends ConsumerWidget {
+  const _LyricsSheetContent();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final lyricsAsync = ref.watch(nowPlayingLyricsProvider);
+    final position = ref.watch(playbackPositionProvider);
+    final playing = ref.watch(playbackPlayingProvider);
+    final loading = ref.watch(playbackLoadingProvider);
+    final controller = ref.read(musicPlayerControllerProvider);
+
+    final lyrics = lyricsAsync.value ?? ParsedLyrics.empty;
+    if (lyricsAsync.isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (lyrics.isEmpty || lyrics.lines.isEmpty) {
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.lyrics_outlined, size: 48),
+            SizedBox(height: 12),
+            Text('No lyrics for this track'),
+          ],
+        ),
+      );
+    }
+
+    return SyncedLyricsViewer(
+      lyrics: lyrics,
+      position: position,
+      playing: playing,
+      loading: loading,
+      onSeek: (time) => controller.seek(time),
+    );
+  }
+}
+
+/// Sheet content that renders the real-time stream/playback metrics overlay
+/// plus the offline-mode quick toggle.
+class _TelemetrySheetContent extends ConsumerWidget {
+  const _TelemetrySheetContent();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final telemetry = ref.watch(playbackTelemetryProvider);
+    final offline = ref.watch(engineOfflineModeProvider);
+    final notifier = ref.read(engineSettingsProvider.notifier);
+
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          PlaybackTelemetryCard(telemetry: telemetry),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              const Icon(Icons.cloud_off_outlined, size: 20),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Offline mode',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    Text(
+                      'Local files only — no network resolves',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              Switch(value: offline, onChanged: notifier.setOfflineMode),
+            ],
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
     );
   }
 }

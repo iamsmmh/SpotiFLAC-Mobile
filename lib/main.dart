@@ -22,6 +22,7 @@ import 'package:spotiflac_android/services/notification_service.dart';
 import 'package:spotiflac_android/services/platform_bridge.dart';
 import 'package:spotiflac_android/services/share_intent_service.dart';
 import 'package:spotiflac_android/services/cover_cache_manager.dart';
+import 'package:spotiflac_android/services/cache_auto_cleaner.dart';
 import 'package:spotiflac_android/services/app_state_database.dart';
 import 'package:spotiflac_android/utils/local_library_scan_prefs.dart';
 import 'package:spotiflac_android/utils/logger.dart';
@@ -254,6 +255,7 @@ class _EagerInitializationState extends ConsumerState<_EagerInitialization>
       _initializeAppServices();
       _initializeExtensions();
       _initializeDeferredProviders();
+      _enforceCachePolicyOnStartup();
     });
   }
 
@@ -424,6 +426,39 @@ class _EagerInitializationState extends ConsumerState<_EagerInitialization>
       ]);
     } catch (e) {
       debugPrint('Failed to initialize app services: $e');
+    }
+  }
+
+  /// Applies the offline storage policy once at startup: if a cache limit is
+  /// configured and auto-clean is enabled, prune the ephemeral cache LRU-first
+  /// and sweep broken/partial stream artifacts. Fire-and-forget so it never
+  /// delays first paint.
+  void _enforceCachePolicyOnStartup() {
+    try {
+      final settings = ref.read(engineSettingsProvider);
+      if (!settings.autoCleanCache || settings.maxCacheSizeMb <= 0) return;
+      unawaited(() async {
+        final appCache = await getApplicationCacheDirectory();
+        final temp = await getTemporaryDirectory();
+        const cleaner = CacheAutoCleaner();
+        final dirs = <Directory>[appCache, temp];
+        final limitBytes = settings.maxCacheSizeMb * 1024 * 1024;
+        final limitResult = await cleaner.enforceLimit(
+          dirs,
+          maxBytes: limitBytes,
+        );
+        final brokenResult = await cleaner.cleanBrokenStreams(dirs);
+        if (limitResult.didAnything || brokenResult.didAnything) {
+          _log.i(
+            'Cache policy: pruned ${limitResult.deletedFiles} files '
+            '(${limitResult.freedBytes} B over limit), removed '
+            '${brokenResult.deletedFiles} broken-stream artifacts '
+            '(${brokenResult.freedBytes} B)',
+          );
+        }
+      }());
+    } catch (e) {
+      _log.w('Cache policy startup pass skipped: $e');
     }
   }
 
