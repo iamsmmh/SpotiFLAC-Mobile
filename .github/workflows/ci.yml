@@ -110,12 +110,14 @@ jobs:
           flutter test --reporter github 2>&1 | tee test.log || status=$?
           if [ "$status" -ne 0 ]; then
             {
-              echo "=== tests marked failed by the reporter ==="
-              grep -aE "^::error|\[E\]|Some tests failed" test.log | head -15
-              echo "=== first exception / harness error context ==="
-              grep -anE "EXCEPTION CAUGHT|RenderFlex overflowed|Timer is still pending|Test failed|Bad state|TestFailure|pumpAndSettle timed out" test.log | head -15
-              echo "=== tail of test run ==="
-              tail -30 test.log
+              echo "=== failing test names ==="
+              grep -a "❌" test.log | head -10
+              echo "=== reporter summary ==="
+              grep -aE "Some tests failed|tests passed" test.log | head -5
+              echo "=== exception frames ==="
+              grep -a -B6 -A28 "Bad state: No ProviderScope found" test.log | head -80
+              echo "=== other harness errors ==="
+              grep -anE "RenderFlex overflowed|Timer is still pending|pumpAndSettle timed out" test.log | head -10
             } | tr -d '\r' | sed -e 's/\x1b\[[0-9;]*m//g' -e 's/%/%25/g' \
               | sed ':a;N;$!ba;s/\n/%0A/g' \
               | awk '{print "::error::" $0}'
