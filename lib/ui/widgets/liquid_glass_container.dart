@@ -245,9 +245,11 @@ class _LiquidGlassBorderPainter extends CustomPainter {
 /// Two slow-drifting radial glows over the theme surface give the frosted
 /// layers something colourful to refract.
 class LiquidGlassBackground extends StatefulWidget {
-  final Widget child;
+  /// Content drawn above the aurora layers. When null (e.g. when the aurora is
+  /// used as a standalone background sibling in a Stack) only the glows render.
+  final Widget? child;
 
-  const LiquidGlassBackground({super.key, required this.child});
+  const LiquidGlassBackground({super.key, this.child});
 
   @override
   State<LiquidGlassBackground> createState() => _LiquidGlassBackgroundState();
@@ -319,7 +321,7 @@ class _LiquidGlassBackgroundState extends State<LiquidGlassBackground>
             },
           ),
         ),
-        Positioned.fill(child: widget.child),
+        if (widget.child != null) Positioned.fill(child: widget.child!),
       ],
     );
   }

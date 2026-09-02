@@ -41,11 +41,11 @@ void main() {
     testWidgets('LiquidGlassBackground renders descendants', (tester) async {
       await tester.pumpWidget(
         host(
-          const LiquidGlassBackground(child: Text('aurora')),
+          const LiquidGlassBackground(child: Text('aurora above glows')),
         ),
       );
       await tester.pump(const Duration(milliseconds: 50));
-      expect(find.text('aurora'), findsOneWidget);
+      expect(find.text('aurora above glows'), findsOneWidget);
     });
   });
 
