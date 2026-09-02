@@ -47,9 +47,12 @@ abstract final class SecureStorePolicy {
   /// True when [key] is a namespaced production key or a known retired key
   /// that we still need to be able to delete.
   static bool isAllowedKey(String key) {
+    // Check the raw key for control characters BEFORE trimming, so a
+    // trailing "\n" cannot be silently stripped into a valid key. Mirrors
+    // NativeSecureStorePolicy.isAllowedKey on Android.
+    if (key.contains('\n') || key.contains('\u0000')) return false;
     final trimmed = key.trim();
     if (trimmed.isEmpty || trimmed.length > maxKeyLength) return false;
-    if (trimmed.contains('\n') || trimmed.contains('\u0000')) return false;
     if (trimmed == SecureStoreKeys.schemaVersion) return true;
     if (retiredKeys.contains(trimmed)) return true;
     for (final prefix in allowedPrefixes) {

@@ -462,7 +462,7 @@ class _CacheManagementPageState extends ConsumerState<CacheManagementPage> {
                     if (cacheLimitMb > 0) ...[
                       const SizedBox(height: 8),
                       Text(
-                        'Cache limit: ${cacheLimitMb} MB',
+                        'Cache limit: $cacheLimitMb MB',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: colorScheme.onPrimaryContainer,
                           fontWeight: FontWeight.w700,
