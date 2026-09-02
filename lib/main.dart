@@ -5,34 +5,35 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:spotiflac_android/app.dart';
-import 'package:spotiflac_android/core/data/android_storage_permission_policy.dart';
-import 'package:spotiflac_android/core/data/background_playback_policy.dart';
-import 'package:spotiflac_android/core/data/cold_start_policy.dart';
-import 'package:spotiflac_android/core/data/network_switch_policy.dart';
-import 'package:spotiflac_android/core/data/release_artifact_policy.dart';
-import 'package:spotiflac_android/core/data/secure_store.dart';
-import 'package:spotiflac_android/core/data/session_resource_budget.dart';
-import 'package:spotiflac_android/core/presentation/core_queue_providers.dart';
-import 'package:spotiflac_android/models/settings.dart';
-import 'package:spotiflac_android/providers/download_queue_provider.dart';
-import 'package:spotiflac_android/providers/download_schedule_settings_provider.dart';
-import 'package:spotiflac_android/providers/engine_settings_provider.dart';
-import 'package:spotiflac_android/providers/extension_provider.dart';
-import 'package:spotiflac_android/providers/local_library_provider.dart';
-import 'package:spotiflac_android/providers/playback_statistics_provider.dart';
-import 'package:spotiflac_android/providers/runtime_profile_provider.dart';
-import 'package:spotiflac_android/providers/settings_provider.dart';
-import 'package:spotiflac_android/providers/streaming_engine_provider.dart';
-import 'package:spotiflac_android/providers/theme_provider.dart';
-import 'package:spotiflac_android/services/notification_service.dart';
-import 'package:spotiflac_android/services/platform_bridge.dart';
-import 'package:spotiflac_android/services/share_intent_service.dart';
-import 'package:spotiflac_android/services/cover_cache_manager.dart';
-import 'package:spotiflac_android/services/cache_auto_cleaner.dart';
-import 'package:spotiflac_android/services/app_state_database.dart';
-import 'package:spotiflac_android/utils/local_library_scan_prefs.dart';
-import 'package:spotiflac_android/utils/logger.dart';
+import 'package:spotimusic/app.dart';
+import 'package:spotimusic/core/data/android_storage_permission_policy.dart';
+import 'package:spotimusic/core/data/background_playback_policy.dart';
+import 'package:spotimusic/core/data/cold_start_policy.dart';
+import 'package:spotimusic/core/data/network_switch_policy.dart';
+import 'package:spotimusic/core/data/release_artifact_policy.dart';
+import 'package:spotimusic/core/data/secure_store.dart';
+import 'package:spotimusic/core/data/session_resource_budget.dart';
+import 'package:spotimusic/core/presentation/core_queue_providers.dart';
+import 'package:spotimusic/models/settings.dart';
+import 'package:spotimusic/providers/download_queue_provider.dart';
+import 'package:spotimusic/providers/download_schedule_settings_provider.dart';
+import 'package:spotimusic/providers/engine_settings_provider.dart';
+import 'package:spotimusic/providers/extension_provider.dart';
+import 'package:spotimusic/providers/local_library_provider.dart';
+import 'package:spotimusic/providers/playback_statistics_provider.dart';
+import 'package:spotimusic/providers/runtime_profile_provider.dart';
+import 'package:spotimusic/providers/settings_provider.dart';
+import 'package:spotimusic/providers/multi_provider_stream_provider.dart';
+import 'package:spotimusic/providers/streaming_engine_provider.dart';
+import 'package:spotimusic/providers/theme_provider.dart';
+import 'package:spotimusic/services/notification_service.dart';
+import 'package:spotimusic/services/platform_bridge.dart';
+import 'package:spotimusic/services/share_intent_service.dart';
+import 'package:spotimusic/services/cover_cache_manager.dart';
+import 'package:spotimusic/services/cache_auto_cleaner.dart';
+import 'package:spotimusic/services/app_state_database.dart';
+import 'package:spotimusic/utils/local_library_scan_prefs.dart';
+import 'package:spotimusic/utils/logger.dart';
 
 final _log = AppLogger('Main');
 
@@ -91,7 +92,7 @@ void main() {
             ),
           ],
           child: _EagerInitialization(
-            child: SpotiFLACApp(
+            child: SpotiMusicApp(
               disableOverscrollEffects: runtimeProfile.disableOverscrollEffects,
             ),
           ),
@@ -433,6 +434,12 @@ class _EagerInitializationState extends ConsumerState<_EagerInitialization>
     // before the first play request.
     unawaited(ref.read(engineSavepointProvider.notifier).load());
     ref.read(streamingEngineControllerProvider).ensureFailureHook();
+
+    // SpotiMusic multi-provider streaming: restore the last selected
+    // provider chip and build the 8-provider resolver (YouTube Explode +
+    // universal fallback) before the first stream request.
+    unawaited(ref.read(activeStreamProviderProvider.notifier).load());
+    ref.read(multiProviderStreamServiceProvider);
 
     // Download scheduling settings must be restored before the queue can
     // decide whether a new download should wait behind a closed window.

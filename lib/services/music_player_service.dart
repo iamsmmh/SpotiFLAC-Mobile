@@ -6,15 +6,15 @@ import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart'
     show AudioSession, AudioSessionConfiguration, AudioInterruptionType;
 import 'package:audioplayers/audioplayers.dart';
-import 'package:spotiflac_android/core/data/background_playback_policy.dart';
-import 'package:spotiflac_android/engine/audio_characteristics.dart';
-import 'package:spotiflac_android/engine/gapless_policy.dart';
-import 'package:spotiflac_android/engine/replay_gain.dart';
-import 'package:spotiflac_android/services/app_state_database.dart';
-import 'package:spotiflac_android/services/platform_bridge.dart';
-import 'package:spotiflac_android/utils/int_utils.dart';
-import 'package:spotiflac_android/utils/logger.dart';
-import 'package:spotiflac_android/utils/string_utils.dart';
+import 'package:spotimusic/core/data/background_playback_policy.dart';
+import 'package:spotimusic/engine/audio_characteristics.dart';
+import 'package:spotimusic/engine/gapless_policy.dart';
+import 'package:spotimusic/engine/replay_gain.dart';
+import 'package:spotimusic/services/app_state_database.dart';
+import 'package:spotimusic/services/platform_bridge.dart';
+import 'package:spotimusic/utils/int_utils.dart';
+import 'package:spotimusic/utils/logger.dart';
+import 'package:spotimusic/utils/string_utils.dart';
 
 final _log = AppLogger('MusicPlayer');
 

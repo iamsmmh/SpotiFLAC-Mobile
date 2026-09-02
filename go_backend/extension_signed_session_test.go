@@ -60,7 +60,7 @@ func TestSignedSessionConfigWithDefaults(t *testing.T) {
 		if got.Platform != "extension" {
 			t.Errorf("Platform = %q, want extension", got.Platform)
 		}
-		if got.CallbackURL != "spotiflac://session-grant" {
+		if got.CallbackURL != "spotimusic://session-grant" {
 			t.Errorf("CallbackURL = %q", got.CallbackURL)
 		}
 		if got.SchemeLabel != "SPOTIFLAC-HMAC-V1" {
@@ -1960,7 +1960,7 @@ func TestBuildSignedSessionChallengeURL(t *testing.T) {
 	config := signedSessionConfigWithDefaults(&SignedSessionConfig{
 		Namespace:   "tidal",
 		BaseURL:     "https://auth.example.com",
-		CallbackURL: "spotiflac://session-grant",
+		CallbackURL: "spotimusic://session-grant",
 	})
 	runtime := newSignedSessionTestRuntime(t, "tidal-ext", nil)
 

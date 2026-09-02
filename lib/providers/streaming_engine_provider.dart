@@ -5,20 +5,20 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:spotiflac_android/engine/adaptive_buffer.dart';
-import 'package:spotiflac_android/engine/audio_characteristics.dart';
-import 'package:spotiflac_android/engine/playback_session.dart';
-import 'package:spotiflac_android/engine/smart_play.dart';
-import 'package:spotiflac_android/engine/streaming_engine.dart';
-import 'package:spotiflac_android/models/track.dart';
-import 'package:spotiflac_android/models/download_item.dart';
-import 'package:spotiflac_android/providers/download_queue_provider.dart';
-import 'package:spotiflac_android/providers/engine_settings_provider.dart';
-import 'package:spotiflac_android/providers/music_player_provider.dart';
-import 'package:spotiflac_android/providers/playback_provider.dart';
-import 'package:spotiflac_android/providers/settings_provider.dart';
-import 'package:spotiflac_android/services/music_player_service.dart';
-import 'package:spotiflac_android/utils/string_utils.dart';
+import 'package:spotimusic/engine/adaptive_buffer.dart';
+import 'package:spotimusic/engine/audio_characteristics.dart';
+import 'package:spotimusic/engine/playback_session.dart';
+import 'package:spotimusic/engine/smart_play.dart';
+import 'package:spotimusic/engine/streaming_engine.dart';
+import 'package:spotimusic/models/track.dart';
+import 'package:spotimusic/models/download_item.dart';
+import 'package:spotimusic/providers/download_queue_provider.dart';
+import 'package:spotimusic/providers/engine_settings_provider.dart';
+import 'package:spotimusic/providers/music_player_provider.dart';
+import 'package:spotimusic/providers/playback_provider.dart';
+import 'package:spotimusic/providers/settings_provider.dart';
+import 'package:spotimusic/services/music_player_service.dart';
+import 'package:spotimusic/utils/string_utils.dart';
 
 /// ---------------------------------------------------------------------------
 /// Stream source adapters

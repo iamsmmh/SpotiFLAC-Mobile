@@ -1,7 +1,7 @@
-name: spotiflac_android
-description: Extension-driven music metadata and downloads for mobile devices
+name: spotimusic
+description: Dual-mode music streaming and lossless FLAC download client with a Liquid Glass interface
 publish_to: "none"
-version: 4.9.0+141
+version: 5.0.0+142
 
 environment:
   sdk: ^3.10.0
@@ -66,8 +66,12 @@ dependencies:
   # Notifications
   flutter_local_notifications: ^22.2.0
   audioplayers: ^6.8.1
-  audio_service: ^0.18.19
+
+  # Multi-provider streaming engine (SpotiMusic)
+  just_audio: ^0.9.36
+  audio_service: ^0.18.12
   audio_session: ^0.2.4
+  youtube_explode_dart: ^2.2.1
 
 dev_dependencies:
   flutter_test:

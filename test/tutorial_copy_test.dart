@@ -1,6 +1,6 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:spotiflac_android/l10n/app_localizations.dart';
+import 'package:spotimusic/l10n/app_localizations.dart';
 
 void main() {
   group('setup and tutorial copy', () {
@@ -12,7 +12,7 @@ void main() {
 
         expect(
           strings.tutorialWelcomeTitle,
-          contains('SpotiFLAC Mobile'),
+          contains('SpotiMusic'),
           reason: 'Unexpected app name for $locale',
         );
         expect(

@@ -1,12 +1,12 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:spotiflac_android/constants/app_info.dart';
-import 'package:spotiflac_android/core/data/android_storage_permission_policy.dart';
-import 'package:spotiflac_android/core/data/background_playback_policy.dart';
-import 'package:spotiflac_android/core/data/cold_start_policy.dart';
-import 'package:spotiflac_android/core/data/network_switch_policy.dart';
-import 'package:spotiflac_android/core/data/release_artifact_policy.dart';
-import 'package:spotiflac_android/core/data/secure_store.dart';
-import 'package:spotiflac_android/core/data/session_resource_budget.dart';
+import 'package:spotimusic/constants/app_info.dart';
+import 'package:spotimusic/core/data/android_storage_permission_policy.dart';
+import 'package:spotimusic/core/data/background_playback_policy.dart';
+import 'package:spotimusic/core/data/cold_start_policy.dart';
+import 'package:spotimusic/core/data/network_switch_policy.dart';
+import 'package:spotimusic/core/data/release_artifact_policy.dart';
+import 'package:spotimusic/core/data/secure_store.dart';
+import 'package:spotimusic/core/data/session_resource_budget.dart';
 
 void main() {
   group('SecureStorePolicy', () {
@@ -264,7 +264,7 @@ void main() {
       expect(BackgroundPlaybackPolicy.iosBackgroundMode, 'audio');
       expect(
         BackgroundPlaybackPolicy.androidPlaybackChannelId,
-        'com.zarz.spotiflac.playback',
+        'com.zarz.spotimusic.playback',
       );
     });
   });
@@ -305,7 +305,7 @@ void main() {
         AppInfo.productionAndroidAbis,
         ReleaseArtifactPolicy.androidAbis,
       );
-      expect(AppInfo.releaseArtifactPrefix, 'SpotiFLAC');
+      expect(AppInfo.releaseArtifactPrefix, 'SpotiMusic');
     });
 
     test('SHA256SUMS parse + verify round-trips via sha256.dart', () {

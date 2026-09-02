@@ -1,8 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:spotiflac_android/theme/app_tokens.dart';
-import 'package:spotiflac_android/utils/adaptive_layout.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:spotimusic/providers/engine_settings_provider.dart';
+import 'package:spotimusic/theme/app_tokens.dart';
+import 'package:spotimusic/ui/widgets/liquid_glass_container.dart';
+import 'package:spotimusic/utils/adaptive_layout.dart';
 
 /// Background fill for grouped cards, matching the Settings group look. Blends a
 /// translucent overlay over the surface so it stays visible on AMOLED (pure
@@ -179,25 +182,18 @@ class _SettingsSearchTargetState extends State<SettingsSearchTarget> {
   }
 }
 
-class SettingsGroup extends StatelessWidget {
+class SettingsGroup extends ConsumerWidget {
   final List<Widget> children;
   final EdgeInsetsGeometry? margin;
 
   const SettingsGroup({super.key, required this.children, this.margin});
 
   @override
-  Widget build(BuildContext context) {
-    final cardColor = settingsGroupColor(context);
+  Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
-
-    final decoration = BoxDecoration(
-      color: cardColor,
-      borderRadius: BorderRadius.circular(context.tokens.radiusCard),
-      border: Border.all(
-        color: colorScheme.outlineVariant.withValues(alpha: 0.5),
-      ),
-    );
-    final child = Material(
+    final useGlass = ref.watch(glassUiEnabledProvider);
+    final radius = BorderRadius.circular(context.tokens.radiusCard);
+    final groupChild = Material(
       color: Colors.transparent,
       child: Column(mainAxisSize: MainAxisSize.min, children: children),
     );
@@ -205,27 +201,53 @@ class SettingsGroup extends StatelessWidget {
     // Explicit caller margin wins as-is. Otherwise center on wide surfaces
     // using the incoming constraint (not screen width) so groups nested in an
     // already clamped box, e.g. a bottom sheet, are not over-inset.
-    if (margin != null) {
-      return Container(
-        margin: margin,
-        decoration: decoration,
-        clipBehavior: Clip.antiAlias,
-        child: child,
-      );
-    }
-    return LayoutBuilder(
-      builder: (context, constraints) => Container(
-        margin: EdgeInsets.symmetric(
+    EdgeInsetsGeometry resolveMargin(BoxConstraints constraints) =>
+        margin ??
+        EdgeInsets.symmetric(
           horizontal:
               16 +
               (constraints.hasBoundedWidth
                   ? wideInsetForWidth(constraints.maxWidth)
                   : 0),
           vertical: 4,
+        );
+
+    if (useGlass) {
+      // SpotiMusic Liquid Glass card: translucent tint + dynamic gradient
+      // border (white @ 18%). Blur stays off per-card (the backdrops already
+      // frost) so scrolling long settings/store lists stays fluid.
+      return LayoutBuilder(
+        builder: (context, constraints) => Padding(
+          padding: resolveMargin(constraints),
+          child: LiquidGlassContainer(
+            borderRadius: context.tokens.radiusCard,
+            enableBlur: false,
+            enableShadow: false,
+            tintOpacity: 0.06,
+            padding: EdgeInsets.zero,
+            child: ClipRRect(
+              borderRadius: radius,
+              child: groupChild,
+            ),
+          ),
         ),
+      );
+    }
+
+    final decoration = BoxDecoration(
+      color: settingsGroupColor(context),
+      borderRadius: radius,
+      border: Border.all(
+        color: colorScheme.outlineVariant.withValues(alpha: 0.5),
+      ),
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) => Container(
+        margin: resolveMargin(constraints),
         decoration: decoration,
         clipBehavior: Clip.antiAlias,
-        child: child,
+        child: groupChild,
       ),
     );
   }

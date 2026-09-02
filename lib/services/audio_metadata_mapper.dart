@@ -1,4 +1,4 @@
-import 'package:spotiflac_android/utils/artist_utils.dart';
+import 'package:spotimusic/utils/artist_utils.dart';
 
 /// Pure metadata-key conversion used by the different audio containers.
 ///
