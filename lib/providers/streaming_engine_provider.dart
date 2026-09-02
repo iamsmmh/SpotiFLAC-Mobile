@@ -356,7 +356,15 @@ class StreamingEngineController {
     });
   }
 
-  Future<NetworkProfile> currentNetworkProfile() => _network.current();
+  Future<NetworkProfile> currentNetworkProfile() async {
+    // Offline mode forces local-only playback: report offline so the Smart
+    // Play ladder never streams or schedules a network download, and so the
+    // adapters are never consulted for candidates.
+    if (_ref.read(engineSettingsProvider).offlineMode) {
+      return NetworkProfile.offline;
+    }
+    return _network.current();
+  }
 
   /// All streaming candidates for [track], in adapter order.
   Future<List<StreamDescriptor>> candidatesFor(Track track) async {
@@ -407,7 +415,10 @@ class StreamingEngineController {
     final settings = _ref.read(engineSettingsProvider);
     final network = await currentNetworkProfile();
     final effectiveLocalPath = localPath ?? await downloadedPathFor(track);
-    final candidates = settings.streamingEnabled
+    final candidates = shouldAttemptStreamResolution(
+          streamingEnabled: settings.streamingEnabled,
+          network: network,
+        )
         ? await candidatesFor(track)
         : const <StreamDescriptor>[];
     return smartPlay.decide(
@@ -1164,6 +1175,15 @@ class SleepTimerNotifier extends Notifier<SleepTimerState> {
     state = const SleepTimerState();
   }
 }
+
+/// Whether the engine may ask stream adapters for candidates right now.
+///
+/// Offline mode and a detected-offline network both disable resolution so the
+/// play path never performs network work; local playback remains available.
+bool shouldAttemptStreamResolution({
+  required bool streamingEnabled,
+  required NetworkProfile network,
+}) => streamingEnabled && !network.isOffline;
 
 /// ---------------------------------------------------------------------------
 /// Provider wiring

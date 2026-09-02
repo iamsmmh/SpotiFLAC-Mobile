@@ -60,6 +60,27 @@ class _StreamingSettingsPageState
     ('Bars', 'bars'),
   ];
 
+  static const List<(int, String)> _cacheLimits = [
+    (0, 'Unlimited'),
+    (256, '256 MB'),
+    (512, '512 MB'),
+    (1024, '1 GB'),
+    (2048, '2 GB'),
+    (4096, '4 GB'),
+  ];
+
+  static String _cacheLimitLabel(int mb) {
+    for (final entry in _cacheLimits) {
+      if (entry.$1 == mb) return entry.$2;
+    }
+    return '$mb MB';
+  }
+
+  static String _cacheLimitDescription(int mb) => mb <= 0
+      ? 'Ephemeral stream and metadata cache can grow freely'
+      : 'Oldest cached files are removed once the cache exceeds '
+            '${_cacheLimitLabel(mb)}';
+
   static String _qualityPolicyDescription(EngineSettings settings) {
     final policy = settings.qualityPolicy;
     if (policy.autoProfile) {
@@ -114,6 +135,45 @@ class _StreamingSettingsPageState
                 subtitle: 'Allow the engine to resolve and play provider streams',
                 value: settings.streamingEnabled,
                 onChanged: notifier.setStreamingEnabled,
+              ),
+              SettingsSwitchItem(
+                icon: Icons.cloud_off_outlined,
+                title: 'Offline mode',
+                subtitle:
+                    'Local files only — never resolve streams or reach the '
+                    'network while enabled',
+                value: settings.offlineMode,
+                onChanged: notifier.setOfflineMode,
+                showDivider: false,
+              ),
+            ],
+          ),
+        ),
+        _section(
+          context,
+          'Offline & storage policy',
+          SettingsGroup(
+            children: [
+              SettingsItem(
+                icon: Icons.sd_storage_outlined,
+                title: 'Cache limit',
+                subtitle: _cacheLimitDescription(settings.maxCacheSizeMb),
+                trailing: Text(
+                  _cacheLimitLabel(settings.maxCacheSizeMb),
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                onTap: () => _pickCacheLimit(context, settings, notifier),
+              ),
+              SettingsSwitchItem(
+                icon: Icons.auto_delete_outlined,
+                title: 'Auto-clean cache',
+                subtitle:
+                    'Prune the oldest cached files when the limit is reached',
+                value: settings.autoCleanCache,
+                onChanged: notifier.setAutoCleanCache,
                 showDivider: false,
               ),
             ],
@@ -652,6 +712,37 @@ class _StreamingSettingsPageState
     );
     if (picked != null) {
       await notifier.setNetworkProfile(profile, level: picked);
+    }
+  }
+
+  Future<void> _pickCacheLimit(
+    BuildContext context,
+    EngineSettings settings,
+    EngineSettingsNotifier notifier,
+  ) async {
+    final picked = await showLiquidBottomSheet<int>(
+      context: context,
+      title: 'Cache limit',
+      subtitle: const Text(
+        'A hard cap on the ephemeral stream/metadata cache. Downloaded music '
+        'is never deleted.',
+      ),
+      builder: (sheetContext) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: _cacheLimits.map((entry) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: GlassChip(
+              label: entry.$2,
+              selected: entry.$1 == settings.maxCacheSizeMb,
+              onTap: () => Navigator.of(sheetContext).pop(entry.$1),
+            ),
+          );
+        }).toList(growable: false),
+      ),
+    );
+    if (picked != null) {
+      await notifier.setMaxCacheSizeMb(picked);
     }
   }
 

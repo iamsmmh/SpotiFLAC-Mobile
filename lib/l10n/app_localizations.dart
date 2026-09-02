@@ -4240,6 +4240,18 @@ abstract class AppLocalizations {
   /// **'Cleanup completed: {downloadCount} orphaned downloads, {libraryCount} missing library entries'**
   String cacheCleanupResult(int downloadCount, int libraryCount);
 
+  /// Action title for removing interrupted/stale stream artifacts
+  ///
+  /// English-first (staged for Crowdin, matching the engine/glass surface).
+  String get cacheCleanBrokenStreams => 'Clean broken streams';
+
+  /// Subtitle for the broken-stream cleanup action
+  ///
+  /// English-first (staged for Crowdin, matching the engine/glass surface).
+  String get cacheCleanBrokenStreamsDesc =>
+      'Remove interrupted and stale stream artifacts from the temporary '
+      'cache. Downloaded music is never deleted.';
+
   /// Button label to refresh cache statistics
   ///
   /// In en, this message translates to:
