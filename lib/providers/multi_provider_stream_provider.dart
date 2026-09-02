@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -21,9 +19,9 @@ class ActiveStreamProviderNotifier extends Notifier<StreamProviderId> {
   @override
   StreamProviderId build() {
     // YouTube is always playable without credentials, so it is the safe
-    // default until the persisted choice is restored (via [load] at startup
-    // or lazily on first access).
-    unawaited(load());
+    // default. The persisted choice is restored via [load] during eager
+    // startup (kept synchronous here so building in tests never spins up an
+    // un-awaited SharedPreferences Future).
     return StreamProviderId.youtube;
   }
 
