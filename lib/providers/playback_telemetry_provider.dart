@@ -155,7 +155,7 @@ class PlaybackTelemetry {
     );
   }
 
-  static final MediaItem _noItem = MediaItem(id: '');
+  static final MediaItem _noItem = MediaItem(id: '', title: '');
 
   static String? _stringOf(Object? value) {
     final text = value?.toString().trim() ?? '';

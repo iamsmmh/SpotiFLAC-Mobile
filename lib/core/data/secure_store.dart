@@ -1,9 +1,8 @@
 /// Production secure storage for secrets, tokens, and extension signatures.
 ///
 /// Backends:
-///  * Android — `EncryptedSharedPreferences` via flutter_secure_storage
-///    (`encryptedSharedPreferences: true`), which wraps AES-256-GCM values
-///    under a Keystore-backed master key.
+///  * Android — encrypted preferences via flutter_secure_storage (v10+ always
+///    encrypts values under a Keystore-backed master key).
 ///  * iOS / macOS — Keychain with `first_unlock_this_device` accessibility
 ///    so items survive background playback but never leave the device via
 ///    iCloud Keychain sync.
@@ -74,7 +73,7 @@ class SecureStore {
   static final SecureStore instance = SecureStore();
 
   static const FlutterSecureStorage _platformStorage = FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    aOptions: AndroidOptions(),
     iOptions: IOSOptions(
       accessibility: KeychainAccessibility.first_unlock_this_device,
       synchronizable: false,
