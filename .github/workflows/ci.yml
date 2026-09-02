@@ -10,12 +10,14 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   changes:
     name: Detect changed paths
     runs-on: ubuntu-latest
-    permissions:
-      pull-requests: read
     outputs:
       dart: ${{ steps.filter.outputs.dart }}
       go: ${{ steps.filter.outputs.go }}
@@ -159,4 +161,27 @@ jobs:
           ANDROID_PLATFORM: "platforms;android-37"
           ANDROID_BUILD_TOOLS: "build-tools;35.0.0"
 
-      - name: 
+      - name: Build Go backend (gomobile AAR)
+        working-directory: go_backend
+        env:
+          CGO_ENABLED: 1
+        run: |
+          set -euo pipefail
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          go install golang.org/x/mobile/cmd/gomobile
+          gomobile init
+          mkdir -p ../android/app/libs
+          gomobile bind -target=android/arm,android/arm64 -androidapi 24 \
+            -o ../android/app/libs/gobackend.aar .
+          test -f ../android/app/libs/gobackend.aar
+
+      - name: Get Flutter dependencies
+        run: flutter pub get
+
+      - name: Compile Android app
+        run: flutter build apk --debug
+
+      - name: Run native unit tests
+        working-directory: android
+        run: ./gradlew testDebugUnitTest
+
