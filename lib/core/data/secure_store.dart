@@ -1,9 +1,8 @@
 /// Production secure storage for secrets, tokens, and extension signatures.
 ///
 /// Backends:
-///  * Android — `EncryptedSharedPreferences` via flutter_secure_storage
-///    (`encryptedSharedPreferences: true`), which wraps AES-256-GCM values
-///    under a Keystore-backed master key.
+///  * Android — encrypted preferences via flutter_secure_storage (v10+ always
+///    encrypts values under a Keystore-backed master key).
 ///  * iOS / macOS — Keychain with `first_unlock_this_device` accessibility
 ///    so items survive background playback but never leave the device via
 ///    iCloud Keychain sync.
@@ -48,9 +47,12 @@ abstract final class SecureStorePolicy {
   /// True when [key] is a namespaced production key or a known retired key
   /// that we still need to be able to delete.
   static bool isAllowedKey(String key) {
+    // Check the raw key for control characters BEFORE trimming, so a
+    // trailing "\n" cannot be silently stripped into a valid key. Mirrors
+    // NativeSecureStorePolicy.isAllowedKey on Android.
+    if (key.contains('\n') || key.contains('\u0000')) return false;
     final trimmed = key.trim();
     if (trimmed.isEmpty || trimmed.length > maxKeyLength) return false;
-    if (trimmed.contains('\n') || trimmed.contains('\u0000')) return false;
     if (trimmed == SecureStoreKeys.schemaVersion) return true;
     if (retiredKeys.contains(trimmed)) return true;
     for (final prefix in allowedPrefixes) {
@@ -74,7 +76,7 @@ class SecureStore {
   static final SecureStore instance = SecureStore();
 
   static const FlutterSecureStorage _platformStorage = FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    aOptions: AndroidOptions(),
     iOptions: IOSOptions(
       accessibility: KeychainAccessibility.first_unlock_this_device,
       synchronizable: false,

@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:spotiflac_android/constants/app_info.dart';
 import 'package:spotiflac_android/core/data/android_storage_permission_policy.dart';
 import 'package:spotiflac_android/core/data/background_playback_policy.dart';
 import 'package:spotiflac_android/core/data/cold_start_policy.dart';

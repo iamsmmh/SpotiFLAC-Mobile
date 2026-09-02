@@ -27,9 +27,11 @@ internal object NativeSecureStorePolicy {
     val retiredKeys: Set<String> = setOf(SPOTIFY_CLIENT_SECRET)
 
     fun isAllowedKey(key: String): Boolean {
+        // Check the raw key for control characters BEFORE trimming, so a
+        // trailing "\n" cannot be silently stripped into a valid key.
+        if (key.contains('\n') || key.contains('\u0000')) return false
         val trimmed = key.trim()
         if (trimmed.isEmpty() || trimmed.length > MAX_KEY_LENGTH) return false
-        if (trimmed.contains('\n') || trimmed.contains('\u0000')) return false
         if (trimmed == SCHEMA_VERSION_KEY) return true
         if (retiredKeys.contains(trimmed)) return true
         return (trimmed.startsWith(TOKEN_PREFIX) && trimmed.length > TOKEN_PREFIX.length) ||
