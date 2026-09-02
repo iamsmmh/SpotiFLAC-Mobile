@@ -2,12 +2,10 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:spotiflac_android/core/data/session_resource_budget.dart';
 import 'package:spotiflac_android/services/cover_cache_manager.dart';
 
 class CachedCoverImage extends StatelessWidget {
-  static const int _defaultMinCacheExtent = 64;
-  static const int _defaultMaxCacheExtent = 512;
-
   final String imageUrl;
   final double? width;
   final double? height;
@@ -45,8 +43,10 @@ class CachedCoverImage extends StatelessWidget {
         memCacheWidth ?? _cacheExtentForLogicalSize(context, width);
     final autoMemCacheHeight =
         memCacheHeight ?? _cacheExtentForLogicalSize(context, height);
-    final diskCacheWidth = resizeDiskCache ? autoMemCacheWidth : null;
-    final diskCacheHeight = resizeDiskCache ? autoMemCacheHeight : null;
+    final resizeDisk =
+        resizeDiskCache || RebuildBudget.shouldResizeDiskCache(width, height);
+    final diskCacheWidth = resizeDisk ? autoMemCacheWidth : null;
+    final diskCacheHeight = resizeDisk ? autoMemCacheHeight : null;
     final image = CachedNetworkImage(
       imageUrl: imageUrl,
       width: width,
@@ -75,13 +75,8 @@ class CachedCoverImage extends StatelessWidget {
 
   static int? _cacheExtentForLogicalSize(BuildContext context, double? size) {
     if (size == null || !size.isFinite || size <= 0) return null;
-    final dpr = MediaQuery.devicePixelRatioOf(
-      context,
-    ).clamp(1.0, 3.0).toDouble();
-    return (size * dpr)
-        .round()
-        .clamp(_defaultMinCacheExtent, _defaultMaxCacheExtent)
-        .toInt();
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    return RebuildBudget.decodeExtent(size, dpr);
   }
 }
 

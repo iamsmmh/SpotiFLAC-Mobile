@@ -3,7 +3,18 @@ part of 'download_queue_provider.dart';
 
 extension _DownloadQueueConnectivity on DownloadQueueNotifier {
   bool _hasWifiConnection(List<ConnectivityResult> results) {
-    return results.contains(ConnectivityResult.wifi);
+    return NetworkSwitchPolicy.hasWifi(results.map(_connectivityTransport));
+  }
+
+  String _connectivityTransport(ConnectivityResult result) {
+    return switch (result) {
+      ConnectivityResult.wifi => NetworkTransport.wifi,
+      ConnectivityResult.ethernet => NetworkTransport.ethernet,
+      ConnectivityResult.vpn => NetworkTransport.vpn,
+      ConnectivityResult.mobile => NetworkTransport.mobile,
+      ConnectivityResult.none => NetworkTransport.none,
+      _ => NetworkTransport.other,
+    };
   }
 
   void _startConnectivityMonitoring() {
@@ -48,7 +59,7 @@ extension _DownloadQueueConnectivity on DownloadQueueNotifier {
     if (failedCount == 0) return;
     final now = DateTime.now();
     if (now.difference(_lastReconnectRetryPromptAt) <
-        const Duration(minutes: 1)) {
+        NetworkSwitchPolicy.reconnectRetryPromptDebounce) {
       return;
     }
     _lastReconnectRetryPromptAt = now;
@@ -94,20 +105,9 @@ extension _DownloadQueueConnectivity on DownloadQueueNotifier {
   /// otherwise be reused, stalling the first request after a network switch.
   /// Applies to every download network mode. Fire-and-forget with a light
   /// debounce so network flapping does not spam the bridge.
-  void _maybeCleanupOnNetworkChange(List<ConnectivityResult> results) {
-    final previous = _lastConnectivityResults;
-    final unchanged =
-        previous != null && _connectivitySetEquals(previous, results);
-    _lastConnectivityResults = List<ConnectivityResult>.unmodifiable(results);
-    if (previous == null || unchanged) return;
-
-    final now = DateTime.now();
-    if (now.difference(_lastConnectionCleanupAt) <
-        DownloadQueueNotifier._connectionCleanupDebounce) {
-      return;
-    }
-    _lastConnectionCleanupAt = now;
-
+  void _maybeCleanupOnNetworkChange(NetworkSwitchDecision decision) {
+    if (decision.action != NetworkSwitchAction.recycleConnections) return;
+    _lastConnectionCleanupAt = DateTime.now();
     _log.i('Network changed, closing idle backend connections');
     unawaited(
       PlatformBridge.cleanupConnections().catchError((Object e) {
@@ -116,32 +116,31 @@ extension _DownloadQueueConnectivity on DownloadQueueNotifier {
     );
   }
 
-  bool _connectivitySetEquals(
-    List<ConnectivityResult> a,
-    List<ConnectivityResult> b,
-  ) {
-    final setA = a.toSet();
-    final setB = b.toSet();
-    return setA.length == setB.length && setA.containsAll(setB);
-  }
-
   void _handleConnectivityResults(List<ConnectivityResult> results) {
-    _maybeCleanupOnNetworkChange(results);
+    final previous = _lastConnectivityResults;
+    final settings = ref.read(settingsProvider);
+    final decision = NetworkSwitchPolicy.decide(
+      current: results.map(_connectivityTransport),
+      previous: previous?.map(_connectivityTransport),
+      now: DateTime.now(),
+      lastCleanupAt: _lastConnectionCleanupAt,
+      wifiOnlyMode: settings.downloadNetworkMode == 'wifi_only',
+      queueProcessing: state.isProcessing && !state.isPaused,
+      queuePausedForWifi: _networkPausedByWifiOnly,
+    );
+    _lastConnectivityResults = List<ConnectivityResult>.unmodifiable(results);
+
+    _maybeCleanupOnNetworkChange(decision);
     _maybeOfferRetryAfterReconnect(results);
 
-    final settings = ref.read(settingsProvider);
-    if (settings.downloadNetworkMode != 'wifi_only') return;
-
-    if (_hasWifiConnection(results)) {
-      if (_networkPausedByWifiOnly && state.isPaused) {
-        _networkPausedByWifiOnly = false;
-        _log.i('WiFi restored, resuming network-paused queue');
-        resumeQueue();
-      }
+    if (decision.shouldResumeWifiOnlyQueue && state.isPaused) {
+      _networkPausedByWifiOnly = false;
+      _log.i('WiFi restored, resuming network-paused queue');
+      resumeQueue();
       return;
     }
 
-    if (state.isProcessing && !state.isPaused) {
+    if (decision.shouldPauseWifiOnlyQueue) {
       _networkPausedByWifiOnly = true;
       _log.w('WiFi connection lost, pausing active queue');
       pauseQueue(persistAcrossRestarts: false);

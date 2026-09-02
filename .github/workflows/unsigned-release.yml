@@ -145,7 +145,7 @@ jobs:
           go install golang.org/x/mobile/cmd/gomobile
           gomobile init
           mkdir -p ../android/app/libs
-          gomobile bind -target=android/arm,android/arm64 -androidapi 24 \
+          gomobile bind -target=android/arm,android/arm64,android/amd64 -androidapi 24 \
             -o ../android/app/libs/gobackend.aar .
 
       - name: Get Flutter dependencies
@@ -158,7 +158,7 @@ jobs:
         run: |
           set -euo pipefail
           flutter build apk --release --split-per-abi \
-            --target-platform android-arm,android-arm64
+            --target-platform android-arm,android-arm64,android-x64
           ls -la build/app/outputs/flutter-apk/
 
       - name: Collect and rename APKs
@@ -176,6 +176,7 @@ jobs:
 
           copy_apk app-arm64-v8a-release.apk   arm64
           copy_apk app-armeabi-v7a-release.apk arm32
+          copy_apk app-x86_64-release.apk      x86_64
           if [ -f "$SRC/app-release.apk" ]; then
             cp "$SRC/app-release.apk" "dist/${APP_NAME}-${VERSION}-universal.apk"
           fi
@@ -192,11 +193,23 @@ jobs:
             echo "::endgroup::"
           done
 
+      - name: Build release AAB
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          BUILD_APP_BUNDLE=1 bash scripts/flutter_build_appbundle.sh
+          mkdir -p dist
+          cp build/app/outputs/bundle/release/app-release.aab \
+            "dist/${APP_NAME}-${VERSION}.aab"
+
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v6
         with:
           name: android-apk
-          path: dist/*.apk
+          path: |
+            dist/*.apk
+            dist/*.aab
           if-no-files-found: error
           retention-days: 14
 
@@ -386,7 +399,8 @@ jobs:
         working-directory: dist
         run: |
           set -euo pipefail
-          sha256sum ./*.apk ./*.ipa | sed 's| \./| |' > SHA256SUMS.txt
+          shopt -s nullglob
+          sha256sum -- *.apk *.aab *.ipa > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Generate changelog
@@ -427,7 +441,8 @@ jobs:
           | --- | --- | --- |
           | Android (arm64) | \`${APP_NAME}-${VERSION}-arm64.apk\` | Recommended for all modern devices |
           | Android (arm32) | \`${APP_NAME}-${VERSION}-arm32.apk\` | Older 32-bit devices |
-          | Android (universal) | \`${APP_NAME}-${VERSION}-universal.apk\` | Both ABIs in one, larger download |
+          | Android (x86_64) | \`${APP_NAME}-${VERSION}-x86_64.apk\` | Emulators / ChromeOS |
+          | Android (AAB) | \`${APP_NAME}-${VERSION}.aab\` | Play Console upload |
           | iOS | \`${APP_NAME}-${VERSION}-ios-unsigned.ipa\` | Unsigned, sideload required |
 
           ### Installation

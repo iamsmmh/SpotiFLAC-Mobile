@@ -8,7 +8,7 @@ import 'package:spotiflac_android/utils/logger.dart';
 
 final _log = AppLogger('UpdateChecker');
 
-enum _ApkVariant { arm64, arm32, universal }
+enum _ApkVariant { arm64, arm32, x86_64, universal }
 
 class _ApkAsset {
   final String name;
@@ -262,6 +262,9 @@ class UpdateChecker {
     if (name.contains('universal')) {
       return _ApkVariant.universal;
     }
+    if (name.contains('x86_64') || name.contains('android-x64')) {
+      return _ApkVariant.x86_64;
+    }
     if (name.contains('arm64') || name.contains('arm64-v8a')) {
       return _ApkVariant.arm64;
     }
@@ -283,6 +286,7 @@ class UpdateChecker {
 
     _ApkAsset? arm64Asset;
     _ApkAsset? arm32Asset;
+    _ApkAsset? x64Asset;
     _ApkAsset? universalAsset;
     for (final asset in assets) {
       switch (asset.variant) {
@@ -291,6 +295,9 @@ class UpdateChecker {
           break;
         case _ApkVariant.arm32:
           arm32Asset ??= asset;
+          break;
+        case _ApkVariant.x86_64:
+          x64Asset ??= asset;
           break;
         case _ApkVariant.universal:
           universalAsset ??= asset;
@@ -301,9 +308,13 @@ class UpdateChecker {
     final supportedAbis = await _getSupportedAndroidAbis();
     final hasArm64 = supportedAbis.any(_isArm64Abi);
     final hasArm32 = supportedAbis.any(_isArm32Abi);
+    final hasX64 = supportedAbis.any(_isX64Abi);
 
     if (hasArm64) {
       return arm64Asset ?? universalAsset ?? arm32Asset;
+    }
+    if (hasX64) {
+      return x64Asset ?? universalAsset;
     }
     if (hasArm32) {
       return arm32Asset ?? universalAsset;
@@ -336,7 +347,11 @@ class UpdateChecker {
           .where((abi) => abi.isNotEmpty)
           .toSet()
           .toList();
-      _log.i('Detected supported Android ABIs: ${supportedAbis.join(', ')}');
+      _log.i(
+        'Detected supported Android ABIs: ${supportedAbis.join(', ')} '
+        '(production splits: ${AppInfo.productionAndroidAbis.join(', ')}; '
+        'prefix: ${AppInfo.releaseArtifactPrefix})',
+      );
       return supportedAbis;
     } catch (e) {
       _log.w('Failed to detect supported Android ABIs: $e');
@@ -349,4 +364,7 @@ class UpdateChecker {
 
   static bool _isArm32Abi(String abi) =>
       abi.contains('armeabi') || abi.contains('armv7') || abi.contains('arm');
+
+  static bool _isX64Abi(String abi) =>
+      abi.contains('x86_64') || abi.contains('amd64') || abi == 'x64';
 }

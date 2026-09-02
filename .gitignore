@@ -84,6 +84,7 @@ DerivedData/
 !/docs/EXTENSION_DEVELOPMENT.md
 !/docs/UNSIGNED_BUILDS.md
 !/docs/SUGGESTED_FEATURES.md
+!/docs/stage5_production.md
 
 # Temporary files and logs
 /.tmp/

@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:spotiflac_android/core/data/secure_store.dart';
 import 'package:spotiflac_android/models/settings.dart';
 import 'package:spotiflac_android/constants/app_info.dart';
 import 'package:spotiflac_android/services/platform_bridge.dart';
@@ -16,7 +16,6 @@ const _settingsKey = 'app_settings';
 const _settingsCorruptBackupKey = 'app_settings_corrupt_backup';
 const _migrationVersionKey = 'settings_migration_version';
 const _currentMigrationVersion = 11;
-const _spotifyClientSecretKey = 'spotify_client_secret';
 const _retiredBuiltInProviderIds = {'deezer', 'qobuz', 'tidal', 'youtube'};
 final _log = AppLogger('SettingsProvider');
 
@@ -110,7 +109,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
   };
 
   final Future<SharedPreferences> _prefs = SharedPreferences.getInstance();
-  final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
+  final SecureStore _secureStorage = SecureStore.instance;
   bool _isSavingSettings = false;
   bool _saveQueued = false;
   String? _pendingSettingsJson;
@@ -429,12 +428,8 @@ class SettingsNotifier extends Notifier<AppSettings> {
   }
 
   Future<void> _cleanupRetiredSpotifySettings() async {
-    final storedSecret = await _secureStorage.read(
-      key: _spotifyClientSecretKey,
-    );
-    if (storedSecret != null && storedSecret.isNotEmpty) {
-      await _secureStorage.delete(key: _spotifyClientSecretKey);
-    }
+    await _secureStorage.ensureInitialized();
+    await _secureStorage.delete(SecureStoreKeys.spotifyClientSecret);
   }
 
   void setDefaultService(String service) {

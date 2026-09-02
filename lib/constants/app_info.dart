@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:spotiflac_android/core/data/release_artifact_policy.dart';
 
 class AppInfo {
   static const String version = '4.9.0';
@@ -8,6 +9,13 @@ class AppInfo {
   static String get displayVersion => kDebugMode ? 'Internal' : version;
 
   static const String appName = 'SpotiFLAC Mobile';
+
+  /// Prefix used by the production release workflow (`SpotiFLAC-<ver>-arm64.apk`).
+  static const String releaseArtifactPrefix = ReleaseArtifactPolicy.appName;
+
+  /// Android ABI splits the production channel must publish.
+  static const List<String> productionAndroidAbis =
+      ReleaseArtifactPolicy.androidAbis;
   static const String copyright = '© 2026 Zarz Eleutherius';
 
   static const String mobileAuthor = 'zarzet';

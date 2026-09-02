@@ -5,6 +5,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:go_router/go_router.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:spotiflac_android/core/data/android_storage_permission_policy.dart';
 import 'package:spotiflac_android/providers/settings_provider.dart';
 import 'package:spotiflac_android/l10n/l10n.dart';
 import 'package:spotiflac_android/l10n/supported_locales.dart';
@@ -41,7 +42,15 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
   bool _isLoading = false;
   int _androidSdkVersion = 0;
 
-  int get _totalSteps => _androidSdkVersion >= 33 ? 5 : 4;
+  int get _totalSteps =>
+      AndroidStoragePermissionPolicy.requiresNotificationRuntimeGrant(
+        _androidSdkVersion,
+      )
+      ? 5
+      : 4;
+
+  AndroidPermissionSet get _androidPermissions =>
+      AndroidStoragePermissionPolicy.forSdk(_androidSdkVersion);
 
   @override
   void initState() {
@@ -81,11 +90,13 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
       }
     } else if (Platform.isAndroid) {
       bool storageGranted = false;
-
-      if (_androidSdkVersion >= 33) {
+      final scan = AndroidStoragePermissionPolicy.libraryScanPermission(
+        _androidSdkVersion,
+      );
+      if (scan == AndroidStoragePermission.readMediaAudio) {
         final audioStatus = await Permission.audio.status;
         storageGranted = audioStatus.isGranted;
-      } else if (_androidSdkVersion >= 30) {
+      } else if (scan == AndroidStoragePermission.manageExternalStorage) {
         final manageStatus = await Permission.manageExternalStorage.status;
         storageGranted = manageStatus.isGranted;
       } else {
@@ -94,7 +105,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
       }
 
       PermissionStatus notificationStatus = PermissionStatus.granted;
-      if (_androidSdkVersion >= 33) {
+      if (_androidPermissions.notificationsAreRuntime) {
         notificationStatus = await Permission.notification.status;
       }
 
@@ -122,7 +133,10 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
       } else if (Platform.isAndroid) {
         bool allGranted = false;
 
-        if (_androidSdkVersion >= 33) {
+        final scan = AndroidStoragePermissionPolicy.libraryScanPermission(
+          _androidSdkVersion,
+        );
+        if (scan == AndroidStoragePermission.readMediaAudio) {
           var audioStatus = await Permission.audio.status;
           if (!audioStatus.isGranted) {
             audioStatus = await Permission.audio.request();
@@ -133,7 +147,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
             await _showPermissionDeniedDialog(permissionAudio);
             return;
           }
-        } else if (_androidSdkVersion >= 30) {
+        } else if (scan == AndroidStoragePermission.manageExternalStorage) {
           var manageStatus = await Permission.manageExternalStorage.status;
           if (!manageStatus.isGranted) {
             final shouldOpen = await _showAndroid11StorageDialog();
@@ -203,7 +217,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
         } else if (status.isPermanentlyDenied) {
           await _showPermissionDeniedDialog(permissionNotification);
         }
-      } else if (_androidSdkVersion >= 33) {
+      } else if (_androidPermissions.notificationsAreRuntime) {
         final status = await Permission.notification.request();
         if (status.isGranted) {
           setState(() => _notificationPermissionGranted = true);
@@ -519,7 +533,9 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
 
     final logicStep = step - 2;
 
-    if (_androidSdkVersion >= 33) {
+    if (AndroidStoragePermissionPolicy.requiresNotificationRuntimeGrant(
+      _androidSdkVersion,
+    )) {
       switch (logicStep) {
         case 0:
           return _storagePermissionGranted;
@@ -607,7 +623,9 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                   _buildWelcomeStep(colorScheme),
                   _buildLanguageStep(colorScheme),
                   _buildStorageStep(colorScheme),
-                  if (_androidSdkVersion >= 33)
+                  if (AndroidStoragePermissionPolicy.requiresNotificationRuntimeGrant(
+                    _androidSdkVersion,
+                  ))
                     _buildNotificationStep(colorScheme),
                   _buildDirectoryStep(colorScheme),
                 ],

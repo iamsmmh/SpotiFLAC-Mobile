@@ -34,6 +34,7 @@ import 'package:spotiflac_android/utils/int_utils.dart';
 import 'package:spotiflac_android/utils/extension_auth_launcher.dart';
 import 'package:spotiflac_android/utils/progress_stream_poller.dart';
 
+import 'package:spotiflac_android/core/data/network_switch_policy.dart';
 import 'package:spotiflac_android/providers/download_history_provider.dart';
 
 export 'package:spotiflac_android/providers/download_history_provider.dart';
@@ -345,7 +346,6 @@ class DownloadQueueNotifier extends Notifier<DownloadQueueState> {
   List<ConnectivityResult>? _lastConnectivityResults;
   DateTime _lastConnectionCleanupAt = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastReconnectRetryPromptAt = DateTime.fromMillisecondsSinceEpoch(0);
-  static const _connectionCleanupDebounce = Duration(seconds: 2);
   String? _lastServiceTrackName;
   String? _lastServiceArtistName;
   String? _lastServiceStatus;
@@ -1535,7 +1535,7 @@ class DownloadQueueNotifier extends Notifier<DownloadQueueState> {
     }
     if (settings.downloadNetworkMode == 'wifi_only') {
       final connectivityResult = await Connectivity().checkConnectivity();
-      final hasWifi = connectivityResult.contains(ConnectivityResult.wifi);
+      final hasWifi = _hasWifiConnection(connectivityResult);
       if (!hasWifi) {
         _log.w('WiFi-only mode enabled but no WiFi connection. Queue paused.');
         _networkPausedByWifiOnly = true;

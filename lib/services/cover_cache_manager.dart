@@ -5,6 +5,7 @@ import 'package:flutter/painting.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
+import 'package:spotiflac_android/core/data/session_resource_budget.dart';
 
 /// Persistent cache manager for album/track cover images.
 ///
@@ -13,13 +14,14 @@ import 'package:path/path.dart' as p;
 /// directory which persists across app restarts.
 class CoverCacheManager {
   static const String _cacheKey = 'coverImageCache';
-  static const int _maxCacheObjects = 1000;
+  static const int _maxCacheObjects = SessionResourceBudget.coverDiskObjectCap;
   static const Duration _maxCacheAge = Duration(days: 365);
   // flutter_cache_manager only caps object count, not bytes; hi-res covers
   // run 300KB-1.5MB each, so 1000 objects can mean hundreds of MB on a
   // storage-starved device. Sweep oldest files past the byte cap on init.
-  static const int _maxCacheBytes = 150 << 20;
-  static const int _sweepTargetBytes = 120 << 20;
+  static const int _maxCacheBytes = SessionResourceBudget.coverDiskByteCap;
+  static const int _sweepTargetBytes =
+      SessionResourceBudget.coverDiskSweepTargetBytes;
 
   static CacheManager? _instance;
   static bool _initialized = false;
