@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:spotiflac_android/app.dart';
+import 'package:spotiflac_android/core/presentation/core_queue_providers.dart';
 import 'package:spotiflac_android/models/settings.dart';
 import 'package:spotiflac_android/providers/download_queue_provider.dart';
 import 'package:spotiflac_android/providers/download_schedule_settings_provider.dart';
@@ -327,6 +328,12 @@ class _EagerInitializationState extends ConsumerState<_EagerInitialization>
         }
       },
     );
+
+    // Stage 2 core engine: eagerly build the transactional queue composition
+    // (storage/backend/integrity ports + event controller) so the engine's
+    // event stream and the stale-temp janitor are live before any migrated
+    // screen reads them.
+    ref.read(coreQueueControllerProvider);
 
     // Streaming engine: restore the last engine savepoint (queue/modes) so
     // recovery can offer "resume?" after a kill, and warm the failover hook
