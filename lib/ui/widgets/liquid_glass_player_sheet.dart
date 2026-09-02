@@ -10,6 +10,7 @@ import 'package:spotimusic/providers/settings_provider.dart';
 import 'package:spotimusic/services/multi_provider_stream_service.dart';
 import 'package:spotimusic/services/music_player_service.dart';
 import 'package:spotimusic/ui/widgets/liquid_glass_container.dart';
+import 'package:spotimusic/widgets/app_bottom_sheet.dart';
 import 'package:spotimusic/widgets/player_artwork.dart';
 
 /// Liquid Glass full-screen player modal sheet for SpotiMusic.
@@ -203,15 +204,11 @@ class _LiquidGlassPlayerSheetState
               children: [
                 Row(
                   children: [
-                    Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: scheme.onSurfaceVariant.withValues(alpha: 0.5),
-                        borderRadius: BorderRadius.circular(4),
+                    const Expanded(
+                      child: Center(
+                        child: AppSheetHandle(margin: EdgeInsets.zero),
                       ),
                     ),
-                    const Spacer(),
                     IconButton(
                       tooltip: 'Close',
                       icon: const Icon(Icons.close_rounded),
