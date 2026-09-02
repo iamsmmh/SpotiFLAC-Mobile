@@ -9,7 +9,7 @@ mkdir -p "$(dirname "$LOG")"
 
 set +o pipefail
 flutter build apk --release --split-per-abi \
-  --target-platform android-arm,android-arm64 \
+  --target-platform android-arm,android-arm64,android-x64 \
   2>&1 | tee "$LOG"
 STATUS="${PIPESTATUS[0]}"
 set -o pipefail

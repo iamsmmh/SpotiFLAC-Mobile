@@ -9,12 +9,14 @@ used.
 
 | Job | Runner | Output |
 | --- | --- | --- |
-| `android` | `ubuntu-latest` | `SpotiFLAC-<version>-arm64.apk`, `-arm32.apk`, `-universal.apk` (when produced) |
+| `android` | `ubuntu-latest` | `SpotiFLAC-<version>-arm64.apk`, `-arm32.apk`, `-x86_64.apk`, `.aab`, `-universal.apk` (when produced) |
 | `ios` | `macos-15` | `SpotiFLAC-<version>-ios-unsigned.ipa` (a real `.ipa` — `Payload/Runner.app`, not a renamed zip) |
 | `release` | `ubuntu-latest` | GitHub Release with all binaries plus `SHA256SUMS.txt` |
 
 Both platform jobs run in parallel; each also uploads its binaries as workflow
 artifacts (14-day retention) so you can grab a build without publishing.
+`SHA256SUMS.txt` is `sha256sum` text format covering every `.apk`, `.aab`, and
+`.ipa` attached to the release.
 
 ## How it stays signing-free
 

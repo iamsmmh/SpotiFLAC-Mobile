@@ -727,6 +727,7 @@ class MainActivity: FlutterFragmentActivity() {
         // delegate looks it up by cached id (see getCachedEngineId above).
         AudioServicePlugin.getFlutterEngine(this)
         super.onCreate(savedInstanceState)
+        NativeSecureStore.warmup(this)
         handleExtensionOAuthIntent(intent)
     }
 

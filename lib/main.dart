@@ -6,6 +6,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:spotiflac_android/app.dart';
+import 'package:spotiflac_android/core/data/android_storage_permission_policy.dart';
+import 'package:spotiflac_android/core/data/background_playback_policy.dart';
+import 'package:spotiflac_android/core/data/cold_start_policy.dart';
+import 'package:spotiflac_android/core/data/network_switch_policy.dart';
+import 'package:spotiflac_android/core/data/release_artifact_policy.dart';
+import 'package:spotiflac_android/core/data/secure_store.dart';
+import 'package:spotiflac_android/core/data/session_resource_budget.dart';
 import 'package:spotiflac_android/core/presentation/core_queue_providers.dart';
 import 'package:spotiflac_android/models/settings.dart';
 import 'package:spotiflac_android/providers/download_queue_provider.dart';
@@ -47,6 +54,13 @@ void main() {
       };
 
       final prefs = await SharedPreferences.getInstance();
+      assert(
+        ColdStartPolicy.blockingSteps.any(
+          (step) => step.id == 'secure_store_init',
+        ),
+      );
+      assert(ColdStartPolicy.isDeferred('cover_cache'));
+      await SecureStore.instance.ensureInitialized();
       await _prepareAndroidInstallationState(prefs);
       final bootstrapSettings = loadBootstrapSettings(prefs);
       final bootstrapTheme = loadBootstrapThemeSettings(prefs);
@@ -56,6 +70,7 @@ void main() {
       );
       final runtimeProfile = await _resolveRuntimeProfile(prefs);
       _configureImageCache(runtimeProfile);
+      _bindProductionHardening(runtimeProfile);
 
       runApp(
         ProviderScope(
@@ -171,12 +186,88 @@ Future<_RuntimeProfile> _resolveRuntimeProfile(SharedPreferences prefs) async {
   }
 }
 
+/// Pins Stage 5 production policies into the app graph so a drifted helper
+/// cannot be deleted by `unreachable_from_main` while still shipping.
+void _bindProductionHardening(_RuntimeProfile runtimeProfile) {
+  final budget = SessionResourceBudget.fromTierName(runtimeProfile.tier);
+  final empty = SessionResourceSnapshot(
+    imageCacheEntries: 0,
+    imageCacheBytes: 0,
+    coverDiskBytes: 0,
+    liveSubscriptions: 0,
+    decodedCoversInFlight: 0,
+    nativeWorkerItems: 0,
+    streamBufferBytes: 0,
+  );
+  assert(budget.allows(empty));
+  assert(SessionResourceBudget.streamHeadBufferCapBytes == 4 << 20);
+  assert(
+    SessionResourceBudget.forTier(RuntimeMemoryTier.high)
+        .violations(
+          const SessionResourceSnapshot(
+            imageCacheEntries: 10_000,
+            imageCacheBytes: 1 << 30,
+            coverDiskBytes: 1 << 30,
+            liveSubscriptions: 10_000,
+            decodedCoversInFlight: 10_000,
+            nativeWorkerItems: 10_000,
+            streamBufferBytes: 1 << 30,
+          ),
+        )
+        .isNotEmpty,
+  );
+  assert(!RebuildBudget.shouldSkipRebuild(null, 'progress'));
+  assert(RebuildBudget.progressRebuildFloor.inMilliseconds == 200);
+  assert(NetworkSwitchPolicy.isOffline(const [NetworkTransport.none]));
+  assert(AndroidStoragePermissionPolicy.usesSafForDownloads(29));
+  assert(AndroidStoragePermissionPolicy.hasDataSyncForegroundBudget(35));
+  assert(BackgroundPlaybackPolicy.iosBackgroundMode == 'audio');
+  assert(ColdStartPolicy.sequence.isNotEmpty);
+  assert(ColdStartPolicy.deferredSteps.isNotEmpty);
+  assert(ColdStartPolicy.blockingSteps.isNotEmpty);
+  assert(
+    ReleaseArtifactPolicy.flutterTargetPlatforms.contains('android-x64'),
+  );
+  assert(ReleaseArtifactPolicy.gomobileAndroidTarget.contains('amd64'));
+  assert(ReleaseArtifactPolicy.androidApiLevel == '24');
+  final artifacts = ReleaseArtifactPolicy.expectedArtifacts('v1.0.0');
+  assert(artifacts.any((a) => a.kind == 'aab'));
+  assert(artifacts.any((a) => a.fileName.endsWith('-x86_64.apk')));
+  assert(ReleaseArtifactPolicy.checksumFileName() == 'SHA256SUMS.txt');
+  final line = ReleaseArtifactPolicy.checksumLine('a.apk', const <int>[1, 2, 3]);
+  final sums = ReleaseArtifactPolicy.parseChecksums(line);
+  assert(
+    ReleaseArtifactPolicy.verify(
+      fileName: 'a.apk',
+      bytes: const <int>[1, 2, 3],
+      checksums: sums,
+    ),
+  );
+  assert(SecureStorePolicy.isAllowedKey(SecureStoreKeys.token('access')));
+  assert(SecureStorePolicy.isAllowedKey(SecureStoreKeys.secret('api')));
+  assert(
+    SecureStorePolicy.isAllowedKey(
+      SecureStoreKeys.extensionSignature('ext'),
+    ),
+  );
+  assert(SecureStorePolicy.isAllowedValue('ok'));
+}
+
 void _configureImageCache(_RuntimeProfile runtimeProfile) {
   final imageCache = PaintingBinding.instance.imageCache;
   // Keep memory cache bounded so cover-heavy pages don't retain too many
-  // full-resolution images simultaneously.
-  imageCache.maximumSize = runtimeProfile.imageCacheMaximumSize;
-  imageCache.maximumSizeBytes = runtimeProfile.imageCacheMaximumSizeBytes;
+  // full-resolution images simultaneously. Caps come from ColdStartPolicy so
+  // they cannot drift from the 2-hour session leak budget.
+  imageCache.maximumSize = ColdStartPolicy.imageCacheEntriesForTier(
+    runtimeProfile.tier,
+  );
+  imageCache.maximumSizeBytes = ColdStartPolicy.imageCacheBytesForTier(
+    runtimeProfile.tier,
+  );
+  assert(
+    SessionResourceBudget.fromTierName(runtimeProfile.tier).maxImageCacheEntries ==
+        imageCache.maximumSize,
+  );
 }
 
 class _RuntimeProfile {

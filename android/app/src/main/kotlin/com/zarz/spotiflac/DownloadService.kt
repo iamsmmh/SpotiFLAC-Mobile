@@ -701,6 +701,7 @@ class DownloadService : Service() {
         )
 
         nativeWorkerJob = serviceScope.launch {
+            NativeThreadPriority.applyForDownload()
             runNativeWorker(requests, settingsJson, generation)
         }
     }

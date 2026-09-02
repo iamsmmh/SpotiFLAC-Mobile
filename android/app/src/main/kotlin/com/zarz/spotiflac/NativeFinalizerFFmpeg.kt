@@ -87,6 +87,7 @@ internal fun NativeDownloadFinalizer.scanReplayGain(path: String, shouldCancel: 
 }
 
 internal fun NativeDownloadFinalizer.runFFmpeg(command: String, shouldCancel: () -> Boolean = { false }): Pair<Boolean, String> {
+    NativeThreadPriority.applyForFfmpeg()
     checkCancelled(shouldCancel)
     installNativeFFmpegCallbackFilter()
     val latch = CountDownLatch(1)
@@ -165,6 +166,7 @@ internal fun NativeDownloadFinalizer.withFFmpegCommandPump(
     val running = AtomicBoolean(true)
     val handled = mutableSetOf<String>()
     val pump = Thread {
+        NativeThreadPriority.applyForFfmpeg()
         while (running.get()) {
             try {
                 val raw = Gobackend.getAllPendingFFmpegCommandsJSON()

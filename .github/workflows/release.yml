@@ -42,6 +42,11 @@ jobs:
   build-android:
     runs-on: ubuntu-latest
     needs: get-version
+    env:
+      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
     steps:
       - name: Free disk space
@@ -98,7 +103,7 @@ jobs:
         working-directory: go_backend
         run: |
           mkdir -p ../android/app/libs
-          gomobile bind -target=android/arm,android/arm64 -androidapi 24 -o ../android/app/libs/gobackend.aar .
+          gomobile bind -target=android/arm,android/arm64,android/amd64 -androidapi 24 -o ../android/app/libs/gobackend.aar .
         env:
           CGO_ENABLED: 1
 
@@ -125,22 +130,43 @@ jobs:
       - name: Build APK (Release - unsigned)
         run: |
           flutter build apk --release --split-per-abi \
-            --target-platform android-arm,android-arm64
+            --target-platform android-arm,android-arm64,android-x64
           ls -la build/app/outputs/flutter-apk/
           test -f build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
           test -f build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+          test -f build/app/outputs/flutter-apk/app-x86_64-release.apk
+
+      - name: Build AAB (Release)
+        run: |
+          bash scripts/flutter_build_appbundle.sh
+          test -s build/app/outputs/bundle/release/app-release.aab
 
       - name: Sign APKs
+        if: env.KEYSTORE_BASE64 != ''
         uses: r0adkll/sign-android-release@v1
         id: sign_arm64
         with:
           releaseDirectory: build/app/outputs/flutter-apk
-          signingKeyBase64: ${{ secrets.KEYSTORE_BASE64 }}
-          alias: ${{ secrets.KEY_ALIAS }}
-          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD }}
+          signingKeyBase64: ${{ env.KEYSTORE_BASE64 }}
+          alias: ${{ env.KEY_ALIAS }}
+          keyStorePassword: ${{ env.KEYSTORE_PASSWORD }}
+          keyPassword: ${{ env.KEY_PASSWORD }}
         env:
-          BUILD_TOOLS_VERSION: "36.0.0"
+          BUILD_TOOLS_VERSION: "35.0.0"
+
+      - name: Sign AAB
+        if: env.KEYSTORE_BASE64 != ''
+        run: |
+          set -euo pipefail
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload-keystore.jks"
+          jarsigner -keystore "$RUNNER_TEMP/upload-keystore.jks" \
+            -storepass "$KEYSTORE_PASSWORD" \
+            -keypass "$KEY_PASSWORD" \
+            -sigalg SHA256withRSA \
+            -digestalg SHA-256 \
+            build/app/outputs/bundle/release/app-release.aab \
+            "$KEY_ALIAS"
+          rm -f "$RUNNER_TEMP/upload-keystore.jks"
 
       - name: Rename APKs
         run: |
@@ -157,13 +183,27 @@ jobs:
 
           rename_required_apk app-arm64-v8a-release.apk   "SpotiFLAC-${VERSION}-arm64.apk"
           rename_required_apk app-armeabi-v7a-release.apk "SpotiFLAC-${VERSION}-arm32.apk"
+          rename_required_apk app-x86_64-release.apk      "SpotiFLAC-${VERSION}-x86_64.apk"
           ls -la
+
+      - name: Collect AAB
+        run: |
+          VERSION="${{ needs.get-version.outputs.version }}"
+          mkdir -p build/app/outputs/bundle/release
+          cp build/app/outputs/bundle/release/app-release.aab \
+            "build/app/outputs/bundle/release/SpotiFLAC-${VERSION}.aab"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v6
         with:
           name: android-apk
           path: build/app/outputs/flutter-apk/SpotiFLAC-*.apk
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: android-aab
+          path: build/app/outputs/bundle/release/SpotiFLAC-*.aab
 
   build-ios:
     runs-on: macos-15
@@ -325,11 +365,25 @@ jobs:
           name: android-apk
           path: ./release
 
+      - name: Download Android AAB
+        uses: actions/download-artifact@v7
+        with:
+          name: android-aab
+          path: ./release
+
       - name: Download iOS IPA
         uses: actions/download-artifact@v7
         with:
           name: ios-ipa
           path: ./release
+
+      - name: Generate SHA-256 checksums
+        working-directory: ./release
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          sha256sum -- *.apk *.aab *.ipa > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
       - name: Prepare release body
         run: |
@@ -356,6 +410,9 @@ jobs:
           #### Android
           - **arm64**: \`SpotiFLAC-${VERSION}-arm64.apk\` (recommended for modern devices)
           - **arm32**: \`SpotiFLAC-${VERSION}-arm32.apk\` (older devices)
+          - **x86_64**: \`SpotiFLAC-${VERSION}-x86_64.apk\` (emulators / ChromeOS)
+          - **AAB**: \`SpotiFLAC-${VERSION}.aab\` (Play Console upload)
+          - **checksums**: \`SHA256SUMS.txt\`
 
           #### iOS
           - **iOS**: \`SpotiFLAC-${VERSION}-ios-unsigned.ipa\` (sideload required)
@@ -371,7 +428,11 @@ jobs:
           tag_name: ${{ needs.get-version.outputs.version }}
           name: SpotiFLAC-Mobile ${{ needs.get-version.outputs.version }}
           body_path: /tmp/release_body.txt
-          files: ./release/*
+          files: |
+            ./release/*.apk
+            ./release/*.aab
+            ./release/*.ipa
+            ./release/SHA256SUMS.txt
           draft: false
           prerelease: ${{ needs.get-version.outputs.is_prerelease == 'true' }}
         env:
@@ -435,6 +496,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [get-version, create-release]
     if: ${{ needs.get-version.outputs.is_prerelease != 'true' }}
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
 
     steps:
       - name: Checkout repository
@@ -488,9 +552,7 @@ jobs:
           fi
 
       - name: Send to Telegram Channel
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+        if: env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHANNEL_ID != ''
         run: |
           VERSION=${{ needs.get-version.outputs.version }}
           CHANGELOG=$(cat /tmp/changelog.txt)

@@ -171,7 +171,7 @@ jobs:
           go install golang.org/x/mobile/cmd/gomobile
           gomobile init
           mkdir -p ../android/app/libs
-          gomobile bind -target=android/arm,android/arm64 -androidapi 24 \
+          gomobile bind -target=android/arm,android/arm64,android/amd64 -androidapi 24 \
             -o ../android/app/libs/gobackend.aar .
           test -f ../android/app/libs/gobackend.aar
 

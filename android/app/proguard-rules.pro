@@ -114,3 +114,35 @@
 # Keep all Flutter plugin registrants
 -keep class io.flutter.plugins.GeneratedPluginRegistrant { *; }
 -keep class ** extends io.flutter.embedding.engine.plugins.FlutterPlugin { *; }
+
+# Flutter MethodChannel / EventChannel reflection (Dart <-> Kotlin)
+-keep class io.flutter.plugin.common.** { *; }
+-keepclassmembers class * {
+    @io.flutter.plugin.common.MethodChannel$MethodCallHandler *;
+}
+
+# audio_service mediaPlayback FGS + notification
+-keep class com.ryanheise.audioservice.** { *; }
+-dontwarn com.ryanheise.audioservice.**
+
+# flutter_secure_storage + EncryptedSharedPreferences (security-crypto 1.0.0)
+-keep class com.it_nomads.fluttersecurestorage.** { *; }
+-keep class androidx.security.crypto.** { *; }
+-keep class com.google.crypto.tink.** { *; }
+-dontwarn com.google.crypto.tink.**
+-dontwarn androidx.security.crypto.**
+
+# audioplayers / audio_session
+-keep class xyz.luan.audioplayers.** { *; }
+-keep class com.ryanheise.audio_session.** { *; }
+
+# connectivity_plus
+-keep class dev.fluttercommunity.plus.connectivity.** { *; }
+
+# cached_network_image / sqflite already covered above
+
+# Keep JNI / gomobile Seq / Gobackend entry points used via reflection
+-keep class gobackend.Gobackend { *; }
+-keepclassmembers class gobackend.Gobackend {
+    public static *;
+}

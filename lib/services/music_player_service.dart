@@ -6,6 +6,7 @@ import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart'
     show AudioSession, AudioSessionConfiguration, AudioInterruptionType;
 import 'package:audioplayers/audioplayers.dart';
+import 'package:spotiflac_android/core/data/background_playback_policy.dart';
 import 'package:spotiflac_android/engine/audio_characteristics.dart';
 import 'package:spotiflac_android/engine/gapless_policy.dart';
 import 'package:spotiflac_android/engine/replay_gain.dart';
@@ -437,31 +438,51 @@ class MusicPlayerHandler extends BaseAudioHandler
             'type=${event.type} player=${_player.state} '
             'playing=${playbackState.value.playing}',
           );
+          final kind = _interruptionKind(event.type);
           if (event.begin) {
-            if (event.type == AudioInterruptionType.duck) {
-              return;
+            final decision = BackgroundPlaybackPolicy.onInterruptionBegan(kind);
+            switch (decision.action) {
+              case BackgroundPlaybackAction.ignore:
+                return;
+              case BackgroundPlaybackAction.pauseAndMarkResumable:
+                _interruptionActive = true;
+                _pausedByInterruption =
+                    _player.state == PlayerState.playing ||
+                    playbackState.value.playing;
+                unawaited(
+                  _pauseForFocusLoss(
+                    reason: decision.reason ?? 'audio interruption',
+                  ),
+                );
+              case BackgroundPlaybackAction.pauseSticky:
+                _interruptionActive = true;
+                _pausedByInterruption = false;
+                unawaited(
+                  _pauseForFocusLoss(
+                    reason: decision.reason ?? 'audio interruption',
+                  ),
+                );
+              case BackgroundPlaybackAction.resume:
+              case BackgroundPlaybackAction.stayPaused:
+                return;
             }
-
-            // Another app took focus or a transient interruption began.
-            _interruptionActive = true;
-            _pausedByInterruption =
-                _player.state == PlayerState.playing ||
-                playbackState.value.playing;
-            unawaited(_pauseForFocusLoss(reason: 'audio interruption'));
           } else {
-            if (event.type == AudioInterruptionType.duck) {
-              return;
-            }
-
-            // Focus returned; resume only if we paused due to a transient
-            // (duck/pause) interruption.
+            final decision = BackgroundPlaybackPolicy.onInterruptionEnded(
+              kind: kind,
+              pausedByInterruption: _pausedByInterruption,
+              userPaused: _userPaused,
+            );
             _interruptionActive = false;
-            if (_pausedByInterruption &&
-                event.type == AudioInterruptionType.pause) {
-              _pausedByInterruption = false;
-              unawaited(play());
-            } else {
-              _pausedByInterruption = false;
+            switch (decision.action) {
+              case BackgroundPlaybackAction.ignore:
+                return;
+              case BackgroundPlaybackAction.resume:
+                _pausedByInterruption = false;
+                unawaited(play());
+              case BackgroundPlaybackAction.stayPaused:
+              case BackgroundPlaybackAction.pauseSticky:
+              case BackgroundPlaybackAction.pauseAndMarkResumable:
+                _pausedByInterruption = false;
             }
           }
         }),
@@ -469,13 +490,24 @@ class MusicPlayerHandler extends BaseAudioHandler
 
       _subscriptions.add(
         session.becomingNoisyEventStream.listen((_) {
-          // Headphones unplugged / output route lost.
-          unawaited(_pauseForFocusLoss(reason: 'becoming noisy'));
+          final decision = BackgroundPlaybackPolicy.becomingNoisy;
+          _pausedByInterruption = false;
+          unawaited(
+            _pauseForFocusLoss(reason: decision.reason ?? 'becoming noisy'),
+          );
         }),
       );
     } catch (e) {
       _log.w('Failed to configure audio session: $e');
     }
+  }
+
+  AudioInterruptionKind _interruptionKind(AudioInterruptionType type) {
+    return switch (type) {
+      AudioInterruptionType.duck => AudioInterruptionKind.duck,
+      AudioInterruptionType.pause => AudioInterruptionKind.pause,
+      _ => AudioInterruptionKind.unknown,
+    };
   }
 
   bool get _shouldIgnoreComplete =>
@@ -829,7 +861,11 @@ class MusicPlayerHandler extends BaseAudioHandler
           playbackState.value.copyWith(updatePosition: position),
         );
       }
-      _broadcastState(playerState: PlayerState.paused);
+      // iOS 17+ kills an app that starts audio from the background without
+      // an active session; the policy always restores paused.
+      if (BackgroundPlaybackPolicy.restoreSessionPaused()) {
+        _broadcastState(playerState: PlayerState.paused);
+      }
     } finally {
       _restoringSession = false;
     }
@@ -1569,7 +1605,8 @@ Future<MusicPlayerHandler> _doInitMusicPlayer() async {
     final handler = await AudioService.init(
       builder: () => MusicPlayerHandler(),
       config: const AudioServiceConfig(
-        androidNotificationChannelId: 'com.zarz.spotiflac.playback',
+        androidNotificationChannelId:
+            BackgroundPlaybackPolicy.androidPlaybackChannelId,
         androidNotificationChannelName: 'Playback',
         androidNotificationChannelDescription:
             'Media controls for background playback',

@@ -90,10 +90,10 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
-            // Minification disabled to avoid R8 issues with Go AAR + FFmpeg + Java 17
-            // Enable later with thorough testing. Proguard rules kept for reference.
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // R8 fullMode stays off (android.enableR8.fullMode=false) so Flutter
+            // channel reflection, gomobile, and both FFmpeg kits survive minify.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -173,6 +173,10 @@ dependencies {
     // NativeDownloadFinalizer imports FFmpegKit APIs directly. The Flutter
     // plugin owns the runtime AAR; compileOnly avoids packaging it twice here.
     compileOnly("com.antonkarpenko:ffmpeg-kit-full:2.2.1")
+
+    // EncryptedSharedPreferences 1.0.0 (MasterKeys.getOrCreate). Do not bump
+    // to 1.1.0-alpha MasterKey — that API is still unstable.
+    implementation("androidx.security:security-crypto:1.0.0")
 
     testImplementation("junit:junit:4.13.2")
 }
