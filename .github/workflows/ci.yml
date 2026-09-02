@@ -102,11 +102,10 @@ jobs:
         run: |
           set -o pipefail
           if ! flutter test 2>&1 | tee test.log; then
-            findings=$(grep -E "\[E\]|Error:|Some tests failed" test.log | head -40)
-            [ -n "$findings" ] || findings=$(tail -n 20 test.log)
-            printf '%s\n' "$findings" | while IFS= read -r line; do
-              echo "::error::${line}"
-            done
+            findings=$(grep -E "\[E\]" test.log | head -20; grep -A8 -E "\[E\]" test.log | head -100)
+            [ -n "$findings" ] || findings=$(tail -n 40 test.log)
+            encoded=$(printf '%s' "$findings" | head -c 3500 | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error::${encoded}"
             exit 1
           fi
 
@@ -203,14 +202,16 @@ jobs:
 
       - name: Run native unit tests
         working-directory: android
+        # Scope to :app — 'testDebugUnitTest' with no project would also run
+        # every Flutter plugin module's own unit tests (e.g.
+        # shared_preferences_android), which are not ours to gate on.
         run: |
           set -o pipefail
-          if ! ./gradlew testDebugUnitTest 2>&1 | tee gradle-test.log; then
+          if ! ./gradlew :app:testDebugUnitTest 2>&1 | tee gradle-test.log; then
             findings=$(grep -E " FAILED$|FAILED \(|e: |error: |Caused by:|What went wrong" gradle-test.log | head -40)
             [ -n "$findings" ] || findings=$(tail -n 30 gradle-test.log)
-            printf '%s\n' "$findings" | while IFS= read -r line; do
-              echo "::error::${line}"
-            done
+            encoded=$(printf '%s' "$findings" | head -c 3500 | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error::${encoded}"
             exit 1
           fi
 
