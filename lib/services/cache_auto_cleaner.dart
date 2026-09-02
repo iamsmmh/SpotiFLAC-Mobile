@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'dart:math' as math;
 
-import 'package:spotiflac_android/utils/logger.dart';
+import 'package:spotimusic/utils/logger.dart';
 
 final _log = AppLogger('CacheAutoCleaner');
 

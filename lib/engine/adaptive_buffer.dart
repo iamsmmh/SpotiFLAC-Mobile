@@ -1,4 +1,4 @@
-import 'package:spotiflac_android/engine/audio_characteristics.dart';
+import 'package:spotimusic/engine/audio_characteristics.dart';
 
 /// Adaptive buffering: turns network conditions + policy into concrete
 /// progressive-playback buffer decisions.

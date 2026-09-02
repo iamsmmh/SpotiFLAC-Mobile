@@ -5,9 +5,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:spotiflac_android/services/download_request_payload.dart';
-import 'package:spotiflac_android/utils/audio_format_utils.dart';
-import 'package:spotiflac_android/utils/logger.dart';
+import 'package:spotimusic/services/download_request_payload.dart';
+import 'package:spotimusic/utils/audio_format_utils.dart';
+import 'package:spotimusic/utils/logger.dart';
 
 final _log = AppLogger('PlatformBridge');
 
@@ -145,7 +145,7 @@ class _BridgeInFlight<T> {
 }
 
 class PlatformBridge {
-  static const _channel = MethodChannel('com.zarz.spotiflac/backend');
+  static const _channel = MethodChannel('com.zarz.spotimusic/backend');
   static const _jsonResultFileKey = '__json_file';
   static const _backgroundJsonDecodeThresholdBytes = 128 * 1024;
   static const _metadataCacheTtl = Duration(minutes: 20);
@@ -155,10 +155,10 @@ class PlatformBridge {
   static const _lookupCachePersistDebounce = Duration(milliseconds: 500);
   static const _metadataPersistentCacheKey = 'bridge_metadata_lookup_cache_v1';
   static const _downloadProgressEvents = EventChannel(
-    'com.zarz.spotiflac/download_progress_stream',
+    'com.zarz.spotimusic/download_progress_stream',
   );
   static const _libraryScanProgressEvents = EventChannel(
-    'com.zarz.spotiflac/library_scan_progress_stream',
+    'com.zarz.spotimusic/library_scan_progress_stream',
   );
   static final Map<String, _BridgeCacheEntry> _metadataCache = {};
   static final Map<String, _BridgeCacheEntry> _urlHandleCache = {};
@@ -663,7 +663,7 @@ class PlatformBridge {
   /// exactly like an OS deep link.
   static Future<bool> startIosWebAuthSession(
     String url, {
-    String callbackScheme = 'spotiflac',
+    String callbackScheme = 'spotimusic',
   }) async {
     final result = await _channel.invokeMethod('startWebAuthSession', {
       'url': url,

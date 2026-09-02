@@ -4,24 +4,26 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:spotiflac_android/l10n/l10n.dart';
-import 'package:spotiflac_android/providers/download_history_provider.dart';
-import 'package:spotiflac_android/providers/music_player_provider.dart';
-import 'package:spotiflac_android/screens/downloaded_album_screen.dart';
-import 'package:spotiflac_android/screens/local_album_screen.dart';
-import 'package:spotiflac_android/services/library_database.dart';
-import 'package:spotiflac_android/services/music_player_service.dart';
-import 'package:spotiflac_android/utils/clickable_metadata.dart';
-import 'package:spotiflac_android/utils/file_access.dart';
-import 'package:spotiflac_android/utils/int_utils.dart';
-import 'package:spotiflac_android/utils/lyrics_parser.dart';
-import 'package:spotiflac_android/utils/logger.dart';
-import 'package:spotiflac_android/utils/string_utils.dart';
-import 'package:spotiflac_android/utils/synced_lyrics_scroll.dart';
-import 'package:spotiflac_android/widgets/app_bottom_sheet.dart';
-import 'package:spotiflac_android/widgets/audio_quality_badges.dart';
-import 'package:spotiflac_android/widgets/player_artwork.dart';
-import 'package:spotiflac_android/widgets/settings_group.dart';
+import 'package:spotimusic/l10n/l10n.dart';
+import 'package:spotimusic/providers/download_history_provider.dart';
+import 'package:spotimusic/providers/music_player_provider.dart';
+import 'package:spotimusic/providers/streaming_engine_provider.dart';
+import 'package:spotimusic/ui/widgets/liquid_glass_player_sheet.dart';
+import 'package:spotimusic/screens/downloaded_album_screen.dart';
+import 'package:spotimusic/screens/local_album_screen.dart';
+import 'package:spotimusic/services/library_database.dart';
+import 'package:spotimusic/services/music_player_service.dart';
+import 'package:spotimusic/utils/clickable_metadata.dart';
+import 'package:spotimusic/utils/file_access.dart';
+import 'package:spotimusic/utils/int_utils.dart';
+import 'package:spotimusic/utils/lyrics_parser.dart';
+import 'package:spotimusic/utils/logger.dart';
+import 'package:spotimusic/utils/string_utils.dart';
+import 'package:spotimusic/utils/synced_lyrics_scroll.dart';
+import 'package:spotimusic/widgets/app_bottom_sheet.dart';
+import 'package:spotimusic/widgets/audio_quality_badges.dart';
+import 'package:spotimusic/widgets/player_artwork.dart';
+import 'package:spotimusic/widgets/settings_group.dart';
 
 final _log = AppLogger('NowPlaying');
 
@@ -383,6 +385,20 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
             onPressed: () => Navigator.of(context).maybePop(),
           ),
           actions: [
+            IconButton(
+              tooltip: 'Streaming providers',
+              icon: const Icon(Icons.travel_explore_rounded),
+              onPressed: () {
+                final track = ref
+                    .read(streamingEngineControllerProvider)
+                    .trackFor(mediaItem.id);
+                LiquidGlassPlayerSheet.show(
+                  context,
+                  track: track,
+                  mediaItem: mediaItem,
+                );
+              },
+            ),
             IconButton(
               tooltip: context.l10n.nowPlayingUpNext,
               icon: const Icon(Icons.queue_music),

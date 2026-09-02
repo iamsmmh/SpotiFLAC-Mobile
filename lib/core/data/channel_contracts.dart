@@ -13,9 +13,9 @@ library;
 class CoreChannelNames {
   const CoreChannelNames._();
 
-  static const String backend = 'com.zarz.spotiflac/backend';
+  static const String backend = 'com.zarz.spotimusic/backend';
   static const String downloadProgressEvents =
-      'com.zarz.spotiflac/download_progress_stream';
+      'com.zarz.spotimusic/download_progress_stream';
 }
 
 /// Storage I/O methods (Android SAF + iOS sandbox), mirroring

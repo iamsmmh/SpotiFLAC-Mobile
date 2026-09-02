@@ -3,9 +3,9 @@ import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:spotiflac_android/engine/playback_session.dart';
-import 'package:spotiflac_android/providers/engine_settings_provider.dart';
-import 'package:spotiflac_android/services/music_player_service.dart';
+import 'package:spotimusic/engine/playback_session.dart';
+import 'package:spotimusic/providers/engine_settings_provider.dart';
+import 'package:spotimusic/services/music_player_service.dart';
 
 /// Privacy-first listening statistics.
 ///

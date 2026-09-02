@@ -1,16 +1,16 @@
 import 'package:flutter/foundation.dart';
-import 'package:spotiflac_android/core/data/release_artifact_policy.dart';
+import 'package:spotimusic/core/data/release_artifact_policy.dart';
 
 class AppInfo {
-  static const String version = '4.9.0';
-  static const String buildNumber = '141';
+  static const String version = '5.0.0';
+  static const String buildNumber = '142';
   static const String fullVersion = '$version+$buildNumber';
 
   static String get displayVersion => kDebugMode ? 'Internal' : version;
 
-  static const String appName = 'SpotiFLAC Mobile';
+  static const String appName = 'SpotiMusic';
 
-  /// Prefix used by the production release workflow (`SpotiFLAC-<ver>-arm64.apk`).
+  /// Prefix used by the production release workflow (`SpotiMusic-<ver>-arm64.apk`).
   static const String releaseArtifactPrefix = ReleaseArtifactPolicy.appName;
 
   /// Android ABI splits the production channel must publish.

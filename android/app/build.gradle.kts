@@ -19,7 +19,7 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
-    namespace = "com.zarz.spotiflac"
+    namespace = "com.zarz.spotimusic"
     // compileSdk 37: the current dependency set (androidx.core 1.18,
     // activity 1.13, audioplayers_android, connectivity_plus, file_picker,
     // receive_sharing_intent) requires compiling against API 37+.
@@ -59,7 +59,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.zarz.spotiflac"
+        applicationId = "com.zarz.spotimusic"
         minSdk = flutter.minSdkVersion
         targetSdk = 35
         versionCode = flutter.versionCode

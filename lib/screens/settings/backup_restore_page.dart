@@ -4,16 +4,16 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart' show ShareParams, SharePlus, XFile;
-import 'package:spotiflac_android/l10n/l10n.dart';
-import 'package:spotiflac_android/providers/download_queue_provider.dart';
-import 'package:spotiflac_android/providers/extension_provider.dart';
-import 'package:spotiflac_android/providers/library_collections_provider.dart';
-import 'package:spotiflac_android/providers/settings_provider.dart';
-import 'package:spotiflac_android/services/backup_service.dart';
-import 'package:spotiflac_android/services/history_database.dart';
-import 'package:spotiflac_android/utils/logger.dart';
-import 'package:spotiflac_android/widgets/settings_group.dart';
-import 'package:spotiflac_android/widgets/app_sliver_header.dart';
+import 'package:spotimusic/l10n/l10n.dart';
+import 'package:spotimusic/providers/download_queue_provider.dart';
+import 'package:spotimusic/providers/extension_provider.dart';
+import 'package:spotimusic/providers/library_collections_provider.dart';
+import 'package:spotimusic/providers/settings_provider.dart';
+import 'package:spotimusic/services/backup_service.dart';
+import 'package:spotimusic/services/history_database.dart';
+import 'package:spotimusic/utils/logger.dart';
+import 'package:spotimusic/widgets/settings_group.dart';
+import 'package:spotimusic/widgets/app_sliver_header.dart';
 
 class BackupRestorePage extends ConsumerStatefulWidget {
   const BackupRestorePage({super.key});

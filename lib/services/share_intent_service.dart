@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
-import 'package:spotiflac_android/utils/logger.dart';
+import 'package:spotimusic/utils/logger.dart';
 
 final _log = AppLogger('ShareIntent');
 
