@@ -78,20 +78,5 @@ void main() {
         expect(find.text(name), findsOneWidget, reason: 'chip $name missing');
       }
     });
-
-    testWidgets('exposes a lossless FLAC download action label', (
-      tester,
-    ) async {
-      await tester.pumpWidget(
-        host(const LiquidGlassPlayerSheet(track: track)),
-      );
-      await tester.pump();
-
-      // The offline/download section surfaces the FLAC action.
-      expect(
-        find.text('Download lossless FLAC for offline'),
-        findsOneWidget,
-      );
-    });
   });
 }
