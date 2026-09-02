@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:spotimusic/l10n/l10n.dart';
 import 'package:spotimusic/screens/settings/log_screen.dart';
@@ -70,11 +71,18 @@ void main() {
       ),
     );
 
+    // LogScreen renders SettingsGroup (a ConsumerWidget watching
+    // glassUiEnabledProvider) inside a lazily-built sliver: it only mounts
+    // once ensureVisible scrolls it into the viewport, so the screen must
+    // live under a ProviderScope even though the initial build doesn't
+    // touch Riverpod.
     await tester.pumpWidget(
-      MaterialApp(
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        supportedLocales: AppLocalizations.supportedLocales,
-        home: const LogScreen(),
+      ProviderScope(
+        child: MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: const LogScreen(),
+        ),
       ),
     );
 
