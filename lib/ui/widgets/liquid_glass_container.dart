@@ -260,7 +260,21 @@ class _LiquidGlassBackgroundState extends State<LiquidGlassBackground>
   late final AnimationController _controller = AnimationController(
     vsync: this,
     duration: const Duration(seconds: 24),
-  )..repeat(reverse: true);
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final disable =
+        MediaQuery.disableAnimationsOf(context) ||
+        !TickerMode.valuesOf(context).enabled;
+    if (disable) {
+      _controller.stop();
+      _controller.value = 0;
+    } else if (!_controller.isAnimating) {
+      _controller.repeat(reverse: true);
+    }
+  }
 
   @override
   void dispose() {
@@ -321,7 +335,7 @@ class _LiquidGlassBackgroundState extends State<LiquidGlassBackground>
             },
           ),
         ),
-        if (widget.child != null) Positioned.fill(child: widget.child!),
+        if (widget.child != null) widget.child!,
       ],
     );
   }
