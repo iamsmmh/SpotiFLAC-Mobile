@@ -88,7 +88,9 @@ void main() {
       }
     });
 
-    testWidgets('exposes a lossless FLAC download action', (tester) async {
+    testWidgets('exposes an enabled lossless FLAC download action', (
+      tester,
+    ) async {
       await tester.pumpWidget(
         host(const LiquidGlassPlayerSheet(track: track)),
       );
@@ -96,11 +98,12 @@ void main() {
 
       final button = find.text('Download lossless FLAC for offline');
       expect(button, findsOneWidget);
-      // The action renders as an enabled filled button.
-      final filled = tester.widget<FilledButton>(
-        find.ancestor(of: button, matching: find.byType(FilledButton)),
+      // The action renders as an enabled filled button (FilledButton.icon
+      // builds a FilledButton subtype, so find by the widget type).
+      final filledButtons = find.byWidgetPredicate(
+        (w) => w is FilledButton && w.onPressed != null,
       );
-      expect(filled.onPressed, isNotNull);
+      expect(filledButtons, findsOneWidget);
     });
   });
 }
