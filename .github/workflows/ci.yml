@@ -99,9 +99,28 @@ jobs:
           fi
 
       - name: Run tests
-        # The github reporter emits each failing test as an ::error
-        # annotation, so failures are diagnosable from the Checks API.
-        run: flutter test --reporter github
+        # The github reporter emits each *located* failing test as an ::error
+        # annotation, but failures without a source location only show up in
+        # the final summary line. Tee an expanded-reporter log and, on failure,
+        # re-emit the failing test lines and exception details as a single
+        # annotation so the Checks API names the culprit without raw-log access.
+        run: |
+          set -o pipefail
+          status=0
+          flutter test --reporter github 2>&1 | tee test.log || status=$?
+          if [ "$status" -ne 0 ]; then
+            {
+              echo "=== tests marked failed by the reporter ==="
+              grep -aE "^::error|\[E\]|Some tests failed" test.log | head -15
+              echo "=== first exception / harness error context ==="
+              grep -anE "EXCEPTION CAUGHT|RenderFlex overflowed|Timer is still pending|Test failed|Bad state|TestFailure|pumpAndSettle timed out" test.log | head -15
+              echo "=== tail of test run ==="
+              tail -30 test.log
+            } | tr -d '\r' | sed -e 's/\x1b\[[0-9;]*m//g' -e 's/%/%25/g' \
+              | sed ':a;N;$!ba;s/\n/%0A/g' \
+              | awk '{print "::error::" $0}'
+          fi
+          exit "$status"
 
   go:
     name: Go vet & test
