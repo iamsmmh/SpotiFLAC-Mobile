@@ -244,6 +244,44 @@ class _StreamingSettingsPageState
         ),
         _section(
           context,
+          'Audio pipeline',
+          SettingsGroup(
+            children: [
+              SettingsSwitchItem(
+                icon: Icons.linked_camera_outlined,
+                title: 'Gapless playback',
+                subtitle:
+                    'Splice consecutive lossless tracks without a silence gap',
+                value: settings.gaplessEnabled,
+                onChanged: notifier.setGaplessEnabled,
+              ),
+              _StepperItem(
+                icon: Icons.storage_outlined,
+                title: 'Low-bandwidth buffer',
+                subtitle: 'Extra lookahead buffered on poor connections',
+                value: settings.lowBandwidthBufferSeconds,
+                suffix: 's',
+                min: 5,
+                max: 120,
+                step: 5,
+                onChanged: notifier.setLowBandwidthBufferSeconds,
+              ),
+              _StepperItem(
+                icon: Icons.downloading_outlined,
+                title: 'Prebuffer head',
+                subtitle: 'Bytes of the next stream warmed while playing',
+                value: settings.prebufferHeadBytesKb,
+                suffix: ' KB',
+                min: 64,
+                max: 8192,
+                step: 64,
+                onChanged: notifier.setPrebufferHeadBytesKb,
+              ),
+            ],
+          ),
+        ),
+        _section(
+          context,
           'Recovery & privacy',
           SettingsGroup(
             children: [

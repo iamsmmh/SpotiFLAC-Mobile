@@ -120,6 +120,14 @@ class AudioCharacteristics {
   final bool lossless;
   final String? sourceLabel;
 
+  /// ReplayGain loudness metadata, when a provider/extension supplies it for a
+  /// stream (local files are probed by the audio service instead). Gains are in
+  /// dB; peaks are linear full-scale values.
+  final double? trackGainDb;
+  final double? albumGainDb;
+  final double? trackPeak;
+  final double? albumPeak;
+
   const AudioCharacteristics({
     this.codec,
     this.bitrateKbps,
@@ -129,6 +137,10 @@ class AudioCharacteristics {
     this.fileSizeBytes,
     this.lossless = false,
     this.sourceLabel,
+    this.trackGainDb,
+    this.albumGainDb,
+    this.trackPeak,
+    this.albumPeak,
   });
 
   factory AudioCharacteristics.fromTrack(Track track) {
@@ -208,6 +220,10 @@ class AudioCharacteristics {
     if (fileSizeBytes != null) 'file_size_bytes': fileSizeBytes,
     'lossless': lossless,
     if (sourceLabel != null) 'source': sourceLabel,
+    if (trackGainDb != null) 'track_gain_db': trackGainDb,
+    if (albumGainDb != null) 'album_gain_db': albumGainDb,
+    if (trackPeak != null) 'track_peak': trackPeak,
+    if (albumPeak != null) 'album_peak': albumPeak,
   };
 
   factory AudioCharacteristics.fromJson(Map<String, dynamic> json) =>
@@ -220,11 +236,21 @@ class AudioCharacteristics {
         fileSizeBytes: _positiveInt(json['file_size_bytes']),
         lossless: json['lossless'] == true,
         sourceLabel: json['source']?.toString(),
+        trackGainDb: _finiteDouble(json['track_gain_db']),
+        albumGainDb: _finiteDouble(json['album_gain_db']),
+        trackPeak: _finiteDouble(json['track_peak']),
+        albumPeak: _finiteDouble(json['album_peak']),
       );
 
   static int? _positiveInt(Object? value) {
     final parsed = value is num ? value.toInt() : int.tryParse('$value');
     return parsed != null && parsed > 0 ? parsed : null;
+  }
+
+  static double? _finiteDouble(Object? value) {
+    final parsed = value is num ? value.toDouble() : double.tryParse('$value');
+    if (parsed == null || !parsed.isFinite) return null;
+    return parsed;
   }
 }
 

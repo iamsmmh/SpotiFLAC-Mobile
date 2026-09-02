@@ -40,6 +40,18 @@ class EngineSettings {
   /// follow provider terms.
   final bool cacheStreams;
 
+  // ---- Real-time audio pipeline --------------------------------------------
+  /// Gapless transitions between consecutive queue items (skips source
+  /// teardown for compatible lossless tracks).
+  final bool gaplessEnabled;
+
+  /// Extra lookahead (seconds) buffered on low-bandwidth networks so a brief
+  /// stall never interrupts playback.
+  final int lowBandwidthBufferSeconds;
+
+  /// Cap on how much of the next stream's head is pre-buffered (KiB).
+  final int prebufferHeadBytesKb;
+
   // ---- Recovery / privacy --------------------------------------------------
   final bool saveEngineSavepoints;
   final bool trackListeningStats;
@@ -74,6 +86,9 @@ class EngineSettings {
     this.autoRefreshExpiredUrls = true,
     this.bufferPreviewStreams = true,
     this.cacheStreams = false,
+    this.gaplessEnabled = true,
+    this.lowBandwidthBufferSeconds = 30,
+    this.prebufferHeadBytesKb = 512,
     this.saveEngineSavepoints = true,
     this.trackListeningStats = true,
     this.glassUiEnabled = true,
@@ -104,6 +119,9 @@ class EngineSettings {
     bool? autoRefreshExpiredUrls,
     bool? bufferPreviewStreams,
     bool? cacheStreams,
+    bool? gaplessEnabled,
+    int? lowBandwidthBufferSeconds,
+    int? prebufferHeadBytesKb,
     bool? saveEngineSavepoints,
     bool? trackListeningStats,
     bool? glassUiEnabled,
@@ -133,6 +151,10 @@ class EngineSettings {
         autoRefreshExpiredUrls ?? this.autoRefreshExpiredUrls,
     bufferPreviewStreams: bufferPreviewStreams ?? this.bufferPreviewStreams,
     cacheStreams: cacheStreams ?? this.cacheStreams,
+    gaplessEnabled: gaplessEnabled ?? this.gaplessEnabled,
+    lowBandwidthBufferSeconds:
+        lowBandwidthBufferSeconds ?? this.lowBandwidthBufferSeconds,
+    prebufferHeadBytesKb: prebufferHeadBytesKb ?? this.prebufferHeadBytesKb,
     saveEngineSavepoints: saveEngineSavepoints ?? this.saveEngineSavepoints,
     trackListeningStats: trackListeningStats ?? this.trackListeningStats,
     glassUiEnabled: glassUiEnabled ?? this.glassUiEnabled,
@@ -172,6 +194,9 @@ class EngineSettings {
     'auto_refresh_expired_urls': autoRefreshExpiredUrls,
     'buffer_preview_streams': bufferPreviewStreams,
     'cache_streams': cacheStreams,
+    'gapless_enabled': gaplessEnabled,
+    'low_bandwidth_buffer_seconds': lowBandwidthBufferSeconds,
+    'prebuffer_head_bytes_kb': prebufferHeadBytesKb,
     'save_engine_savepoints': saveEngineSavepoints,
     'track_listening_stats': trackListeningStats,
     'glass_ui_enabled': glassUiEnabled,
@@ -212,6 +237,11 @@ class EngineSettings {
           json['auto_refresh_expired_urls'] as bool? ?? true,
       bufferPreviewStreams: json['buffer_preview_streams'] as bool? ?? true,
       cacheStreams: json['cache_streams'] as bool? ?? false,
+      gaplessEnabled: json['gapless_enabled'] as bool? ?? true,
+      lowBandwidthBufferSeconds:
+          (json['low_bandwidth_buffer_seconds'] as num?)?.toInt() ?? 30,
+      prebufferHeadBytesKb:
+          (json['prebuffer_head_bytes_kb'] as num?)?.toInt() ?? 512,
       saveEngineSavepoints: json['save_engine_savepoints'] as bool? ?? true,
       trackListeningStats: json['track_listening_stats'] as bool? ?? true,
       glassUiEnabled: json['glass_ui_enabled'] as bool? ?? true,
@@ -336,6 +366,17 @@ class EngineSettingsNotifier extends Notifier<EngineSettings> {
 
   Future<void> setCacheStreams(bool value) =>
       _apply(state.copyWith(cacheStreams: value));
+
+  Future<void> setGaplessEnabled(bool value) =>
+      _apply(state.copyWith(gaplessEnabled: value));
+
+  Future<void> setLowBandwidthBufferSeconds(int value) => _apply(
+    state.copyWith(lowBandwidthBufferSeconds: value.clamp(5, 120)),
+  );
+
+  Future<void> setPrebufferHeadBytesKb(int value) => _apply(
+    state.copyWith(prebufferHeadBytesKb: value.clamp(64, 8192)),
+  );
 
   Future<void> setSaveEngineSavepoints(bool value) =>
       _apply(state.copyWith(saveEngineSavepoints: value));
