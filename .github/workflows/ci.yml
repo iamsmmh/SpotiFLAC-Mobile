@@ -203,5 +203,14 @@ jobs:
 
       - name: Run native unit tests
         working-directory: android
-        run: ./gradlew testDebugUnitTest
+        run: |
+          set -o pipefail
+          if ! ./gradlew testDebugUnitTest 2>&1 | tee gradle-test.log; then
+            findings=$(grep -E " FAILED$|FAILED \(|e: |error: |Caused by:|What went wrong" gradle-test.log | head -40)
+            [ -n "$findings" ] || findings=$(tail -n 30 gradle-test.log)
+            printf '%s\n' "$findings" | while IFS= read -r line; do
+              echo "::error::${line}"
+            done
+            exit 1
+          fi
 
