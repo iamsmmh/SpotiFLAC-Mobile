@@ -1677,7 +1677,10 @@ class PlatformBridge {
   static Future<List<Map<String, dynamic>>>
   getAllPendingFFmpegCommands() async {
     final result = await _channel.invokeMethod('getAllPendingFFmpegCommands');
-    return _decodeMapListResult(result, 'setFFmpegCommandResult');
+    return _decodeMapListResult(
+      result,
+      'getAllPendingFFmpegCommands',
+    );
   }
 
   static Future<List<Map<String, dynamic>>> customSearchWithExtension(
