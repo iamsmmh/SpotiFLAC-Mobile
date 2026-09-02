@@ -99,3 +99,4 @@ NUL
 *.log
 hs_err_*.log
 flutter_*.log
+pubspec.lock

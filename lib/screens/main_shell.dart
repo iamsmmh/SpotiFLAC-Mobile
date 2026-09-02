@@ -836,7 +836,8 @@ class _MainShellState extends ConsumerState<MainShell>
               // with the classic theme so the old Material look is unchanged.
               if (useLiquidGlass)
                 const Positioned.fill(child: LiquidGlassBackground()),
-              Scaffold(
+              Positioned.fill(
+                child: Scaffold(
           extendBody: true,
           backgroundColor: useLiquidGlass ? Colors.transparent : null,
           // The page view keeps one element across the rail<->bar structure
@@ -943,11 +944,12 @@ class _MainShellState extends ConsumerState<MainShell>
               );
             },
           ),
-          ), // Scaffold
-          ], // Stack children
-        ), // Stack
-      ), // BackButtonListener
-      ), // SelectionOverlayHost
+        ), // Scaffold
+      ), // Positioned.fill
+      ], // Stack children
+    ), // Stack
+    ), // BackButtonListener
+    ), // SelectionOverlayHost
     ); // LiquidGlassCapabilitiesHost
   }
 }
