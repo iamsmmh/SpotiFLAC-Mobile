@@ -42,16 +42,43 @@ All policy lives in `lib/engine/` and is 100% unit-testable:
 | File | Responsibility |
 |---|---|
 | `track_identity.dart` | Canonical `TrackIdentityInput` → `CanonicalTrackKey`; ISRC-first matching; fuzzy title/artist/duration scoring; duplicate merging |
-| `audio_characteristics.dart` | Quality ladder (Auto → Hi-Res), network profiles, codec/bitrate/sample-rate/bit-depth display model, quality policy |
+| `audio_characteristics.dart` | Quality ladder (Auto → Hi-Res), network profiles, codec/bitrate/sample-rate/bit-depth display model, quality policy, `StreamBufferPolicy`, per-source ReplayGain fields |
 | `streaming_engine.dart` | `StreamDescriptor`, provider health + exponential backoff, source ranking, session phase machine, URL-expiry refresh policy, preflight contract, preloader, diagnostics |
 | `smart_play.dart` | The Smart Play ladder with decision traces |
 | `playback_session.dart` | Queue planner, shuffle/repeat, savepoint + sanitize, listening statistics |
+| `replay_gain.dart` | ReplayGain dB↔linear conversion, tag parsing, track/album selection, peak-clipping protection |
+| `gapless_policy.dart` | Gapless transition planning (seamless lossless splice vs. pre-buffer vs. disabled) |
+| `adaptive_buffer.dart` | Adaptive buffer planner: network profile + throughput → lookahead window and head pre-buffer size |
 
 The Riverpod layer (`lib/providers/streaming_engine_provider.dart`) performs the
-actual HTTP work (`HttpStreamPreflightValidator`, `NetworkStatusMonitor`) and
-drives the existing `MusicPlayerHandler` — which now accepts progressive
-`UrlSource` playback, exposes a playback-failure hook for failover, and keeps
-its original content-URI/local-file behavior untouched.
+actual HTTP work (`HttpStreamPreflightValidator`, `StreamHeadWarmer`,
+`NetworkStatusMonitor`) and drives the existing `MusicPlayerHandler` — which
+now accepts progressive `UrlSource` playback, exposes a playback-failure hook
+for failover, and keeps its original content-URI/local-file behavior untouched.
+
+## Real-time audio pipeline
+
+The handler (`lib/services/music_player_service.dart`) now normalizes both
+transports through the same pure `ReplayGain` policy:
+
+* **Local files** — track/album gain and peak tags are probed from the file
+  (`replaygain_track_gain`, `replaygain_album_gain`, `replaygain_track_peak`).
+* **Progressive streams** — gain metadata rides on the resolved
+  `StreamDescriptor` → `AudioCharacteristics` → `PlayableMedia`, so extensions
+  can supply ReplayGain for authorized streams without re-probing a URL.
+* **Peak-clipping protection** — a reported peak above full scale is attenuated
+  back to 1.0; positive gains clamp at unity because the platform volume can
+  only attenuate.
+
+Gapless transitions are planned by `GaplessPolicy`: two consecutive items on the
+same transport with identical codec/sample rate/bit depth/channels and a
+lossless codec (FLAC/ALAC/WAV/AIFF/APE/WavPack) splice seamlessly by skipping
+source teardown; every other transition pre-buffers the next head to shrink the
+gap. The engine's `StreamHeadWarmer` pulls a bounded ranged-GET prefix of the
+next stream (respecting `bufferPreviewStreams` / `cachePermitted`) while the
+current track plays, and `AdaptiveBufferPlanner` sizes that prefix from the
+network profile and live bandwidth — poor links open a deeper low-bandwidth
+lookahead window.
 
 ## Smart Play ladder
 
@@ -118,3 +145,12 @@ the reference implementation (provider-supplied preview URLs).
   resuming.
 - Download & Play watches the existing download queue and starts local playback
   when the item completes.
+
+## Seamless failover
+
+When a stream URL expires or breaks mid-playback, the runtime failure hook
+re-resolves the same track to the next ranked source **and resumes at the
+position where the dead source stopped** (`t`): the handler's
+`currentPlaybackPosition()` is captured before the switch and passed through
+`replaceCurrentAndPlay(item, resumeAt: t)`, so the listener hears a jump of at
+most the resolve/backoff delay instead of a restart from 0:00.

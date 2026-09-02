@@ -48,7 +48,7 @@ class BridgeDownloadBackend implements DownloadBackend {
     // side flips a latch the transfer observes on its next read/write cycle.
     unawaited(
       PlatformBridge.cancelDownload(jobId).then<void>(
-        () {},
+        (_) {},
         onError: (Object _) {},
       ),
     );
@@ -101,7 +101,7 @@ class BridgeDownloadBackend implements DownloadBackend {
       return const DownloadTaskResult.success();
     }
     final Object? rawError = response['error'] ?? response['message'];
-    final errorMessage = rawError == null ? null : rawError.toString();
+    final errorMessage = rawError?.toString();
     return DownloadTaskResult.failure(
       CoreError(
         category: coreCategoryForBackendError(

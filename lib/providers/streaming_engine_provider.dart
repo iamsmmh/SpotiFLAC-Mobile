@@ -5,6 +5,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:spotiflac_android/engine/adaptive_buffer.dart';
 import 'package:spotiflac_android/engine/audio_characteristics.dart';
 import 'package:spotiflac_android/engine/playback_session.dart';
 import 'package:spotiflac_android/engine/smart_play.dart';
@@ -120,6 +121,60 @@ class HttpStreamPreflightValidator implements StreamPreflightValidator {
   static int? _contentLength(Map<String, String> headers) {
     final raw = headers['content-length'];
     return raw == null ? null : int.tryParse(raw);
+  }
+}
+
+/// Warms the head of a stream URL (a bounded ranged GET) so the next-track
+/// switch reuses an established connection and a warm HTTP cache. Bytes are
+/// drained and discarded — never persisted — so the warm-up respects the
+/// same terms-of-use guardrails as the rest of the engine.
+class StreamHeadWarmer {
+  final http.Client _client;
+  final Duration timeout;
+
+  StreamHeadWarmer({
+    http.Client? client,
+    this.timeout = const Duration(seconds: 8),
+  }) : _client = client ?? http.Client();
+
+  /// Whether the engine may pull extra bytes for [source]. Preview streams are
+  /// warmed only when the user enabled "buffer preview streams"; other sources
+  /// only when the provider explicitly permits caching.
+  bool permittedFor(
+    StreamDescriptor source, {
+    required bool bufferPreviewStreams,
+  }) {
+    if (!source.uri.startsWith('http://') &&
+        !source.uri.startsWith('https://')) {
+      return false;
+    }
+    if (source.kind == StreamSourceKind.httpStream) return bufferPreviewStreams;
+    return source.cachePermitted;
+  }
+
+  /// Returns `(bytesReceived, elapsedMs)`, or null when the warm-up failed.
+  Future<(int, int)?> warmHead(StreamDescriptor source, int maxBytes) async {
+    final cap = maxBytes.clamp(1, 4 * 1024 * 1024);
+    final stopwatch = Stopwatch()..start();
+    try {
+      final request = http.Request('GET', Uri.parse(source.uri))
+        ..headers['Range'] = 'bytes=0-${cap - 1}'
+        ..headers['Accept'] = 'audio/*, application/octet-stream';
+      final response = await _client.send(request).timeout(
+        timeout,
+        onTimeout: () => throw TimeoutException('head warm-up timed out'),
+      );
+      var received = 0;
+      await for (final chunk in response.stream) {
+        received += chunk.length;
+        if (received >= cap) break;
+      }
+      stopwatch.stop();
+      return (received, stopwatch.elapsedMilliseconds);
+    } catch (_) {
+      stopwatch.stop();
+      return null;
+    }
   }
 }
 
@@ -273,6 +328,7 @@ class StreamingEngineController {
     log: log,
   );
   final NetworkStatusMonitor _network = NetworkStatusMonitor();
+  final StreamHeadWarmer _headWarmer = StreamHeadWarmer();
 
   final Map<String, Track> _trackByMediaId = {};
   Timer? _downloadReadyTimer;
@@ -444,22 +500,70 @@ class StreamingEngineController {
   Future<void> _preloadUpcoming(List<Track> upcoming) async {
     final settings = _ref.read(engineSettingsProvider);
     if (!settings.preloadNextTrack || upcoming.isEmpty) return;
+    final profile = await currentNetworkProfile();
+    final policy = StreamBufferPolicy.auto.forProfile(profile);
+    const planner = AdaptiveBufferPlanner();
     for (final track in upcoming) {
       final candidates = await candidatesFor(track);
       if (candidates.isEmpty) continue;
       final ranked = _resolver.candidates(
         candidates,
-        requested: settings.qualityPolicy.levelFor(
-          await currentNetworkProfile(),
-        ),
+        requested: settings.qualityPolicy.levelFor(profile),
       );
       if (ranked.isEmpty) continue;
+      final selected = ranked.first;
+      // Preflight the URL (validity + latency) as before.
       _preloader.plan(
         [track.id],
         window: 1,
-        resolver: (id) => ranked.first,
+        resolver: (id) => selected,
       );
+      // Adaptive buffering: on healthy links pull just enough ahead to absorb
+      // jitter; on poor links open a deeper low-bandwidth buffer window.
+      final decision = planner.plan(
+        profile: profile,
+        policy: policy,
+        bitrateKbps: selected.characteristics.bitrateKbps,
+        measuredBytesPerSecond: bandwidth.smoothedBytesPerSecond,
+        preloadEnabled: settings.preloadNextTrack,
+        lowBandwidthBufferSeconds: settings.lowBandwidthBufferSeconds,
+        prebufferHeadBytes: settings.prebufferHeadBytesKb * 1024,
+      );
+      if (decision.headBytes > 0 &&
+          _headWarmer.permittedFor(
+            selected,
+            bufferPreviewStreams: settings.bufferPreviewStreams,
+          )) {
+        unawaited(_warmHeadAndRecord(selected, decision.headBytes));
+      }
     }
+  }
+
+  Future<void> _warmHeadAndRecord(StreamDescriptor source, int maxBytes) async {
+    final result = await _headWarmer.warmHead(source, maxBytes);
+    if (result == null) return;
+    final bytes = result.$1;
+    final elapsedMs = result.$2;
+    if (bytes <= 0) return;
+    final bps = elapsedMs > 0
+        ? ((bytes / (elapsedMs / 1000)).round()).clamp(0, 1 << 40)
+        : 0;
+    bandwidth.record(
+      BandwidthSample(
+        at: DateTime.now(),
+        bytes: bytes,
+        latencyMs: elapsedMs,
+        bytesPerSecond: bps,
+        providerId: source.providerId,
+      ),
+    );
+    log.add(
+      EngineEvent.info(
+        'buffer',
+        'Pre-buffered ${formatBandwidth(bps)} head for next track '
+        '(${source.providerId})',
+      ),
+    );
   }
 
   EnginePlayContext _contextFor(
@@ -786,6 +890,9 @@ class StreamingEngineController {
       qualityLabel: source.characteristics.compactLabel,
       sourceLabel: source.providerId,
       explicit: track.isExplicit,
+      trackGainDb: source.characteristics.trackGainDb,
+      albumGainDb: source.characteristics.albumGainDb,
+      trackPeak: source.characteristics.trackPeak,
     );
   }
 
@@ -844,6 +951,11 @@ class StreamingEngineController {
         await Future<void>.delayed(delay);
       }
       final handler = musicPlayerHandler;
+      // Capture where the dead source stopped so failover resumes seamlessly
+      // at the same position ($t) instead of restarting from 0:00.
+      final resumeAt = handler == null
+          ? Duration.zero
+          : (await handler.currentPlaybackPosition() ?? Duration.zero);
       if (handler == null) {
         await _startSource(track, await decide(track), next);
         return;
@@ -854,10 +966,14 @@ class StreamingEngineController {
           uri: next.uri,
           category: 'fallback',
           message:
-              'Switched from ${media.sourceLabel ?? 'previous'} to ${next.providerId}',
+              'Switched from ${media.sourceLabel ?? 'previous'} to '
+              '${next.providerId} at ${resumeAt.inSeconds}s',
         ),
       );
-      await handler.replaceCurrentAndPlay(_playableFor(track, next));
+      await handler.replaceCurrentAndPlay(
+        _playableFor(track, next),
+        resumeAt: resumeAt,
+      );
       _session.markSuccess(next);
     } finally {
       _failedHookReentrant = false;

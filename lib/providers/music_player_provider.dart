@@ -114,8 +114,13 @@ class MusicPlayerController {
     await _handler?.seekRelative(-offset);
   }
 
-  Future<void> replaceCurrentAndPlay(PlayableMedia item) async =>
-      _handler?.replaceCurrentAndPlay(item);
+  Future<void> replaceCurrentAndPlay(
+    PlayableMedia item, {
+    Duration? resumeAt,
+  }) async => _handler?.replaceCurrentAndPlay(item, resumeAt: resumeAt);
+
+  Future<Duration?> currentPlaybackPosition() async =>
+      _handler?.currentPlaybackPosition();
 
   Future<void> togglePlayPause(bool isPlaying) async {
     final handler = _handler;

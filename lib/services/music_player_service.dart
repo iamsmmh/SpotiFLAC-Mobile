@@ -6,6 +6,9 @@ import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart'
     show AudioSession, AudioSessionConfiguration, AudioInterruptionType;
 import 'package:audioplayers/audioplayers.dart';
+import 'package:spotiflac_android/engine/audio_characteristics.dart';
+import 'package:spotiflac_android/engine/gapless_policy.dart';
+import 'package:spotiflac_android/engine/replay_gain.dart';
 import 'package:spotiflac_android/services/app_state_database.dart';
 import 'package:spotiflac_android/services/platform_bridge.dart';
 import 'package:spotiflac_android/utils/int_utils.dart';
@@ -26,6 +29,7 @@ void updateMusicPlayerStrings({
 }
 
 bool _playbackNormalizationEnabled = false;
+bool _playbackGaplessEnabled = true;
 MusicPlayerHandler? _activeMusicPlayerHandler;
 
 /// Enables/disables ReplayGain volume normalization and re-applies it to the
@@ -34,6 +38,22 @@ void setPlaybackNormalizationEnabled(bool enabled) {
   if (_playbackNormalizationEnabled == enabled) return;
   _playbackNormalizationEnabled = enabled;
   _activeMusicPlayerHandler?.reapplyNormalization();
+}
+
+/// Enables/disables gapless transitions between consecutive queue items. When
+/// enabled, the handler skips source teardown between compatible tracks so a
+/// FLAC→FLAC (or other lossless) sequence splices without a silence gap.
+void setPlaybackGaplessEnabled(bool enabled) {
+  _playbackGaplessEnabled = enabled;
+}
+
+/// Parses a dynamic value to a finite double, or returns null. Accepts [num]
+/// and parseable [String] values; rejects NaN and infinities.
+double? readFiniteDouble(dynamic value) {
+  if (value == null) return null;
+  final parsed = value is num ? value.toDouble() : double.tryParse('$value');
+  if (parsed == null || !parsed.isFinite) return null;
+  return parsed;
 }
 
 final AudioContext _musicAudioContext = AudioContext(
@@ -72,6 +92,13 @@ class PlayableMedia {
   /// Stable provider id used by the health registry / failover hook.
   final String? providerId;
 
+  /// ReplayGain loudness metadata (dB gains + linear peak). For local files
+  /// these are probed from tags at play time; for streams they are carried by
+  /// the engine from the resolved `StreamDescriptor`.
+  final double? trackGainDb;
+  final double? albumGainDb;
+  final double? trackPeak;
+
   const PlayableMedia({
     required this.id,
     required this.source,
@@ -89,6 +116,9 @@ class PlayableMedia {
     this.qualityLabel,
     this.sourceLabel,
     this.providerId,
+    this.trackGainDb,
+    this.albumGainDb,
+    this.trackPeak,
   });
 
   bool get isContentUri => source.startsWith('content://');
@@ -97,6 +127,15 @@ class PlayableMedia {
   /// streaming engine and plays them with [UrlSource].
   bool get isRemoteHttp =>
       source.startsWith('http://') || source.startsWith('https://');
+
+  /// Technical characteristics used for gapless-transition planning.
+  AudioCharacteristics get characteristics => AudioCharacteristics(
+    codec: format,
+    sampleRateHz: sampleRate,
+    bitDepth: bitDepth,
+    bitrateKbps: bitrate,
+    lossless: GaplessPolicy.isGaplessCapableCodec(format),
+  );
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -119,6 +158,9 @@ class PlayableMedia {
       'sourceLabel': sourceLabel,
     if (providerId != null && providerId!.trim().isNotEmpty)
       'providerId': providerId,
+    if (trackGainDb != null) 'trackGainDb': trackGainDb,
+    if (albumGainDb != null) 'albumGainDb': albumGainDb,
+    if (trackPeak != null) 'trackPeak': trackPeak,
   };
 
   static PlayableMedia? fromJson(Map<String, dynamic> json) {
@@ -147,6 +189,9 @@ class PlayableMedia {
       qualityLabel: json['qualityLabel']?.toString(),
       sourceLabel: json['sourceLabel']?.toString(),
       providerId: json['providerId']?.toString(),
+      trackGainDb: readFiniteDouble(json['trackGainDb']),
+      albumGainDb: readFiniteDouble(json['albumGainDb']),
+      trackPeak: readFiniteDouble(json['trackPeak']),
     );
   }
 
@@ -178,6 +223,9 @@ class PlayableMedia {
           'source_label': sourceLabel!.trim(),
         if (providerId != null && providerId!.trim().isNotEmpty)
           'provider_id': providerId!.trim(),
+        if (trackGainDb != null) 'track_gain_db': trackGainDb,
+        if (albumGainDb != null) 'album_gain_db': albumGainDb,
+        if (trackPeak != null) 'track_peak': trackPeak,
       },
     );
   }
@@ -541,6 +589,23 @@ class MusicPlayerHandler extends BaseAudioHandler
     unawaited(_persistSession(position: position));
   }
 
+  /// Whether the transition from [previousIndex] to [next] may skip tearing
+  /// down the source (a true gapless splice). Only compatible lossless items
+  /// on the same transport qualify.
+  bool _planGaplessTeardown(int previousIndex, PlayableMedia next) {
+    if (!_playbackGaplessEnabled) return false;
+    if (previousIndex < 0 || previousIndex >= _media.length) return false;
+    if (previousIndex == _index) return false; // repeat-one / same-item replay
+    final previous = _media[previousIndex];
+    final decision = const GaplessPolicy().decide(
+      enabled: true,
+      current: previous.characteristics,
+      next: next.characteristics,
+      sameTransport: previous.isRemoteHttp == next.isRemoteHttp,
+    );
+    return decision.canSkipSourceTeardown;
+  }
+
   // ReplayGain normalization: resolved path -> volume multiplier.
   final Map<String, double> _normalizationVolumeCache = {};
 
@@ -548,23 +613,31 @@ class MusicPlayerHandler extends BaseAudioHandler
   /// album gain fallback; Opus R128 tags are converted to ReplayGain dB by
   /// the Go reader). 1.0 when disabled, untagged, or unreadable. Positive
   /// gains clamp at 1.0 — setVolume can only attenuate.
-  Future<double> _normalizationVolumeFor(String path) async {
-    // Remote streams have no local tags; normalization is applied at the
-    // engine level (stream gain metadata) when available.
-    if (path.startsWith('http://') || path.startsWith('https://')) return 1.0;
+  ///
+  /// Remote streams carry their gain on [PlayableMedia] (from the resolved
+  /// `StreamDescriptor`); local files are probed here.
+  Future<double> _normalizationVolumeFor(String path, PlayableMedia media) async {
     if (!_playbackNormalizationEnabled) return 1.0;
+
+    if (media.isRemoteHttp) {
+      return ReplayGain.volume(
+        trackGainDb: media.trackGainDb,
+        albumGainDb: media.albumGainDb,
+        trackPeak: media.trackPeak,
+      );
+    }
+
     final cached = _normalizationVolumeCache[path];
     if (cached != null) return cached;
 
     var volume = 1.0;
     try {
       final metadata = await PlatformBridge.readFileMetadata(path);
-      final gainDb =
-          _parseGainDb(metadata['replaygain_track_gain']) ??
-          _parseGainDb(metadata['replaygain_album_gain']);
-      if (gainDb != null) {
-        volume = pow(10.0, gainDb / 20.0).toDouble().clamp(0.0, 1.0);
-      }
+      volume = ReplayGain.volume(
+        trackGainDb: ReplayGain.parseGainDb(metadata['replaygain_track_gain']),
+        albumGainDb: ReplayGain.parseGainDb(metadata['replaygain_album_gain']),
+        trackPeak: ReplayGain.parsePeak(metadata['replaygain_track_peak']),
+      );
     } catch (e) {
       _log.w('Failed to read gain tags for normalization: $e');
     }
@@ -573,13 +646,6 @@ class MusicPlayerHandler extends BaseAudioHandler
     }
     _normalizationVolumeCache[path] = volume;
     return volume;
-  }
-
-  static double? _parseGainDb(Object? raw) {
-    final text = raw?.toString();
-    if (text == null || text.isEmpty) return null;
-    final match = RegExp(r'-?\d+(\.\d+)?').firstMatch(text);
-    return match == null ? null : double.tryParse(match.group(0)!);
   }
 
   /// Re-applies normalization to the playing track when the setting flips.
@@ -593,7 +659,7 @@ class MusicPlayerHandler extends BaseAudioHandler
           ? _resolvedPathCache[media.source]
           : media.source;
       if (resolved == null) return;
-      final volume = await _normalizationVolumeFor(resolved);
+      final volume = await _normalizationVolumeFor(resolved, media);
       if (_index != index || generation != _playRequestGeneration) return;
       try {
         await _player.setVolume(volume);
@@ -888,6 +954,7 @@ class MusicPlayerHandler extends BaseAudioHandler
       _pendingRestorePosition = null;
     }
     final generation = ++_playRequestGeneration;
+    final previousIndex = _index;
     _index = index;
     _pausedByInterruption = false;
     _interruptionActive = false;
@@ -907,6 +974,9 @@ class MusicPlayerHandler extends BaseAudioHandler
     }
 
     final media = _media[index];
+    // Plan the gapless transition: between two compatible lossless items the
+    // source teardown is skipped so the decoder splices without a gap.
+    final skipSourceTeardown = _planGaplessTeardown(previousIndex, media);
     final effectiveStartPosition = normalizedPlaybackResumePosition(
       startPosition,
       duration: media.duration,
@@ -938,13 +1008,20 @@ class MusicPlayerHandler extends BaseAudioHandler
       // Set before play() so the track never starts at the wrong loudness;
       // always set (1.0 when disabled/untagged) so a previous track's
       // attenuation can't leak into the next one.
-      final normalizationVolume = await _normalizationVolumeFor(resolved);
+      final normalizationVolume = await _normalizationVolumeFor(
+        resolved,
+        media,
+      );
       if (!_isCurrentPlayRequest(generation, media)) return;
       await _player.setAudioContext(_musicAudioContext);
       if (!_isCurrentPlayRequest(generation, media)) return;
       await _activateAudioSession();
       if (!_isCurrentPlayRequest(generation, media)) return;
-      await _player.stop();
+      if (skipSourceTeardown) {
+        _log.d('Gapless transition: skipping source teardown');
+      } else {
+        await _player.stop();
+      }
       _sourceReady = false;
       if (!_isCurrentPlayRequest(generation, media)) return;
       await _player.setVolume(normalizationVolume);
@@ -1000,8 +1077,13 @@ class MusicPlayerHandler extends BaseAudioHandler
 
   /// Replaces the current queue item's source and replays it without touching
   /// the rest of the queue. Used by the streaming engine's failover path to
-  /// swap an expired/dead stream URL for the next ranked source.
-  Future<void> replaceCurrentAndPlay(PlayableMedia item) async {
+  /// swap an expired/dead stream URL for the next ranked source. [resumeAt]
+  /// resumes at the position where the dead source failed, so a mid-playback
+  /// expiry is seamless for the listener.
+  Future<void> replaceCurrentAndPlay(
+    PlayableMedia item, {
+    Duration? resumeAt,
+  }) async {
     if (_index < 0 || _index >= _media.length) return;
     final current = _media[_index];
     if (!current.isRemoteHttp) return; // Engine-owned streams only.
@@ -1009,7 +1091,21 @@ class MusicPlayerHandler extends BaseAudioHandler
     _queueItems[_index] = item.toMediaItem();
     queue.add(List<MediaItem>.unmodifiable(_queueItems));
     mediaItem.add(item.toMediaItem());
-    await _playIndex(_index, recordHistory: false);
+    await _playIndex(
+      _index,
+      recordHistory: false,
+      startPosition: resumeAt ?? Duration.zero,
+    );
+  }
+
+  /// The best-known playback position for failover: the live engine position
+  /// when available, otherwise the last broadcast position. Never throws.
+  Future<Duration?> currentPlaybackPosition() async {
+    try {
+      return await _currentPositionForPersist();
+    } catch (_) {
+      return playbackState.value.position;
+    }
   }
 
   Future<void> setVolume(double volume) async {
@@ -1475,8 +1571,14 @@ Future<MusicPlayerHandler> _doInitMusicPlayer() async {
       config: const AudioServiceConfig(
         androidNotificationChannelId: 'com.zarz.spotiflac.playback',
         androidNotificationChannelName: 'Playback',
+        androidNotificationChannelDescription:
+            'Media controls for background playback',
+        androidNotificationIcon: 'mipmap/ic_launcher',
         androidNotificationOngoing: true,
         androidStopForegroundOnPause: true,
+        androidNotificationClickStartsActivity: true,
+        fastForwardInterval: Duration(seconds: 15),
+        rewindInterval: Duration(seconds: 15),
       ),
     );
     _handler = handler;

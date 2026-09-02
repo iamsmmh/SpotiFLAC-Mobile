@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:spotiflac_android/core/application/extension_engine.dart';
 import 'package:spotiflac_android/core/application/retry_policy.dart';
@@ -140,17 +138,23 @@ void main() {
         throwsA(
           isA<ExtensionExhaustedError>()
               .having((e) => e.failures, 'failures', hasLength(2))
+              .having(
+                (e) => e.failures[1].cause,
+                'second failure cause',
+                isA<StateError>(),
+              )
+              .having(
+                (e) => e.failures[1].providerId,
+                'second failure provider',
+                'b',
+              )
               .having((e) => e.category, 'category',
                   CoreErrorCategory.rateLimited)
               .having((e) => e.isRetryable, 'retryable', isTrue),
         ),
       );
-      // The raw StateError must have been normalized, never rethrown.
-      await resolution.catchError((Object error) {
-        final exhausted = error as ExtensionExhaustedError;
-        expect(exhausted.failures[1].cause, isA<StateError>());
-        expect(exhausted.failures[1].providerId, 'b');
-      });
+      // The raw StateError above is asserted via `failures[1].cause`: the
+      // engine normalizes it into the aggregated error, never rethrowing it.
     });
 
     test('no registered provider yields a normalized provider error', () async {

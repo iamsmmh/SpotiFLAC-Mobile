@@ -40,8 +40,10 @@ becoming-noisy, route changes (unchanged and verified)
 (codec, bitrate, sample rate, bit depth, channels, size, lossless, source) — used by the glass player chips
 
 ## 9. Gapless & advanced
-🧱 ReplayGain normalization already applies in the built-in player
-🚀 playback rate + balance controls (audioplayers) · ⏳ crossfade / loudness normalization knobs
+🚀 ReplayGain normalization in the built-in player (local tag probe + stream
+gain metadata + peak-clipping protection) · 🚀 gapless transition planning
+(lossless splice via `GaplessPolicy`, source-teardown skip) ·
+🚀 playback rate + balance controls (audioplayers) · ⏳ crossfade knobs
 
 ## 10. Equalizer / DSP
 🚀 UI/Settings scaffold (more controls sheet, presets enumerated) · ⏳ platform DSP plugin integration
@@ -92,7 +94,9 @@ provider-id map, duplicate merging — the "ONE TRACK" backbone
 ✅ existing cover/metadata cache · 🧱 streaming cache gated by provider `cachePermitted` (default off — terms guardrail)
 
 ## 29. Adaptive streaming
-🚀 quality step policy + preflight latency + preloading · ✅ live bandwidth sampling (preflight-based estimate in Diagnostics)
+🚀 quality step policy + preflight latency + preloading ·
+🚀 adaptive buffer planner (low-bandwidth lookahead window + bounded head
+pre-buffer) · ✅ live bandwidth sampling (preflight + head-warmup estimates in Diagnostics)
 
 ## 30–32. Provider system / failover / source intelligence
 ✅ extension manager, priority, health checks (existing Go runtime)
