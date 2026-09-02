@@ -46,7 +46,11 @@ class ExtensionPayloadDecoder {
     if (value == null) return null;
     if (value is int) return value;
     if (value is num) return value.toInt();
-    if (value is String) return int.tryParse(value.trim());
+    if (value is String) {
+      final parsed = int.tryParse(value.trim());
+      if (parsed != null) return parsed;
+      throw _formatError(key, 'int?', value);
+    }
     throw _formatError(key, 'int?', value);
   }
 

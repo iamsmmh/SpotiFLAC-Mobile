@@ -305,6 +305,7 @@ void main() {
       engine.enqueue(spec('third', priority: JobPriority.low));
 
       engine.reorder('third', JobPriority.immediate);
+      await flushQueue();
       expect(
         engine.pendingJobs.map((j) => j.id),
         <String>['third', 'second'],
@@ -313,6 +314,7 @@ void main() {
 
       // Running jobs are never re-laned.
       engine.reorder('first', JobPriority.low);
+      await flushQueue();
       expect(
         events.whereType<QueueJobReordered>().where((e) => e.job.id == 'first'),
         isEmpty,
@@ -412,6 +414,7 @@ void main() {
       runner.finish('j1', const QueueJobResult.success());
       runner.finish('j2', const QueueJobResult.success());
       await drained; // must complete once nothing is pending/running
+      await flushQueue();
       expect(
         events.whereType<QueueEmptied>(),
         hasLength(1),
