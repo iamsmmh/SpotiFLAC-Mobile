@@ -59,6 +59,25 @@ const List<_StoreSpec> _stores = <_StoreSpec>[
 final RegExp _stepPattern = RegExp(r'if \(oldVersion < (\d+)\) \{');
 final RegExp _alterPattern = RegExp(r"ALTER TABLE[^\n]*ADD COLUMN", caseSensitive: false);
 
+/// Package root, located by walking up from the working directory until a
+/// `pubspec.yaml` is found. `flutter test` may start the isolate from a
+/// different directory, so the source files must be resolved rather than
+/// assumed to sit next to the working directory.
+Directory _locatePackageRoot() {
+  var dir = Directory.current;
+  for (var i = 0; i < 5; i++) {
+    if (File('${dir.path}/pubspec.yaml').existsSync()) return dir;
+    final parent = dir.parent;
+    if (parent.path == dir.path) break;
+    dir = parent;
+  }
+  return Directory.current;
+}
+
+final Directory _packageRoot = _locatePackageRoot();
+
+File _sourceFile(String relative) => File('${_packageRoot.path}/$relative');
+
 /// Splits the upgrade function into `version -> body` blocks.
 Map<int, String> _migrationSteps(String source) {
   final upgradeIndex = source.indexOf(RegExp(
@@ -81,7 +100,7 @@ Map<int, String> _migrationSteps(String source) {
 void main() {
   for (final store in _stores) {
     group(store.path, () {
-      final file = File(store.path);
+      final file = _sourceFile(store.path);
       final source = file.existsSync() ? file.readAsStringSync() : '';
 
       test('source file is readable', () {
@@ -144,7 +163,7 @@ void main() {
 
   group('sqlite helper contract', () {
     test('addColumnIfMissing is used by every guarded migration', () {
-      final helpers = File('lib/services/sqlite_helpers.dart');
+      final helpers = _sourceFile('lib/services/sqlite_helpers.dart');
       expect(helpers.existsSync(), isTrue);
       final source = helpers.readAsStringSync();
       expect(source, contains('addColumnIfMissing'));
