@@ -110,33 +110,31 @@ jobs:
           status=0
           flutter test --reporter github 2>&1 | tee test.log || status=$?
           if [ "$status" -ne 0 ]; then
-            python3 - <<'PY'
-import re
-text = open('test.log', encoding='utf-8', errors='replace').read()
-blocks = re.split(r'(?m)^(?=::group::❌)', text)
-failing = [b for b in blocks[1:] if '::group::❌' in b]
-if not failing:
-    print('::error::No per-test failure blocks found; last log lines:')
-    for line in [l for l in text.splitlines() if l.strip()][-60:]:
-        print('::error::' + line.replace('%', '%25').replace('\n', '%0A'))
-else:
-    for i, block in enumerate(failing, 1):
-        head, _, rest = block.partition('::endgroup::')
-        title = head.splitlines()[0].replace('::group::', '').strip()
-        lines = [l.rstrip() for l in rest.splitlines() if l.strip()]
-        detail = '\n'.join(lines[:60])
-        if len(detail) > 2200:
-            detail = detail[:2200] + ' ...[truncated]'
-        msg = (f'failed test {i}: {title}\n{detail}'
-               .replace('%', '%25').replace('\n', '%0A'))
-        print('::error::' + msg)
-m = re.search(r'(?m)^.*(?:Some tests failed|tests passed).*$', text)
-if m:
-    print('::error::' + m.group(0).replace('%', '%25').replace('\n', '%0A'))
-PY
+          python3 - <<'PY'
+          import re
+          text = open('test.log', encoding='utf-8', errors='replace').read()
+          blocks = re.split(r'(?m)^(?=::group::❌)', text)
+          failing = [b for b in blocks[1:] if '::group::❌' in b]
+          if not failing:
+              print('::error::No per-test failure blocks found; last log lines:')
+              for line in [l for l in text.splitlines() if l.strip()][-60:]:
+                  print('::error::' + line.replace('%', '%25').replace('\n', '%0A'))
+          else:
+              for i, block in enumerate(failing, 1):
+                  head, _, rest = block.partition('::endgroup::')
+                  title = head.splitlines()[0].replace('::group::', '').strip()
+                  lines = [l.rstrip() for l in rest.splitlines() if l.strip()]
+                  detail = '\n'.join(lines[:60])
+                  if len(detail) > 2200:
+                      detail = detail[:2200] + ' ...[truncated]'
+                  msg = ('failed test %d: %s\n%s' % (i, title, detail)).replace('%', '%25').replace('\n', '%0A')
+                  print('::error::' + msg)
+          m = re.search(r'(?m)^.*(?:Some tests failed|tests passed).*$', text)
+          if m:
+              print('::error::' + m.group(0).replace('%', '%25').replace('\n', '%0A'))
+          PY
           fi
           exit "$status"
-
   go:
     name: Go vet & test
     runs-on: ubuntu-latest
