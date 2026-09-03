@@ -717,6 +717,9 @@ class _DownloadRun {
     if (!await _decryptIfNeeded()) {
       return false;
     }
+    if (!await _verifyDownloadedFileIsSane()) {
+      return false;
+    }
     await _applyFormatHandling(actualService);
 
     if (await _shouldAbort(
@@ -833,6 +836,90 @@ class _DownloadRun {
 
     await _persistCompletionAndNotify();
     return true;
+  }
+
+  /// Corruption gate for the file the backend just produced.
+  ///
+  /// A transport-level success says nothing about the payload: an HTML error
+  /// page, a JSON `{ "error": ... }` body, or a truncated transfer all arrive
+  /// as "success" and would otherwise be committed to the library, only to
+  /// fail later at play time (or to surface as a 0-second track). This gate
+  /// inspects size + magic bytes and, when the content is not recognizable
+  /// audio, deletes the artifact and fails the item so the queue's retry path
+  /// fetches it again.
+  Future<bool> _verifyDownloadedFileIsSane() async {
+    final path = filePath;
+    // SAF content URIs (and any remote source) cannot be probed with
+    // dart:io; those are validated by the native finalizer instead.
+    if (path == null ||
+        path.isEmpty ||
+        isContentUri(path) ||
+        path.startsWith('http://') ||
+        path.startsWith('https://')) {
+      return true;
+    }
+    // A file that already existed was not produced by this run: never delete
+    // (or fail on) the user's existing data.
+    if (wasExisting) return true;
+    try {
+      final file = File(path);
+      if (!await file.exists()) {
+        _failAsCorrupt('the downloaded file is missing');
+        return false;
+      }
+      final size = await file.length();
+      if (size <= 0) {
+        _failAsCorrupt('the downloaded file is empty');
+        return false;
+      }
+      final raf = await file.open();
+      List<int> head;
+      try {
+        head = await raf.read(AudioMagicSanityChecker.probeLength);
+      } finally {
+        await raf.close();
+      }
+      if (detectAudioContainer(head) == null) {
+        final preview = head
+            .take(8)
+            .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
+            .join(' ');
+        _failAsCorrupt(
+          'the downloaded file is not audio (${size} bytes, '
+          'header: $preview)',
+        );
+        return false;
+      }
+      return true;
+    } catch (e) {
+      // A probe failure must never turn into a false "corrupt" verdict: the
+      // pipeline continues and the later embed/playback stages report.
+      _log.w('Corruption probe skipped for $path: $e');
+      return true;
+    }
+  }
+
+  /// Deletes the corrupt artifact and fails the item with an actionable
+  /// message (the queue's retry flow can then re-download it).
+  void _failAsCorrupt(String reason) {
+    final path = filePath;
+    _log.e(
+      'Corrupt download detected for "${trackToDownload.name}": $reason',
+    );
+    if (path != null && path.isNotEmpty && !isContentUri(path)) {
+      try {
+        final file = File(path);
+        if (file.existsSync()) file.deleteSync();
+      } catch (e) {
+        _log.w('Failed to delete corrupt download at $path: $e');
+      }
+    }
+    n.updateItemStatus(
+      item.id,
+      DownloadStatus.failed,
+      error: 'Corrupt download: $reason',
+      errorType: DownloadErrorType.unknown,
+    );
   }
 
   Future<bool> _decryptIfNeeded() async {

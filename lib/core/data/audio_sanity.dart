@@ -57,8 +57,8 @@ class AudioMagicSanityChecker implements MetadataSanityChecker {
 
 /// Pure magic-byte classifier, usable without dart:io. Returns the container
 /// kind label (`flac`, `mp3`, `ogg`, `wav`, `m4a`, `aiff`, `ape`, `wv`,
-/// `tta`, `dsf`) or null when [head] doesn't start with a known audio
-/// signature. [head] may be shorter than 16 bytes.
+/// `tta`, `dsf`, `webm`) or null when [head] doesn't start with a known
+/// audio signature. [head] may be shorter than 16 bytes.
 String? detectAudioContainer(List<int> head) {
   bool startsWith(List<int> signature, [int offset = 0]) {
     if (head.length < offset + signature.length) return false;
@@ -86,6 +86,7 @@ String? detectAudioContainer(List<int> head) {
   if (startsWith(const <int>[0x54, 0x54, 0x41, 0x31])) return 'tta'; // TTA1
   if (startsWith(const <int>[0x44, 0x53, 0x44, 0x20])) return 'dsf'; // "DSD "
   if (startsWith(const <int>[0x46, 0x4F, 0x52, 0x4D])) return 'aiff'; // FORM
+  if (startsWith(const <int>[0x1A, 0x45, 0xDF, 0xA3])) return 'webm'; // EBML
   return null;
 }
 

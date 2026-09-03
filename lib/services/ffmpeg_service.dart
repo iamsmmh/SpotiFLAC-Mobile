@@ -1531,6 +1531,9 @@ class FFmpegService {
           _log.w(
             'Failed to replace file with ${scope.toLowerCase()} ReplayGain: $e',
           );
+          // The callback may have thrown *after* the temp file was written
+          // (or before it was handed to SAF): never leave the artifact behind.
+          await _deleteTempQuietly(tempOutput);
         }
       } else if (await _promoteTempOutput(
         tempOutput,
@@ -1583,6 +1586,15 @@ class FFmpegService {
         if (await tempFile.exists()) await tempFile.delete();
       } catch (_) {}
     }
+  }
+
+  /// Best-effort temp-file removal. Never throws: cleanup must not mask the
+  /// failure that triggered it.
+  static Future<void> _deleteTempQuietly(String path) async {
+    try {
+      final file = File(path);
+      if (await file.exists()) await file.delete();
+    } catch (_) {}
   }
 
   /// Map input #1 (the cover image) as attached picture art.
