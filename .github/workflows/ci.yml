@@ -99,30 +99,20 @@ jobs:
           fi
 
       - name: Run tests
-        # The github reporter emits each *located* failing test as an ::error
-        # annotation, but failures without a source location only show up in
-        # the final summary line. Tee an expanded-reporter log and, on failure,
-        # re-emit the failing test lines and exception details as a single
-        # annotation so the Checks API names the culprit without raw-log access.
+        # On failure, surface the *actual* error for every failing test as
+        # annotations. The github reporter wraps each failing test's exception
+        # and stack in a ::group::…::endgroup:: block right after its ❌ line;
+        # grep'ing only the ❌ line (or only `Expected:` mismatches) hides
+        # thrown exceptions entirely, which made red runs undiagnosable from
+        # the Checks API. Extract each failing block verbatim instead.
         run: |
           set -o pipefail
           status=0
           flutter test --reporter github 2>&1 | tee test.log || status=$?
           if [ "$status" -ne 0 ]; then
-            {
-              echo "=== failing test names ==="
-              grep -a "❌" test.log | head -10
-              echo "=== reporter summary ==="
-              grep -aE "Some tests failed|tests passed" test.log | head -5
-              echo "=== expect mismatches ==="
-              grep -a -B3 -A10 -E "Expected:|Actual:|Which:|Reason:" test.log | head -240
-              echo "=== exception frames ==="
-              grep -a -B4 -A30 -E "EXCEPTION CAUGHT|Bad state: No ProviderScope found" test.log | head -120
-              echo "=== other harness errors ==="
-              grep -anE "RenderFlex overflowed|Timer is still pending|pumpAndSettle timed out" test.log | head -10
-            } | tr -d '\r' | sed -e 's/\x1b\[[0-9;]*m//g' -e 's/%/%25/g' \
-              | sed ':a;N;$!ba;s/\n/%0A/g' \
-              | awk '{print "::error::" $0}'
+            echo "=== raw failure context (web log) ==="
+            grep -a -A 45 "❌" test.log | tr -d '\r' | sed -e 's/\x1b\[[0-9;]*m//g' | head -400
+            python3 scripts/ci_test_failures.py test.log 10
           fi
           exit "$status"
 

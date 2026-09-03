@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Crash safety in background workers**: panics raised while scanning one
+  corrupt audio file (library scan), indexing one malformed file (ISRC
+  duplicate index), parsing one malformed lyrics provider response, or
+  retiring one HTTP/2 connection are now contained to that work unit instead
+  of aborting the whole process — a deferred recover on the gomobile entry
+  point cannot catch a panic unwinding through a worker goroutine. Covered by
+  regression tests that inject panicking fixtures.
+- **Cover cache leak**: clearing the cover cache no longer leaks the replaced
+  `CacheManager` (and its open cache-info repository) on every clear.
+- **Smart Play wiring tests** are now hermetic (stubbed player controller,
+  mocked `path_provider`), so `flutter test` is green and deterministic in
+  environments without the audio plugins.
+
 ### Added
 
 - **Smart Play as the play path**: pressing play on a track list (playlists,
