@@ -135,6 +135,15 @@ class CoverCacheManager {
     instance.store.emptyMemoryCache();
     _instance = _createManager(cachePath);
     _initialized = true;
+
+    // Dispose the replaced manager so its cache-info repository (an open
+    // database handle) is released. clearCache can run multiple times per
+    // session; without this each call leaked one CacheManager.
+    try {
+      await instance.dispose();
+    } catch (e) {
+      debugPrint('CoverCacheManager: dispose of replaced manager failed: $e');
+    }
   }
 
   static Future<CacheStats> getStats() async {

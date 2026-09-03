@@ -61,3 +61,29 @@ func bridgePanicJSON(r any) string {
 	})
 	return s
 }
+
+// recoverWorkerPanic contains a panic inside a background worker goroutine
+// (library-scan workers, ISRC parse workers, lyrics provider fan-out, HTTP/2
+// connection retirement). A deferred recover in the exported entry point does
+// NOT cover these: a defer only catches panics unwinding through its own
+// goroutine, so an escaping panic in a worker aborts the whole process with
+// SIGABRT even though the failing work unit is a single corrupt file or one
+// malformed provider response out of thousands. Workers must convert the
+// panic into a per-unit failure and keep going:
+//
+//	func runOneUnit(...) (result T, err error) {
+//	    defer func() {
+//	        if r := recoverWorkerPanic("library scan", recover()); r != nil {
+//	            result, err = *new(T), r
+//	        }
+//	    }()
+//	    ...
+//	}
+func recoverWorkerPanic(worker string, r any) error {
+	if r == nil {
+		return nil
+	}
+	stack := string(debug.Stack())
+	GoLog("[Bridge] recovered panic in %s worker: %v\n%s\n", worker, r, stack)
+	return fmt.Errorf("internal error in %s worker: %v", worker, r)
+}
