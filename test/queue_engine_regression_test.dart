@@ -136,8 +136,12 @@ void main() {
         isNot(JobLifecycle.completed),
       );
 
-      // The live job is still reachable by the command API.
+      // The live job is still reachable by the command API. Cancellation of a
+      // *running* job is cooperative: the token fires synchronously, then the
+      // worker future unwinds and the engine settles the job as cancelled, so
+      // wait for the drain instead of asserting an in-flight transition.
       engine.cancel('reused');
+      await engine.drained;
       expect(engine.jobById('reused')!.lifecycle, JobLifecycle.cancelled);
     });
 
@@ -156,9 +160,12 @@ void main() {
         await engine.drained;
       }
       // Revive 'a' and hold it so it stays non-terminal: the ring then holds
-      // exactly one stale row for id 'a' plus the live entry.
+      // exactly one stale row for id 'a' plus the live entry. Pausing a
+      // running job aborts the worker cooperatively, so let the engine settle
+      // the job as held before asserting.
       engine.enqueue(_spec('a'));
-      engine.pause('a'); // synchronous: the job is still starting
+      engine.pause('a');
+      await Future<void>.delayed(Duration.zero);
       expect(engine.jobById('a')!.lifecycle, JobLifecycle.held);
 
       // Overflowing the ring evicts stale rows (b, and the pre-revival 'a'),
@@ -170,9 +177,11 @@ void main() {
 
       expect(engine.jobById('a'), isNotNull);
       expect(engine.jobById('a')!.lifecycle, JobLifecycle.held);
-      // The held job can still be resumed: it was never evicted.
+      // The held job can still be resumed: it was never evicted. Resuming
+      // (re)queues it and the scheduler claims a free slot immediately, so the
+      // job is running by the time the command returns.
       engine.resume('a');
-      expect(engine.jobById('a')!.lifecycle, JobLifecycle.pending);
+      expect(engine.jobById('a')!.lifecycle, JobLifecycle.running);
     });
 
     test('enqueueing a live id never duplicates the job', () async {
@@ -182,6 +191,10 @@ void main() {
       );
       addTearDown(engine.dispose);
 
+      // Close the gate so the first job stays pending: the engine claims a
+      // free worker slot synchronously on enqueue, so without the gate the
+      // idempotency check would observe the job in `running`, not `pending`.
+      engine.pauseAll();
       engine.enqueue(_spec('dup'));
       engine.enqueue(_spec('dup'));
       engine.enqueue(_spec('dup'));

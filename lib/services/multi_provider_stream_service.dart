@@ -1617,13 +1617,13 @@ class HttpStreamValidator implements StreamValidator {
 // ---------------------------------------------------------------------------
 
 class _CacheEntry {
-  _CacheEntry.positive(this.stream)
+  _CacheEntry.positive(this.stream, {DateTime? storedAt})
     : error = null,
-      storedAt = DateTime.now();
+      storedAt = storedAt ?? DateTime.now();
 
-  _CacheEntry.negative(this.error)
+  _CacheEntry.negative(this.error, {DateTime? storedAt})
     : stream = null,
-      storedAt = DateTime.now();
+      storedAt = storedAt ?? DateTime.now();
 
   final ResolvedStream? stream;
   final String? error;
@@ -1671,11 +1671,14 @@ class StreamResolutionCache {
   Iterable<String> get keys => List<String>.unmodifiable(_entries.keys);
 
   /// Cached stream for [key], or null when absent/expired. Touches the entry
-  /// so hot keys survive eviction.
+  /// so hot keys survive eviction. Negative (and expired) entries are put back
+  /// so [negativeError] can still serve a cached failure — otherwise a single
+  /// `get` probe would destroy the protection against repeat provider traffic.
   ResolvedStream? get(String key) {
     final entry = _entries.remove(key);
     if (entry == null) return null;
     if (!entry.isPositive || entry.isExpired(_clock(), negativeTtl: negativeTtl)) {
+      _entries[key] = entry;
       return null;
     }
     _entries[key] = entry;
@@ -1693,13 +1696,13 @@ class StreamResolutionCache {
 
   void put(String key, ResolvedStream stream) {
     _entries.remove(key);
-    _entries[key] = _CacheEntry.positive(stream);
+    _entries[key] = _CacheEntry.positive(stream, storedAt: _clock());
     _evict();
   }
 
   void putNegative(String key, String error) {
     _entries.remove(key);
-    _entries[key] = _CacheEntry.negative(error);
+    _entries[key] = _CacheEntry.negative(error, storedAt: _clock());
     _evict();
   }
 
@@ -1724,7 +1727,8 @@ class MultiProviderStreamService {
   late final Map<StreamProviderId, StreamProviderHandler> _handlers;
   late final http.Client _httpClient;
 
-  /// Keyed by "provider|isrc-or-query"; signed URLs are cached until expiry.
+  /// Keyed by "provider|full-or-preview|isrc-or-query"; signed URLs are
+  /// cached until expiry.
   final StreamResolutionCache cache;
 
   /// Live provider health, fed by every resolution attempt.
@@ -1793,10 +1797,18 @@ class MultiProviderStreamService {
     }
   }
 
-  String _cacheKey(StreamProviderId provider, StreamTrackRequest request) {
+  String _cacheKey(
+    StreamProviderId provider,
+    StreamTrackRequest request, {
+    bool allowPreview = false,
+  }) {
     final identity =
         request.isrc ?? '${request.title}|${request.artist}'.toLowerCase();
-    return '${provider.name}|$identity';
+    // Preview vs full-fidelity resolutions follow different chains (previews
+    // may be returned by catalogs that a full request must skip), so they must
+    // never share a cache slot: a cached fallback from a full request would
+    // otherwise shadow an explicitly allowed preview and vice versa.
+    return '${provider.name}|${allowPreview ? 'preview' : 'full'}|$identity';
   }
 
   /// Ordered failover chain for [request].
@@ -1831,10 +1843,12 @@ class MultiProviderStreamService {
   ]) {
     if (provider != null) {
       cache.invalidate(_cacheKey(provider, request));
+      cache.invalidate(_cacheKey(provider, request, allowPreview: true));
       return;
     }
     for (final id in StreamProviderId.values) {
       cache.invalidate(_cacheKey(id, request));
+      cache.invalidate(_cacheKey(id, request, allowPreview: true));
     }
   }
 
@@ -1849,9 +1863,11 @@ class MultiProviderStreamService {
   ///   5. Preview-only catalogs (Deezer, Spotify, Apple) when [allowPreview]
   ///      is set — otherwise they count as a miss like any other.
   ///
-  /// Providers in a health cooldown are skipped; the chain is still attempted
-  /// end-to-end once all candidates are cooling down, so a temporary outage
-  /// degrades to "try everything" instead of "silently fail".
+  /// Providers in a health cooldown are skipped while anything healthy
+  /// remains; if the healthy pass finds no stream they are retried once as a
+  /// last resort, and when every candidate is cooling down the chain is
+  /// attempted end-to-end — a temporary outage degrades to "try everything"
+  /// instead of "silently fail".
   Future<ResolvedStream> resolveStream(
     StreamTrackRequest request, {
     StreamProviderId? preferredProvider,
@@ -1859,7 +1875,7 @@ class MultiProviderStreamService {
     bool? validate,
   }) async {
     final preferred = preferredProvider ?? StreamProviderId.youtube;
-    final cacheKey = _cacheKey(preferred, request);
+    final cacheKey = _cacheKey(preferred, request, allowPreview: allowPreview);
 
     final cached = cache.get(cacheKey);
     if (cached != null && (allowPreview || !cached.isPreview)) {
@@ -1901,75 +1917,91 @@ class MultiProviderStreamService {
     final healthy = chain
         .where((id) => health.isAvailable(id, now: now))
         .toList(growable: false);
-    // Never skip everything: if every provider is cooling down, retry them all
-    // rather than failing a track the user can plainly hear elsewhere.
-    final order = healthy.isNotEmpty ? healthy : chain;
+    final cooling = chain
+        .where((id) => !health.isAvailable(id, now: now))
+        .toList(growable: false);
+    // A cooldown skips a provider while anything healthy remains, so a flaky
+    // CDN is not hammered by every play request. But a temporary outage must
+    // not take the whole app offline: when the healthy pass yields nothing,
+    // the cooling-down providers get one last-resort try, and when every
+    // provider is cooling down the chain is attempted end to end.
+    final passes = <List<StreamProviderId>>[
+      if (healthy.isNotEmpty) healthy,
+      if (healthy.isNotEmpty && cooling.isNotEmpty) cooling,
+      if (healthy.isEmpty) chain,
+    ];
 
     Object? lastError;
-    for (final provider in order) {
-      final handler = _handlers[provider];
-      if (handler == null) continue;
-      final stopwatch = Stopwatch()..start();
-      try {
-        final resolved = await handler.resolve(request);
-        stopwatch.stop();
-        if (resolved == null) {
-          // "No match / no credentials" is not a provider failure: it is a
-          // legitimate miss and must not put the provider in a cooldown.
-          _log.d('${provider.name}: no candidate for "${request.title}"');
-          continue;
-        }
-        if (resolved.isPreview && !allowPreview) {
-          _log.i(
-            '${provider.name} only offers a preview for "${request.title}"; '
-            'continuing down the chain',
-          );
-          continue;
-        }
-        if (validate && validator != null) {
-          final validation = await validator!.validate(resolved);
-          if (!validation.ok) {
-            stopwatch.stop();
-            health.recordFailure(
-              provider,
-              error: validation.error ?? 'validation failed',
-              latencyMs: validation.latencyMs ?? stopwatch.elapsedMilliseconds,
-            );
-            _log.w(
-              '${provider.name} stream failed validation for '
-              '"${request.title}": ${validation.error}',
-            );
-            lastError = StreamResolutionException(
-              '${provider.name}: ${validation.error}',
+    for (final pass in passes) {
+      for (final provider in pass) {
+        final handler = _handlers[provider];
+        if (handler == null) continue;
+        final stopwatch = Stopwatch()..start();
+        try {
+          final resolved = await handler.resolve(request);
+          stopwatch.stop();
+          if (resolved == null) {
+            // "No match / no credentials" is not a provider failure: it is a
+            // legitimate miss and must not put the provider in a cooldown.
+            _log.d('${provider.name}: no candidate for "${request.title}"');
+            continue;
+          }
+          if (resolved.isPreview && !allowPreview) {
+            _log.i(
+              '${provider.name} only offers a preview for "${request.title}"; '
+              'continuing down the chain',
             );
             continue;
           }
+          if (validate && validator != null) {
+            final validation = await validator!.validate(resolved);
+            if (!validation.ok) {
+              stopwatch.stop();
+              health.recordFailure(
+                provider,
+                error: validation.error ?? 'validation failed',
+                latencyMs:
+                    validation.latencyMs ?? stopwatch.elapsedMilliseconds,
+              );
+              _log.w(
+                '${provider.name} stream failed validation for '
+                '"${request.title}": ${validation.error}',
+              );
+              lastError = StreamResolutionException(
+                '${provider.name}: ${validation.error}',
+              );
+              continue;
+            }
+          }
+          health.recordSuccess(
+            provider,
+            latencyMs: stopwatch.elapsedMilliseconds,
+          );
+          final annotated = provider == preferred
+              ? resolved
+              : _withFallbackFlag(resolved, preferred);
+          cache.put(
+            _cacheKey(preferred, request, allowPreview: allowPreview),
+            annotated,
+          );
+          return annotated;
+        } on StreamResolutionException catch (e) {
+          lastError = e;
+          health.recordFailure(
+            provider,
+            error: e.message,
+            latencyMs: stopwatch.elapsedMilliseconds,
+          );
+          _log.w('${provider.name} resolution failed: ${e.message}');
+        } catch (e) {
+          lastError = e;
+          health.recordFailure(
+            provider,
+            error: e.toString(),
+            latencyMs: stopwatch.elapsedMilliseconds,
+          );
+          _log.w('${provider.name} resolution failed: $e');
         }
-        health.recordSuccess(
-          provider,
-          latencyMs: stopwatch.elapsedMilliseconds,
-        );
-        final annotated = provider == preferred
-            ? resolved
-            : _withFallbackFlag(resolved, preferred);
-        cache.put(_cacheKey(preferred, request), annotated);
-        return annotated;
-      } on StreamResolutionException catch (e) {
-        lastError = e;
-        health.recordFailure(
-          provider,
-          error: e.message,
-          latencyMs: stopwatch.elapsedMilliseconds,
-        );
-        _log.w('${provider.name} resolution failed: ${e.message}');
-      } catch (e) {
-        lastError = e;
-        health.recordFailure(
-          provider,
-          error: e.toString(),
-          latencyMs: stopwatch.elapsedMilliseconds,
-        );
-        _log.w('${provider.name} resolution failed: $e');
       }
     }
 
@@ -1977,7 +2009,7 @@ class MultiProviderStreamService {
         'No playable stream for "${request.title}" by ${request.artist} '
         'across any provider';
     cache.putNegative(
-      _cacheKey(preferred, request),
+      _cacheKey(preferred, request, allowPreview: allowPreview),
       lastError?.toString() ?? message,
     );
     throw StreamResolutionException(message, cause: lastError);
