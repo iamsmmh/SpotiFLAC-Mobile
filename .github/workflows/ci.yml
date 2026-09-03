@@ -115,7 +115,7 @@ jobs:
               echo "=== reporter summary ==="
               grep -aE "Some tests failed|tests passed" test.log | head -5
               echo "=== expect mismatches ==="
-              grep -a -B2 -A6 -E "Expected:|Actual:|Which:" test.log | head -60
+              grep -a -B3 -A10 -E "Expected:|Actual:|Which:|Reason:" test.log | head -240
               echo "=== exception frames ==="
               grep -a -B4 -A30 -E "EXCEPTION CAUGHT|Bad state: No ProviderScope found" test.log | head -120
               echo "=== other harness errors ==="

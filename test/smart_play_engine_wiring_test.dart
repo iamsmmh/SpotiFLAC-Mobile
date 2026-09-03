@@ -113,12 +113,20 @@ void main() {
     test('decide() completes with a valid decision under test bindings',
         () async {
       final container = _container(adapters: const []);
+      final monitor = container.read(networkStatusMonitorProvider);
+      expect(monitor, isA<_FakeNetworkMonitor>());
+      expect(await monitor.current(), NetworkProfile.wifi);
+      expect(container.read(initialEngineSettingsProvider).offlineMode,
+          isFalse);
       final engine = container.read(streamingEngineControllerProvider);
       final decision = await engine.decide(_track('canary'));
       // No local file, no adapters, streaming enabled -> the smart ladder
       // must end at download&play (download subsystem available), never
-      // throw.
-      expect(decision.mode, SmartPlayMode.downloadAndPlay);
+      // throw. The reason dumps the full decision trace on failure.
+      expect(decision.mode, SmartPlayMode.downloadAndPlay,
+          reason: decision.steps
+              .map((s) => '${s.check}=${s.passed}(${s.detail})')
+              .join(' | '));
       expect(decision.networkProfile, NetworkProfile.wifi);
     });
   });
@@ -325,17 +333,26 @@ void main() {
       expect(result.started, isTrue, reason: result.message ?? '');
       // First resolve + one re-query after the failure.
       expect(adapter.callCount, greaterThanOrEqualTo(2));
-      expect(validator.callCount, 2);
+      final integrityDump = engine.integrityLog.records
+          .map((r) => '${r.outcome.name}:${r.providerId}:${r.category}')
+          .join(' | ');
+      final healthDump = engine.providerHealth
+          .snapshot()
+          .map((h) => '${h.providerId}(f=${h.failureCount},s=${h.successCount})')
+          .join(' | ');
+      expect(validator.callCount, 2, reason: integrityDump);
       expect(
         engine.integrityLog.countOutcome(StreamIntegrityOutcome.failure),
         1,
+        reason: integrityDump,
       );
       expect(
         engine.integrityLog.countOutcome(StreamIntegrityOutcome.success),
         1,
+        reason: integrityDump,
       );
       final failedHealth = engine.providerHealth.healthOf('providerA');
-      expect(failedHealth.failureCount, 1);
+      expect(failedHealth.failureCount, 1, reason: healthDump);
       final context = container.read(enginePlayContextProvider);
       expect(context?.providerId, 'providerB');
     });
@@ -469,7 +486,10 @@ void main() {
         artist: track.artistName,
       );
       final resolved = await engine.resolveDeferredSource(deferredMedia);
-      expect(resolved, 'https://b.example.com/stream');
+      final eventDump = engine.eventLog.events
+          .map((e) => '${e.category}:${e.message}')
+          .join(' | ');
+      expect(resolved, 'https://b.example.com/stream', reason: eventDump);
     });
 
     test('returns null (never throws) when no source exists', () async {
