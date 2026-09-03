@@ -210,6 +210,32 @@ func scanLibraryAudioTasksParallel(tasks []libraryScanTask, scanTime string, can
 	)
 }
 
+// libraryScanOneFile is the single-file metadata probe used by scan workers.
+// It is a variable (not a direct call) so tests can simulate a parser panic
+// on a malformed file without depending on a real parser bug being present.
+var libraryScanOneFile = scanAudioFileWithKnownModTimeAndDisplayNameAndCoverCacheKey
+
+// runLibraryScanTask scans one file, converting a panic into an error for
+// that file only. Scan workers run in their own goroutines over the user's
+// entire library: a deferred recover on the exported entry point cannot catch
+// a panic unwinding through a worker goroutine, so without this guard one
+// corrupt file would abort the whole process. With it, the file is reported
+// as a scan error and the scan continues.
+func runLibraryScanTask(task libraryScanTask, scanTime string) (result *LibraryScanResult, err error) {
+	defer func() {
+		if r := recoverWorkerPanic("library scan", recover()); r != nil {
+			result, err = nil, r
+		}
+	}()
+	return libraryScanOneFile(
+		task.info.path,
+		"",
+		libraryAudioCoverCacheKey(task.info),
+		scanTime,
+		task.info.modTime,
+	)
+}
+
 func scanLibraryAudioTasksParallelWithSink(
 	tasks []libraryScanTask,
 	scanTime string,
@@ -235,13 +261,7 @@ func scanLibraryAudioTasksParallelWithSink(
 				return resultsByIndex, errorCount, fmt.Errorf("scan cancelled")
 			default:
 			}
-			result, err := scanAudioFileWithKnownModTimeAndDisplayNameAndCoverCacheKey(
-				task.info.path,
-				"",
-				libraryAudioCoverCacheKey(task.info),
-				scanTime,
-				task.info.modTime,
-			)
+			result, err := runLibraryScanTask(task, scanTime)
 			*completed++
 			updateLibraryScanProgress(*completed, totalFiles, task.info.path)
 			if err != nil {
@@ -275,13 +295,10 @@ func scanLibraryAudioTasksParallelWithSink(
 					return
 				default:
 				}
-				result, err := scanAudioFileWithKnownModTimeAndDisplayNameAndCoverCacheKey(
-					task.info.path,
-					"",
-					libraryAudioCoverCacheKey(task.info),
-					scanTime,
-					task.info.modTime,
-				)
+				// Panic-contained per task: a corrupt file fails its own task
+				// instead of aborting the process (worker goroutines are not
+				// covered by the exported entry point's recover).
+				result, err := runLibraryScanTask(task, scanTime)
 				taskResult := libraryScanTaskResult{
 					index: task.index,
 					path:  task.info.path,

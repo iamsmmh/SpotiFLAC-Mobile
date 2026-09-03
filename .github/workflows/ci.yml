@@ -100,32 +100,44 @@ jobs:
 
       - name: Run tests
         # The github reporter emits each *located* failing test as an ::error
-        # annotation, but failures without a source location only show up in
-        # the final summary line. Tee an expanded-reporter log and, on failure,
-        # re-emit the failing test lines and exception details as a single
-        # annotation so the Checks API names the culprit without raw-log access.
+        # annotation, but annotation messages are size-truncated on the Checks
+        # API and the raw job log is not retrievable from outside the Actions
+        # storage backend. On failure, re-emit each failing test as its own
+        # small annotation (name + first ~60 detail lines) so the Checks API
+        # names the culprit with enough context to debug without raw-log access.
         run: |
           set -o pipefail
           status=0
           flutter test --reporter github 2>&1 | tee test.log || status=$?
           if [ "$status" -ne 0 ]; then
-            {
-              echo "=== failing test names ==="
-              grep -a "❌" test.log | head -10
-              echo "=== reporter summary ==="
-              grep -aE "Some tests failed|tests passed" test.log | head -5
-              echo "=== expect mismatches ==="
-              grep -a -B3 -A10 -E "Expected:|Actual:|Which:|Reason:" test.log | head -240
-              echo "=== exception frames ==="
-              grep -a -B4 -A30 -E "EXCEPTION CAUGHT|Bad state: No ProviderScope found" test.log | head -120
-              echo "=== other harness errors ==="
-              grep -anE "RenderFlex overflowed|Timer is still pending|pumpAndSettle timed out" test.log | head -10
-            } | tr -d '\r' | sed -e 's/\x1b\[[0-9;]*m//g' -e 's/%/%25/g' \
-              | sed ':a;N;$!ba;s/\n/%0A/g' \
-              | awk '{print "::error::" $0}'
+          python3 - <<'PY'
+          import re
+          text = open('test.log', encoding='utf-8', errors='replace').read()
+          blocks = re.split(r'(?m)^(?=::group::❌)', text)
+          failing = [b for b in blocks[1:] if '::group::❌' in b]
+          if not failing:
+              print('::error::No per-test failure blocks found; last log lines:')
+              for line in [l for l in text.splitlines() if l.strip()][-60:]:
+                  print('::error::' + line.replace('%', '%25').replace('\n', '%0A'))
+          else:
+              for i, block in enumerate(failing, 1):
+                  head, sep, _rest = block.partition('::endgroup::')
+                  if not sep:
+                      continue
+                  title = head.splitlines()[0].replace('::group::', '').strip()
+                  lines = [l.rstrip() for l in head.splitlines()[1:] if l.strip()]
+                  if not lines:
+                      lines = ['(no detail lines emitted by reporter)']
+                  for part, start in enumerate(range(0, min(len(lines), 120), 25), 1):
+                      chunk = '\n'.join(lines[start:start + 25])
+                      msg = ('failed test %d (part %d): %s\n%s' % (i, part, title, chunk)).replace('%', '%25').replace('\n', '%0A')
+                      print('::error::' + msg)
+          m = re.search(r'(?m)^.*(?:Some tests failed|tests passed).*$', text)
+          if m:
+              print('::error::' + m.group(0).replace('%', '%25').replace('\n', '%0A'))
+          PY
           fi
           exit "$status"
-
   go:
     name: Go vet & test
     runs-on: ubuntu-latest

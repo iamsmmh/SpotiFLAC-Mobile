@@ -309,6 +309,26 @@ func resolveLyricsProviderOrder(
 	return providerOrder
 }
 
+// fetchLyricsProviderGuarded invokes one lyrics provider, converting a panic
+// (malformed provider response, extension bug) into an error for that
+// provider only. Provider fan-out runs in worker goroutines, where an
+// unrecovered panic would abort the process; with this guard the provider is
+// marked failed and the remaining providers still get a chance. ok is
+// returned true so the caller takes the normal failure path (an ok=false
+// panic would misreport the provider as "unknown").
+func fetchLyricsProviderGuarded(
+	fetchProvider func(string, lyricsProviderSearchRequest) (*LyricsResponse, error, bool),
+	providerName string,
+	request lyricsProviderSearchRequest,
+) (lyrics *LyricsResponse, err error, ok bool) {
+	defer func() {
+		if r := recoverWorkerPanic("lyrics provider", recover()); r != nil {
+			lyrics, err, ok = nil, r, true
+		}
+	}()
+	return fetchProvider(providerName, request)
+}
+
 func fetchLyricsProviders(
 	providerOrder []string,
 	request lyricsProviderSearchRequest,
@@ -346,7 +366,7 @@ func fetchLyricsProviders(
 			defer func() { <-sem }()
 
 			GoLog("[Lyrics] Trying provider: %s\n", candidate.name)
-			lyrics, err, ok := fetchProvider(candidate.name, request)
+			lyrics, err, ok := fetchLyricsProviderGuarded(fetchProvider, candidate.name, request)
 			if !ok {
 				results <- lyricsProviderSearchResult{index: candidate.index, providerName: candidate.name, err: fmt.Errorf("unknown provider")}
 				return
