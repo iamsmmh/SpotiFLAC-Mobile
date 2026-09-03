@@ -726,7 +726,7 @@ class StreamingEngineController {
     final hasPaths = resolvedPaths != null &&
         resolvedPaths.length == tracks.length;
     var paths = hasPaths
-        ? List<String?>.of(resolvedPaths!, growable: false)
+        ? List<String?>.of(resolvedPaths, growable: false)
         : await _ref
               .read(playbackProvider.notifier)
               .resolveTrackFilePaths(ordered);

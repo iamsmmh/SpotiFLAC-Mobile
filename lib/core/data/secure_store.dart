@@ -34,6 +34,11 @@ abstract final class SecureStorePolicy {
   static const int maxKeyLength = 128;
   static const int maxValueBytes = 16 * 1024;
 
+  /// Retry cap for boot-time initialization against a flaky secure-storage
+  /// backend; after this many failures the store is treated as initialized
+  /// (best-effort) so boot cannot loop on retrying forever.
+  static const int maxInitAttempts = 3;
+
   static const Set<String> allowedPrefixes = <String>{
     SecureStoreKeys.tokenPrefix,
     SecureStoreKeys.secretPrefix,
@@ -85,6 +90,7 @@ class SecureStore {
 
   final FlutterSecureStorage _storage;
   bool _initialized = false;
+  int _initAttempts = 0;
 
   /// Writes the schema version on first use and wipes retired secrets.
   /// Plugin-missing / Keychain failures are swallowed so a cold start never
@@ -100,11 +106,18 @@ class SecureStore {
         );
       }
       await deleteRetiredSecrets();
+      _initialized = true;
     } catch (_) {
       // MissingPluginException in tests, or a Keychain/EncryptedSharedPreferences
-      // outage on a locked device. Non-fatal: callers retry on next write.
+      // outage on a locked device. Non-fatal — and crucially NOT marked
+      // initialized, so the next boot-time call retries instead of skipping
+      // schema migration/secret cleanup forever. A retry cap avoids log spam
+      // from a persistently failing backend.
+      _initAttempts += 1;
+      if (_initAttempts >= SecureStorePolicy.maxInitAttempts) {
+        _initialized = true;
+      }
     }
-    _initialized = true;
   }
 
   Future<String?> read(String key) async {

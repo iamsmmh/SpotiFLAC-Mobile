@@ -134,7 +134,27 @@ abstract class StreamSourceAdapter {
 
 Add the adapter to `streamSourceAdaptersProvider` and the engine ranks, healths,
 preflights, and fails over to it automatically. The `preview` adapter ships as
-the reference implementation (provider-supplied preview URLs).
+the reference implementation (provider-supplied preview URLs), and the built-in
+`MultiProviderStreamAdapter` exposes the app's multi-provider resolver (YouTube
+universal fallback, SoundCloud, credential-gated lossless providers) to Smart
+Play — so the play path resolves real full streams, not only previews. Previews
+are ranked below full streams and are the last resort.
+
+## Queue playback & deferred sources
+
+`StreamingEngineController.playTracks` is the list-play entry point:
+
+1. The tapped track runs the full Smart Play ladder and starts immediately.
+2. Remaining tracks are queued behind it — pre-resolved local copies play
+   directly, and everything else becomes a **deferred** queue item
+   (`deferred-stream://track/<id>`).
+3. When playback reaches a deferred item, the player asks the engine to
+   resolve it (`resolveDeferredSource`): a *fresh* Smart Play decision runs at
+   play time, so stream URLs are never stale, files downloaded in the meantime
+   are picked up, and offline/local-only policies apply per track.
+4. Deferred items survive session restore (paused) and re-resolve on resume;
+   low-confidence or unresolvable items stop playback gracefully with a
+   logged reason instead of silently substituting another track.
 
 ## Recovery
 
@@ -154,3 +174,15 @@ position where the dead source stopped** (`t`): the handler's
 `currentPlaybackPosition()` is captured before the switch and passed through
 `replaceCurrentAndPlay(item, resumeAt: t)`, so the listener hears a jump of at
 most the resolve/backoff delay instead of a restart from 0:00.
+
+Failover also applies *before* playback: a failed preflight walks the ranked
+alternative candidates (bounded by the configured attempt budget and a
+tried-URI set), so Provider A → Provider B → Provider C succeeds without
+re-trying a URI that already failed.
+
+## Match confidence
+
+The anonymous fallback providers (YouTube, SoundCloud) score every candidate
+(Topic/official markers, duration drift, cover/karaoke/live penalties) and
+**reject low-confidence matches** instead of playing an unrelated track: the
+resolution falls through to the next provider or fails with a clear reason.

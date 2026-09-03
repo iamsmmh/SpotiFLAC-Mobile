@@ -339,7 +339,9 @@ func (r *extensionRuntime) saveSignedSession(config SignedSessionConfig, record 
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0600)
+	// Atomic write (temp + fsync + rename): a process kill mid-write must not
+	// corrupt the persisted auth session.
+	return writeFileAtomic(path, data, 0600)
 }
 
 func randomHex(bytesLen int) string {
