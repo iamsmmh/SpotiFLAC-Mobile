@@ -6,6 +6,7 @@ import 'package:spotimusic/engine/smart_play.dart';
 import 'package:spotimusic/engine/streaming_engine.dart';
 import 'package:spotimusic/models/track.dart';
 import 'package:spotimusic/providers/engine_settings_provider.dart';
+import 'package:spotimusic/providers/music_player_provider.dart';
 import 'package:spotimusic/providers/streaming_engine_provider.dart';
 import 'package:spotimusic/services/multi_provider_stream_service.dart';
 import 'package:spotimusic/services/music_player_service.dart';
@@ -82,6 +83,22 @@ class _FakeNetworkMonitor extends NetworkStatusMonitor {
   Future<NetworkProfile> current() async => profile;
 }
 
+/// Player controller stand-in: AudioService.init succeeds in the test VM
+/// even without native plugins, so the real controller would start actual
+/// playback and route the resulting MissingPluginException through the
+/// engine's playback-failure hook, polluting provider health. The engine
+/// tests exercise the engine, not the audio backend.
+class _NoopPlayerController extends MusicPlayerController {
+  @override
+  Future<void> playAll(
+    List<PlayableMedia> items, {
+    int initialIndex = 0,
+  }) async {}
+
+  @override
+  Future<void> addAllToQueue(List<PlayableMedia> items) async {}
+}
+
 ProviderContainer _container({
   List<StreamSourceAdapter> adapters = const [],
   StreamPreflightValidator? validator,
@@ -96,6 +113,9 @@ ProviderContainer _container({
       initialEngineSettingsProvider.overrideWith((ref) => settings),
       networkStatusMonitorProvider.overrideWith(
         (ref) => _FakeNetworkMonitor(network),
+      ),
+      musicPlayerControllerProvider.overrideWith(
+        (ref) => _NoopPlayerController(),
       ),
     ],
   );
