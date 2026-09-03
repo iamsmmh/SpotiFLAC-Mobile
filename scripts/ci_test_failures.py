@@ -20,7 +20,7 @@ import sys
 
 CROSS_MARK = "\u274c"  # ❌
 CHUNK_CHARS = 3800
-CONTEXT_LINES = 45
+CONTEXT_LINES = 250
 
 
 def extract(log_text: str, max_tests: int) -> str:

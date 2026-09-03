@@ -8,6 +8,7 @@ import 'package:spotimusic/engine/audio_characteristics.dart';
 import 'package:spotimusic/engine/smart_play.dart';
 import 'package:spotimusic/engine/streaming_engine.dart';
 import 'package:spotimusic/models/track.dart';
+import 'package:spotimusic/providers/download_history_provider.dart';
 import 'package:spotimusic/providers/engine_settings_provider.dart';
 import 'package:spotimusic/providers/music_player_provider.dart';
 import 'package:spotimusic/providers/streaming_engine_provider.dart';
@@ -200,6 +201,30 @@ void main() {
               .map((s) => '${s.check}=${s.passed}(${s.detail})')
               .join(' | '));
       expect(decision.networkProfile, NetworkProfile.wifi);
+    });
+
+    // Regression: building the download-history notifier schedules a load that
+    // races getCount() against getAll(). Under `flutter test` the sqflite
+    // databaseFactory is uninitialized, so BOTH queries fail. If the count
+    // query's failure is left unobserved (the old bug) it escapes as an
+    // unhandled async error and fails this whole suite. After the fix the
+    // failure is observed, so the state simply stays empty and NO unhandled
+    // error is reported.
+    test(
+        'download-history load failure stays contained (no unhandled async '
+        'error)', () async {
+      final container = _container(adapters: const []);
+      // Building the notifier schedules the racy load microtask.
+      container.read(downloadHistoryProvider);
+      // Let the load attempt run and fail (databaseFactory not initialized):
+      // give the event loop a few real turns so any unobserved failure would
+      // already have been reported against this test.
+      for (var i = 0; i < 5; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      final state = container.read(downloadHistoryProvider);
+      expect(state.items, isEmpty);
+      expect(state.totalCount, 0);
     });
   });
 

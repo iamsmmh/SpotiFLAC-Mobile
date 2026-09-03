@@ -115,6 +115,13 @@ class DownloadHistoryNotifier extends Notifier<DownloadHistoryState> {
       }
 
       final countFuture = _db.getCount();
+      // getCount() races getAll() for the same database handle. Observe its
+      // failure now so it can never surface as an unhandled async error when
+      // getAll() below throws first; the await on [countFuture] still
+      // receives the original error afterwards.
+      unawaited(
+        countFuture.then<void>((_) {}, onError: (Object _, StackTrace __) {}),
+      );
       final jsonList = await _db.getAll(limit: _initialHistoryLoadLimit);
       final items = jsonList
           .map((e) => DownloadHistoryItem.fromJson(e))
