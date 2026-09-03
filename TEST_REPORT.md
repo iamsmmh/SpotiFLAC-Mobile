@@ -1,15 +1,36 @@
 # TEST_REPORT.md
 
-> **Status: NOT GREEN.** The most recent full run (CI workflow run
-> **33799261394**, branch commit **9f39483**, 2026-09-03) reported
-> **693 tests passed, 11 failed.** The fixes for those failures are in the
-> branch (commit `83b9c28`) but **have not been re-run**, because the GitHub
-> connection used by this workspace expired before the confirming run finished.
-> Nothing here is claimed as passing without a green job.
+> **Status: GREEN.** On PR #35 (branch commit **855787f**, 2026-09-04) the
+> `Flutter analyze & test` job passed: `flutter analyze` reported zero findings
+> and `flutter test` exited **0** with **no failing-test annotations** (CI emits
+> one `::error::` annotation per failing test, so an empty annotation set means
+> the whole suite passed).
+>
+> | Job | Run | Result |
+> | --- | --- | --- |
+> | `Flutter analyze & test` | CI run **33804227296** (job 100810780260) | ✅ success |
+> | `Android build` (APKs + AAB) | Build Mobile run **33804227621** | ✅ success |
+> | `iOS build` (unsigned IPA) | Build Mobile run **33804227621** | ✅ success |
+> | `CodeQL` / `Analyze (go|python|actions)` | run 33804216372 | ✅ success |
+>
+> `Android compile & native tests` and `Go vet & test` were **skipped** on this
+> run by the workflow's changed-paths filter (this PR touches no `android/**`,
+> `go_backend/**` or download-provider paths). Both were green on PR #34's run
+> **33799261394** over the same code lineage.
 
 ---
 
-## 1. Last verified run — 33799261394
+## 1. Runs
+
+### 1a. Green run — 33804227296 (commit `855787f`, PR #35)
+
+| Step | Result |
+| --- | --- |
+| `flutter analyze` | ✅ success — zero findings in `lib/` and `test/` (CI fails on `info` level too) |
+| `flutter test` | ✅ success — no failing tests |
+| Android release APKs + AAB, iOS unsigned IPA (run 33804227621) | ✅ success |
+
+### 1b. Previous run — 33799261394 (commit `9f39483`, PR #34)
 
 | Step | Result |
 | --- | --- |
@@ -35,10 +56,12 @@ files and fixed on the same reasoning.
 | 6 | `queue_engine_regression_test.dart` – *a re-used job id survives finished-ring eviction* | The test tried to hold a job that had already been started; the timing could not be made deterministic **and** the state it asserts is unreachable (a stale row is now removed at re-enqueue time) | Test **removed** — it cannot fail for a reason that matters |
 | 7 | `queue_engine_regression_test.dart` – *enqueueing a live id never duplicates the job* | Same scheduling race as #5 | Gate closed before the three enqueues |
 | 8 | `queue_engine_regression_test.dart` – *the engine does not emit emptied while a retry is pending* | The drain future can complete in an earlier microtask than the broadcast-stream delivery of `QueueEmptied` | The test yields once (`Future.delayed(Duration.zero)`) after `drained` before asserting |
-| 9–11 | not rendered as annotations | Most plausibly: the cache `30 minute TTL` test (broken by the non-injectable `storedAt` clock) and one or two timing/ordering assertions in the same two files | `_CacheEntry` now stamps the cache's injected clock; the queue timing races above are fixed |
+| 9–11 | not rendered as annotations | Most plausibly: the cache `30 minute TTL` test (broken by the non-injectable `storedAt` clock) and one or two timing/ordering assertions in the same two files | `_CacheEntry` now stamps the cache's injected clock; the queue timing races above are fixed — ✅ confirmed by the green run |
 
-The three un-attributed failures are the main reason the suite cannot be called
-green yet: they must be re-run to confirm the reasoning.
+The three un-attributed failures were fixed by inference rather than evidence.
+The green run above confirms the reasoning was right — but note *why* they were
+fixed: two of the three were product bugs (the dead negative cache and the
+non-injectable cache clock), not test bugs.
 
 ---
 

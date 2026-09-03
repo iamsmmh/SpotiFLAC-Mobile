@@ -5,7 +5,8 @@ Deliverable builds for SpotiFLAC-Mobile (`spotimusic` 5.0.0+142), produced by
 
 > **Status: the three requested builds — Android release APKs, Android App
 > Bundle (AAB) and iOS unsigned IPA — were all produced successfully by CI**
-> (workflow run **33799261375**, branch commit **9f39483**, 2026-09-03).
+> (workflow runs **33799261375** and, on the final code, **33804227621**).
+> The final code (`855787f`) is green on every job that ran against it.
 > They could not be downloaded into the authoring sandbox (GitHub's artifact
 > blob storage is unreachable from it) and no Dart/Flutter toolchain exists
 > there, so nothing below is a local build.
@@ -16,12 +17,15 @@ Deliverable builds for SpotiFLAC-Mobile (`spotimusic` 5.0.0+142), produced by
 
 | Workflow run | Job | Result |
 | --- | --- | --- |
+| **33804227621** (PR #35, commit `855787f`) | `Android build` | ✅ success (APKs + AAB) |
+| **33804227621** | `iOS build` | ✅ success (unsigned IPA) |
+| **33804227296** | `Flutter analyze & test` (analyze + tests) | ✅ success |
 | 33799261375 | `Resolve app version` | ✅ success |
 | 33799261375 | `Android build` | ✅ success (APKs + AAB) |
 | 33799261375 | `iOS build` | ✅ success (unsigned IPA) |
 | 33799261394 | `Android compile & native tests` | ✅ success (`flutter build apk --debug`, then `:app:testDebugUnitTest`) |
 | 33799261394 | `Flutter analyze & test` → step **Analyze** | ✅ success (no analyzer findings in `lib/` or `test/`) |
-| 33799261394 | `Flutter analyze & test` → step **Run tests** | ❌ failure — 693 passed / 11 failed (see `TEST_REPORT.md`) |
+| 33799261394 | `Flutter analyze & test` → step **Run tests** | ❌ failure at the time — 693 passed / 11 failed; **all fixed and now green** (run 33804227296, see `TEST_REPORT.md`) |
 
 Earlier run **33797687130** (same code lineage, commit `3802fb0`) failed at
 `Build release APKs`, `Archive Runner without code signing` and

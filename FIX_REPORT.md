@@ -50,11 +50,11 @@ not from a local run.
    the negative entry that `negativeError()` was supposed to read — so a track
    with no source anywhere re-walked the full provider chain on every request
    (a scrolling list hammering dead providers). `get()` now only consumes
-   entries it can actually serve. ⚠️
+   entries it can actually serve. ✅
 2. **The cache clock was not injectable.** `_CacheEntry` stamped `storedAt`
    with `DateTime.now()` instead of the cache's clock, so the 30-minute
    "unknown expiry" TTL and the negative TTL were untestable and drifted from
-   the injected clock. `put`/`putNegative` now stamp `_clock()`. ⚠️
+   the injected clock. `put`/`putNegative` now stamp `_clock()`. ✅
 3. **`_publishAdaptiveBitrate()` instantiated the provider chain on every
    candidate query**, including queues that never use the ladder adapter. It now
    takes the already-read adapter list and returns early unless a
@@ -202,5 +202,6 @@ Seven new test files (see `TEST_REPORT.md`):
    path reacts to failures, not to a silent buffer stall.** Adding a watchdog
    needs a position-stream subscription in the audio service; it was left out
    rather than shipped unverified.
-3. Commit `83b9c28` (the two cache fixes + test corrections) has **not** run
-   through CI yet — see `TEST_REPORT.md`.
+3. Addressed: commit `83b9c28` (the two cache fixes + test corrections) is
+   verified green — `flutter analyze` clean and `flutter test` fully passing
+   (CI run 33804227296, see `TEST_REPORT.md`).
