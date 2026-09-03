@@ -114,12 +114,21 @@ class DownloadHistoryNotifier extends Notifier<DownloadHistoryState> {
         }
       }
 
-      final countFuture = _db.getCount();
-      final jsonList = await _db.getAll(limit: _initialHistoryLoadLimit);
-      final items = jsonList
+      // Load count and rows concurrently, but wait for *both* before touching
+      // the results. A bare `countFuture = _db.getCount()` followed by an
+      // `await _db.getAll(...)` that throws leaves `countFuture` abandoned: it
+      // fails later as an unhandled async error (e.g. under `flutter test`,
+      // where no sqlite databaseFactory is registered), tearing down the
+      // surrounding zone/test instead of being captured by this catch.
+      final results = await Future.wait<Object>([
+        _db.getCount(),
+        _db.getAll(limit: _initialHistoryLoadLimit),
+      ]);
+      final totalCount = results[0] as int;
+      final items = (results[1] as List)
+          .cast<Map<String, dynamic>>()
           .map((e) => DownloadHistoryItem.fromJson(e))
           .toList();
-      final totalCount = await countFuture;
 
       state = state.copyWith(
         items: items,

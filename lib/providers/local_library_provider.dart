@@ -197,13 +197,17 @@ class LocalLibraryNotifier extends Notifier<LocalLibraryState> {
     try {
       await _migrateLegacySource();
       final reconnectedSources = await _refreshSourceAvailabilityInDatabase();
-      final countFuture = _db.getCount();
-      final indexFuture = _db.getLookupIndex();
-      final sourcesFuture = _db.getSources();
+      // Wait for *all* parallel DB queries together: with sequential awaits a
+      // failure in one abandons the others as unhandled async errors.
+      final dbResults = await Future.wait<Object>([
+        _db.getCount(),
+        _db.getLookupIndex(),
+        _db.getSources(),
+      ]);
+      final count = dbResults[0] as int;
+      final lookupIndex = dbResults[1] as LocalLibraryLookupIndex;
+      final sources = (dbResults[2] as List).cast<LocalLibrarySource>();
       final prefsFuture = _prefs;
-      final count = await countFuture;
-      final lookupIndex = await indexFuture;
-      final sources = await sourcesFuture;
 
       DateTime? lastScannedAt;
       var excludedDownloadedCount = 0;
@@ -397,12 +401,16 @@ class LocalLibraryNotifier extends Notifier<LocalLibraryState> {
     DateTime? lastScannedAt,
     int? excludedDownloadedCount,
   }) async {
-    final countFuture = _db.getCount();
-    final indexFuture = _db.getLookupIndex();
-    final sourcesFuture = _db.getSources();
-    final count = await countFuture;
-    final index = await indexFuture;
-    final sources = await sourcesFuture;
+    // Wait for *all* parallel DB queries together: with sequential awaits a
+    // failure in one abandons the others as unhandled async errors.
+    final dbResults = await Future.wait<Object>([
+      _db.getCount(),
+      _db.getLookupIndex(),
+      _db.getSources(),
+    ]);
+    final count = dbResults[0] as int;
+    final index = dbResults[1] as LocalLibraryLookupIndex;
+    final sources = (dbResults[2] as List).cast<LocalLibrarySource>();
     final latestSourceScan = sources
         .map((source) => source.lastScannedAt)
         .whereType<DateTime>()
