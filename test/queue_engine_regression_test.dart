@@ -274,11 +274,10 @@ void main() {
       expect(events.whereType<QueueEmptied>(), isEmpty);
 
       gate.complete();
+      // The drain completer is resolved while the event still sits in the
+      // broadcast controller's delivery queue; let it flush before asserting.
       await engine.drained;
-      // ignore: avoid_print
-      print('[QDBG-TEST] job=${engine.jobById('flaky')} '
-          'pending=${engine.pendingJobs.length} running=${engine.runningJobs.length} '
-          'events=${events.map((e) => e.runtimeType.toString()).join(",")}');
+      await Future<void>.delayed(Duration.zero);
       expect(events.whereType<QueueEmptied>(), isNotEmpty);
     });
   });

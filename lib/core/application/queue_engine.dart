@@ -490,10 +490,6 @@ class QueueEngine {
   }
 
   void _signalEmptinessIfIdle() {
-    // ignore: avoid_print
-    print('[QDBG] signal: pending=${_pending.length} running=${_running.length} '
-        'armed=$_armedRetries emptiedSignalled=$_emptiedSignalled '
-        'drain=${_drainCompleter?.isCompleted ?? 'null'}');
     if (_pending.isEmpty && _running.isEmpty && _armedRetries == 0) {
       if (!_emptiedSignalled) {
         _emptiedSignalled = true;
@@ -596,9 +592,6 @@ class QueueEngine {
 
   void _handleFailed(_JobEntry entry, Object error) {
     final wasRunning = _running.remove(entry.job.id) != null;
-    // ignore: avoid_print
-    print('[QDBG] handle-failed: id=${entry.job.id} attempt=${entry.job.attempt} '
-        'wasRunning=$wasRunning');
     if (!wasRunning) return;
     final token = entry.cancelSource?.token;
     try {
@@ -668,9 +661,6 @@ class QueueEngine {
     } finally {
       _disarmRetry(entry);
     }
-    // ignore: avoid_print
-    print('[QDBG] retry-awake: lifecycle=${entry.job.lifecycle.name} '
-        'attempt=${entry.job.attempt} disposed=$_disposed');
     if (_disposed) return;
     // Vetoed by cancel/pause while backing off: the job left `pending`.
     if (entry.job.lifecycle != JobLifecycle.pending) return;
