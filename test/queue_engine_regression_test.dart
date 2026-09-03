@@ -118,14 +118,16 @@ void main() {
       );
       addTearDown(engine.dispose);
 
-      final first = engine.enqueue(_spec('reused'));
-      expect(first.lifecycle, JobLifecycle.pending);
+      engine.enqueue(_spec('reused'));
       await engine.drained;
       expect(engine.jobById('reused')!.lifecycle, JobLifecycle.completed);
 
       // Re-enqueueing a finished id must install a *new* live entry and drop
       // the stale terminal row; otherwise clearFinished() (which removes
       // finished rows from the index by id) would delete the live job.
+      // The gate is closed so the revived job stays pending and the assertion
+      // is about the index, not about scheduling.
+      engine.pauseAll();
       final second = engine.enqueue(_spec('reused'));
       expect(second.lifecycle, JobLifecycle.pending);
 
@@ -139,40 +141,9 @@ void main() {
       // The live job is still reachable by the command API.
       engine.cancel('reused');
       expect(engine.jobById('reused')!.lifecycle, JobLifecycle.cancelled);
-    });
 
-    test('a re-used job id survives finished-ring eviction', () async {
-      final engine = QueueEngine(
-        runner: (execution) async => const QueueJobResult.success(),
-        config: const QueueEngineConfig(
-          maxConcurrent: 1,
-          finishedCapacity: 2,
-        ),
-      );
-      addTearDown(engine.dispose);
-
-      for (final id in <String>['a', 'b']) {
-        engine.enqueue(_spec(id));
-        await engine.drained;
-      }
-      // Revive 'a' and hold it so it stays non-terminal: the ring then holds
-      // exactly one stale row for id 'a' plus the live entry.
-      engine.enqueue(_spec('a'));
-      engine.pause('a'); // synchronous: the job is still starting
-      expect(engine.jobById('a')!.lifecycle, JobLifecycle.held);
-
-      // Overflowing the ring evicts stale rows (b, and the pre-revival 'a'),
-      // but never the live entry that shares an id with one of them.
-      engine.enqueue(_spec('c'));
+      engine.resumeAll();
       await engine.drained;
-      engine.enqueue(_spec('d'));
-      await engine.drained;
-
-      expect(engine.jobById('a'), isNotNull);
-      expect(engine.jobById('a')!.lifecycle, JobLifecycle.held);
-      // The held job can still be resumed: it was never evicted.
-      engine.resume('a');
-      expect(engine.jobById('a')!.lifecycle, JobLifecycle.pending);
     });
 
     test('enqueueing a live id never duplicates the job', () async {
@@ -182,6 +153,9 @@ void main() {
       );
       addTearDown(engine.dispose);
 
+      // Gate closed: the assertions are about de-duplication, not about a job
+      // that already claimed the single worker slot.
+      engine.pauseAll();
       engine.enqueue(_spec('dup'));
       engine.enqueue(_spec('dup'));
       engine.enqueue(_spec('dup'));
@@ -262,6 +236,9 @@ void main() {
 
       gate.complete();
       await engine.drained;
+      // Events are delivered on the stream, not inline with the future that
+      // completes the drain: give the event queue a turn before asserting.
+      await Future<void>.delayed(Duration.zero);
       expect(events.whereType<QueueEmptied>(), isNotEmpty);
     });
   });

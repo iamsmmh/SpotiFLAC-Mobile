@@ -1617,13 +1617,13 @@ class HttpStreamValidator implements StreamValidator {
 // ---------------------------------------------------------------------------
 
 class _CacheEntry {
-  _CacheEntry.positive(this.stream)
+  _CacheEntry.positive(this.stream, DateTime now)
     : error = null,
-      storedAt = DateTime.now();
+      storedAt = now;
 
-  _CacheEntry.negative(this.error)
+  _CacheEntry.negative(this.error, DateTime now)
     : stream = null,
-      storedAt = DateTime.now();
+      storedAt = now;
 
   final ResolvedStream? stream;
   final String? error;
@@ -1672,12 +1672,22 @@ class StreamResolutionCache {
 
   /// Cached stream for [key], or null when absent/expired. Touches the entry
   /// so hot keys survive eviction.
+  ///
+  /// A negative ("no source on this provider") entry is *not* consumed here:
+  /// every resolution looks for a positive hit first, so removing it would
+  /// silently disable negative caching and let a scrolling list hammer a dead
+  /// provider. Negative entries are read by [negativeError] and expire on
+  /// [negativeTtl].
   ResolvedStream? get(String key) {
-    final entry = _entries.remove(key);
+    final entry = _entries[key];
     if (entry == null) return null;
-    if (!entry.isPositive || entry.isExpired(_clock(), negativeTtl: negativeTtl)) {
+    if (!entry.isPositive) return null;
+    if (entry.isExpired(_clock(), negativeTtl: negativeTtl)) {
+      _entries.remove(key);
       return null;
     }
+    // Re-insert so a hot key becomes the most-recently-used one.
+    _entries.remove(key);
     _entries[key] = entry;
     return entry.stream;
   }
@@ -1693,13 +1703,13 @@ class StreamResolutionCache {
 
   void put(String key, ResolvedStream stream) {
     _entries.remove(key);
-    _entries[key] = _CacheEntry.positive(stream);
+    _entries[key] = _CacheEntry.positive(stream, _clock());
     _evict();
   }
 
   void putNegative(String key, String error) {
     _entries.remove(key);
-    _entries[key] = _CacheEntry.negative(error);
+    _entries[key] = _CacheEntry.negative(error, _clock());
     _evict();
   }
 

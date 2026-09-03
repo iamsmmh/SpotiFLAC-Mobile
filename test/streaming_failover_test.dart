@@ -168,8 +168,33 @@ void main() {
         preferredProvider: StreamProviderId.deezer,
       );
       expect(full.provider, StreamProviderId.youtube);
+      expect(full.viaFallback, isTrue);
 
-      final preview = await service.resolveStream(
+      // The cached full stream wins: allowing previews must never displace
+      // real audio that is already resolved.
+      final warm = await service.resolveStream(
+        _request,
+        preferredProvider: StreamProviderId.deezer,
+        allowPreview: true,
+      );
+      expect(warm.provider, StreamProviderId.youtube);
+
+      // On a cold cache the preview is used when the caller opts in.
+      final cold = _service({
+        StreamProviderId.deezer: _FakeHandler(
+          StreamProviderId.deezer,
+          stream: ResolvedStream(
+            uri: Uri.parse('https://cdns-preview.deezer.com/a'),
+            provider: StreamProviderId.deezer,
+            qualityLabel: 'MP3 128kbps preview',
+            matchedTitle: 'Song',
+            isPreview: true,
+          ),
+        ),
+        StreamProviderId.youtube: _FakeHandler(StreamProviderId.youtube),
+      });
+      addTearDown(cold.dispose);
+      final preview = await cold.resolveStream(
         _request,
         preferredProvider: StreamProviderId.deezer,
         allowPreview: true,
@@ -207,11 +232,14 @@ void main() {
     test('retries every provider when the whole chain is cooling down',
         () async {
       final now = DateTime.now();
-      final health = StreamProviderHealthRegistry()
-        ..recordFailure(StreamProviderId.youtube, error: 'a', now: now)
-        ..recordFailure(StreamProviderId.youtube, error: 'b', now: now)
-        ..recordFailure(StreamProviderId.soundCloud, error: 'a', now: now)
-        ..recordFailure(StreamProviderId.soundCloud, error: 'b', now: now);
+      final health = StreamProviderHealthRegistry();
+      // Every provider in the chain is cooling down, not just the preferred
+      // one: that is the state in which "skip unhealthy providers" would
+      // otherwise leave nothing to try.
+      for (final id in StreamProviderId.values) {
+        health.recordFailure(id, error: 'a', now: now);
+        health.recordFailure(id, error: 'b', now: now);
+      }
       final youtube = _FakeHandler(
         StreamProviderId.youtube,
         stream: _stream(StreamProviderId.youtube, 'https://yt/a'),
