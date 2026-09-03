@@ -239,7 +239,10 @@ void main() {
         StreamRecoveryAction.wait,
       );
 
-      final refreshAt = policy.nextRefreshAt(now.add(const Duration(hours: 1)));
+      final refreshAt = policy.nextRefreshAt(
+        now.add(const Duration(hours: 1)),
+        now: now,
+      );
       expect(refreshAt, now.add(const Duration(minutes: 58)));
       expect(policy.nextRefreshAt(null), isNull);
       expect(
