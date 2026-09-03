@@ -1,4 +1,3 @@
-import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -75,30 +74,29 @@ class _ScriptedValidator implements StreamPreflightValidator {
   }
 }
 
-void _mockConnectivity() {
-  TestWidgetsFlutterBinding.ensureInitialized();
-  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-      .setMockMethodCallHandler(
-    const MethodChannel('plugins.flutter.io/connectivity'),
-    (call) async {
-      if (call.method == 'checkConnectivity') return <String>['wifi'];
-      return null;
-    },
-  );
+class _FakeNetworkMonitor extends NetworkStatusMonitor {
+  final NetworkProfile profile;
+  _FakeNetworkMonitor(this.profile);
+
+  @override
+  Future<NetworkProfile> current() async => profile;
 }
 
 ProviderContainer _container({
   List<StreamSourceAdapter> adapters = const [],
   StreamPreflightValidator? validator,
   EngineSettings settings = const EngineSettings(bufferPreviewStreams: false),
+  NetworkProfile network = NetworkProfile.wifi,
 }) {
-  _mockConnectivity();
   final container = ProviderContainer(
     overrides: [
       streamSourceAdaptersProvider.overrideWith((ref) => adapters),
       if (validator != null)
         streamPreflightValidatorProvider.overrideWith((ref) => validator),
       initialEngineSettingsProvider.overrideWith((ref) => settings),
+      networkStatusMonitorProvider.overrideWith(
+        (ref) => _FakeNetworkMonitor(network),
+      ),
     ],
   );
   addTearDown(container.dispose);
@@ -154,7 +152,7 @@ void main() {
         () {
       final score = scoreYouTubeSearchResult(
         author: 'Random Channel',
-        title: 'different song entirely',
+        title: 'another tune completely',
         targetSeconds: 200,
         videoSeconds: 200,
         requestTitle: 'Song',

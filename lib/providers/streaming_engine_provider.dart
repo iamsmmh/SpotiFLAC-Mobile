@@ -402,8 +402,12 @@ class EnginePlayResult {
 /// ---------------------------------------------------------------------------
 
 class StreamingEngineController {
-  StreamingEngineController._(this._ref, {StreamPreflightValidator? validator})
-    : _validator = validator ?? HttpStreamPreflightValidator();
+  StreamingEngineController._(
+    this._ref, {
+    StreamPreflightValidator? validator,
+    NetworkStatusMonitor? network,
+  }) : _validator = validator ?? HttpStreamPreflightValidator(),
+       _network = network ?? NetworkStatusMonitor();
 
   final Ref _ref;
 
@@ -424,7 +428,7 @@ class StreamingEngineController {
     validator: _validator,
     log: log,
   );
-  final NetworkStatusMonitor _network = NetworkStatusMonitor();
+  final NetworkStatusMonitor _network;
   final StreamHeadWarmer _headWarmer = StreamHeadWarmer();
 
   final Map<String, Track> _trackByMediaId = {};
@@ -1551,10 +1555,17 @@ final streamPreflightValidatorProvider = Provider<StreamPreflightValidator>(
   (ref) => HttpStreamPreflightValidator(),
 );
 
+/// Network status monitor used by the engine controller. Overridable in
+/// tests (the connectivity plugin has no test-channel implementation).
+final networkStatusMonitorProvider = Provider<NetworkStatusMonitor>(
+  (ref) => NetworkStatusMonitor(),
+);
+
 final streamingEngineControllerProvider = Provider<StreamingEngineController>(
   (ref) => StreamingEngineController._(
     ref,
     validator: ref.watch(streamPreflightValidatorProvider),
+    network: ref.watch(networkStatusMonitorProvider),
   ),
 );
 
