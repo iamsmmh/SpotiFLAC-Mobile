@@ -315,6 +315,85 @@ class SpotifyStreamHandler extends StreamProviderHandler {
 }
 
 // ---------------------------------------------------------------------------
+// Pure match-confidence scoring shared by the anonymous fallback providers.
+//
+// Both gates enforce the same policy: a candidate that is neither a
+// Topic/official upload nor duration-verified is *rejected* rather than
+// silently substituted — an honest "no stream" beats playing the wrong song.
+// ---------------------------------------------------------------------------
+
+/// Minimum YouTube match score required to accept a candidate.
+const int youTubeMinimumMatchScore = 25;
+
+/// Hard duration guard: a video more than this many seconds off the requested
+/// track can never be the same recording.
+const int youTubeMaxDurationDriftSeconds = 60;
+
+/// Scores one YouTube search result against the requested track.
+///
+/// Positive signals: "- Topic" author (official catalog upload), "official
+/// audio"/"audio" in the title, duration proximity. Negative signals: live,
+/// concert, cover, karaoke, instrumental uploads and large duration drift.
+/// Returns a negative sentinel for candidates that are hard-rejected.
+int scoreYouTubeSearchResult({
+  required String author,
+  required String title,
+  int? targetSeconds,
+  int? videoSeconds,
+}) {
+  final authorLower = author.toLowerCase();
+  final titleLower = title.toLowerCase();
+  var score = 0;
+  if (authorLower.endsWith('- topic') || authorLower.contains('topic')) {
+    score += 60;
+  }
+  if (titleLower.contains('official audio') || titleLower.contains('audio')) {
+    score += 25;
+  }
+  if (titleLower.contains('live') || titleLower.contains('concert')) score -= 40;
+  if (titleLower.contains('cover') || titleLower.contains('karaoke')) {
+    score -= 60;
+  }
+  if (targetSeconds != null && videoSeconds != null) {
+    final drift = (videoSeconds - targetSeconds).abs();
+    if (drift > youTubeMaxDurationDriftSeconds) {
+      score -= 30;
+    } else if (drift <= 3) {
+      score += 50;
+    } else if (drift <= 10) {
+      score += 25;
+    }
+  }
+  return score;
+}
+
+/// Minimum SoundCloud match score required to accept a candidate.
+const int soundCloudMinimumMatchScore = 20;
+
+/// Scores one SoundCloud search result against the requested track.
+int scoreSoundCloudResult({
+  required String title,
+  required String requestTitle,
+  int? targetSeconds,
+  int? durationMs,
+}) {
+  final lower = title.toLowerCase();
+  var score = 0;
+  if (lower.contains(requestTitle.toLowerCase())) score += 30;
+  if (lower.contains('official')) score += 10;
+  if (lower.contains('cover') || lower.contains('remix')) score -= 25;
+  if (targetSeconds != null && durationMs != null) {
+    final driftSec = (durationMs - (targetSeconds * 1000)).abs() ~/ 1000;
+    if (driftSec > youTubeMaxDurationDriftSeconds) {
+      score -= 30;
+    } else if (driftSec <= 5) {
+      score += 40;
+    }
+  }
+  return score;
+}
+
+// ---------------------------------------------------------------------------
 // Provider 2 — YouTube / YouTube Music: direct audio stream resolution via
 // youtube_explode_dart. This is also the engine that powers the universal
 // fallback, so it is public and shared.
@@ -328,6 +407,10 @@ class YouTubeStreamHandler extends StreamProviderHandler {
   StreamProviderInfo get info => StreamProviderInfo.of(StreamProviderId.youtube);
 
   /// Searches YouTube Music for the best matching video.
+  ///
+  /// Low-confidence matches are rejected (null) instead of silently
+  /// substituting an unrelated video: the universal fallback then moves on to
+  /// SoundCloud or the resolution fails loudly.
   Future<yt.Video?> _findBestMatch(
     StreamTrackRequest request, {
     bool audioOnly = true,
@@ -344,32 +427,28 @@ class YouTubeStreamHandler extends StreamProviderHandler {
     int bestScore = -1 << 30;
     final targetSeconds = request.duration?.inSeconds;
     for (final video in results.take(12)) {
-      var score = 0;
-      final author = video.author.toLowerCase();
-      final title = video.title.toLowerCase();
-      if (author.endsWith('- topic') || author.contains('topic')) score += 60;
-      if (title.contains('official audio') || title.contains('audio')) {
-        score += 25;
-      }
-      if (title.contains('live') || title.contains('concert')) score -= 40;
-      if (title.contains('cover') || title.contains('karaoke')) score -= 60;
-      final videoSeconds = video.duration?.inSeconds;
-      if (targetSeconds != null && videoSeconds != null) {
-        final drift = (videoSeconds - targetSeconds).abs();
-        if (drift <= 3) {
-          score += 50;
-        } else if (drift <= 10) {
-          score += 25;
-        } else if (drift > 60) {
-          score -= 30;
-        }
-      }
+      final score = scoreYouTubeSearchResult(
+        author: video.author,
+        title: video.title,
+        targetSeconds: targetSeconds,
+        videoSeconds: video.duration?.inSeconds,
+      );
       if (score > bestScore) {
         bestScore = score;
         best = video;
       }
     }
-    return best ?? results.first;
+    if (best == null) return null;
+    // Confidence floor: a result that is neither a Topic/official upload nor
+    // duration-verified carries no real evidence it is the requested track.
+    if (bestScore < youTubeMinimumMatchScore) {
+      _log.i(
+        'YouTube: no confident match for "${request.title}" '
+        '(best score $bestScore < $youTubeMinimumMatchScore); rejecting',
+      );
+      return null;
+    }
+    return best;
   }
 
   /// Resolves the highest-bitrate progressive audio stream for [video].
@@ -779,30 +858,31 @@ class SoundCloudStreamHandler extends StreamProviderHandler {
 
       Map<String, dynamic>? best;
       int bestScore = -1 << 30;
-      final targetSeconds = request.duration?.inMilliseconds;
+      final targetSeconds = request.duration?.inSeconds;
       for (final raw in collection) {
         final track = raw as Map<String, dynamic>;
         final title = (track['title'] as String?) ?? '';
-        final lower = title.toLowerCase();
-        var score = 0;
-        if (lower.contains(request.title.toLowerCase())) score += 30;
-        if (lower.contains('official')) score += 10;
-        if (lower.contains('cover') || lower.contains('remix')) score -= 25;
-        final durationMs = (track['duration'] as num?)?.toInt();
-        if (targetSeconds != null && durationMs != null) {
-          final driftSec = (durationMs - targetSeconds).abs() ~/ 1000;
-          if (driftSec <= 5) {
-            score += 40;
-          } else if (driftSec > 60) {
-            score -= 30;
-          }
-        }
+        final score = scoreSoundCloudResult(
+          title: title,
+          requestTitle: request.title,
+          targetSeconds: targetSeconds,
+          durationMs: (track['duration'] as num?)?.toInt(),
+        );
         if (score > bestScore) {
           bestScore = score;
           best = track;
         }
       }
       if (best == null) return null;
+      // Confidence floor: reject weak matches instead of substituting an
+      // unrelated upload (policy mirrors the YouTube fallback gate).
+      if (bestScore < soundCloudMinimumMatchScore) {
+        _log.i(
+          'SoundCloud: no confident match for "${request.title}" '
+          '(best score $bestScore < $soundCloudMinimumMatchScore); rejecting',
+        );
+        return null;
+      }
 
       final transcodings = (best['media'] as Map<String, dynamic>?)?['transcodings']
           as List<dynamic>?;
