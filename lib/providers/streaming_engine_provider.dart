@@ -820,72 +820,85 @@ class StreamingEngineController {
   );
 
   Future<void> _preloadUpcoming(List<Track> upcoming) async {
-    final settings = _ref.read(engineSettingsProvider);
-    if (!settings.preloadNextTrack || upcoming.isEmpty) return;
-    final profile = await currentNetworkProfile();
-    final policy = StreamBufferPolicy.auto.forProfile(profile);
-    const planner = AdaptiveBufferPlanner();
-    for (final track in upcoming) {
-      final candidates = await candidatesFor(track);
-      if (candidates.isEmpty) continue;
-      final ranked = _resolver.candidates(
-        candidates,
-        requested: settings.qualityPolicy.levelFor(profile),
-      );
-      if (ranked.isEmpty) continue;
-      final selected = ranked.first;
-      // Preflight the URL (validity + latency) as before.
-      _preloader.plan(
-        [track.id],
-        window: 1,
-        resolver: (id) => selected,
-      );
-      // Adaptive buffering: on healthy links pull just enough ahead to absorb
-      // jitter; on poor links open a deeper low-bandwidth buffer window.
-      final decision = planner.plan(
-        profile: profile,
-        policy: policy,
-        bitrateKbps: selected.characteristics.bitrateKbps,
-        measuredBytesPerSecond: bandwidth.smoothedBytesPerSecond,
-        preloadEnabled: settings.preloadNextTrack,
-        lowBandwidthBufferSeconds: settings.lowBandwidthBufferSeconds,
-        prebufferHeadBytes: settings.prebufferHeadBytesKb * 1024,
-      );
-      if (decision.headBytes > 0 &&
-          _headWarmer.permittedFor(
-            selected,
-            bufferPreviewStreams: settings.bufferPreviewStreams,
-          )) {
-        unawaited(_warmHeadAndRecord(selected, decision.headBytes));
+    try {
+      final settings = _ref.read(engineSettingsProvider);
+      if (!settings.preloadNextTrack || upcoming.isEmpty) return;
+      final profile = await currentNetworkProfile();
+      final policy = StreamBufferPolicy.auto.forProfile(profile);
+      const planner = AdaptiveBufferPlanner();
+      for (final track in upcoming) {
+        final candidates = await candidatesFor(track);
+        if (candidates.isEmpty) continue;
+        final ranked = _resolver.candidates(
+          candidates,
+          requested: settings.qualityPolicy.levelFor(profile),
+        );
+        if (ranked.isEmpty) continue;
+        final selected = ranked.first;
+        // Preflight the URL (validity + latency) as before.
+        _preloader.plan(
+          [track.id],
+          window: 1,
+          resolver: (id) => selected,
+        );
+        // Adaptive buffering: on healthy links pull just enough ahead to
+        // absorb jitter; on poor links open a deeper low-bandwidth buffer
+        // window.
+        final decision = planner.plan(
+          profile: profile,
+          policy: policy,
+          bitrateKbps: selected.characteristics.bitrateKbps,
+          measuredBytesPerSecond: bandwidth.smoothedBytesPerSecond,
+          preloadEnabled: settings.preloadNextTrack,
+          lowBandwidthBufferSeconds: settings.lowBandwidthBufferSeconds,
+          prebufferHeadBytes: settings.prebufferHeadBytesKb * 1024,
+        );
+        if (decision.headBytes > 0 &&
+            _headWarmer.permittedFor(
+              selected,
+              bufferPreviewStreams: settings.bufferPreviewStreams,
+            )) {
+          unawaited(_warmHeadAndRecord(selected, decision.headBytes));
+        }
       }
+    } catch (e) {
+      // Best-effort lookahead: never let a stale preload (e.g. the owning
+      // provider was disposed after an async gap, or the network died while
+      // probing candidates) surface as an unhandled async error.
+      log.add(EngineEvent.warning('buffer', 'Preload skipped: $e'));
     }
   }
 
   Future<void> _warmHeadAndRecord(StreamDescriptor source, int maxBytes) async {
-    final result = await _headWarmer.warmHead(source, maxBytes);
-    if (result == null) return;
-    final bytes = result.$1;
-    final elapsedMs = result.$2;
-    if (bytes <= 0) return;
-    final bps = elapsedMs > 0
-        ? ((bytes / (elapsedMs / 1000)).round()).clamp(0, 1 << 40)
-        : 0;
-    bandwidth.record(
-      BandwidthSample(
-        at: DateTime.now(),
-        bytes: bytes,
-        latencyMs: elapsedMs,
-        bytesPerSecond: bps,
-        providerId: source.providerId,
-      ),
-    );
-    log.add(
-      EngineEvent.info(
-        'buffer',
-        'Pre-buffered ${formatBandwidth(bps)} head for next track '
-        '(${source.providerId})',
-      ),
-    );
+    try {
+      final result = await _headWarmer.warmHead(source, maxBytes);
+      if (result == null) return;
+      final bytes = result.$1;
+      final elapsedMs = result.$2;
+      if (bytes <= 0) return;
+      final bps = elapsedMs > 0
+          ? ((bytes / (elapsedMs / 1000)).round()).clamp(0, 1 << 40)
+          : 0;
+      bandwidth.record(
+        BandwidthSample(
+          at: DateTime.now(),
+          bytes: bytes,
+          latencyMs: elapsedMs,
+          bytesPerSecond: bps,
+          providerId: source.providerId,
+        ),
+      );
+      log.add(
+        EngineEvent.info(
+          'buffer',
+          'Pre-buffered ${formatBandwidth(bps)} head for next track '
+          '(${source.providerId})',
+        ),
+      );
+    } catch (e) {
+      // Background probe: a failure must not become an unhandled async error.
+      log.add(EngineEvent.warning('buffer', 'Head warm-up failed: $e'));
+    }
   }
 
   EnginePlayContext _contextFor(
