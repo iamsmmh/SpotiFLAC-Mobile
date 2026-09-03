@@ -790,7 +790,14 @@ class StreamingEngineController {
         .skip(1)
         .take(_ref.read(engineSettingsProvider).preloadWindow)
         .toList(growable: false);
-    unawaited(_preloadUpcoming(upcoming));
+    // Preloading is best-effort: a disposal racing a pending preload (app
+    // teardown, engine invalidation) must never surface as an unhandled
+    // async error.
+    unawaited(
+      _preloadUpcoming(upcoming).catchError((Object error) {
+        log.add(EngineEvent.warning('preload', 'Preload aborted: $error'));
+      }),
+    );
     return firstResult;
   }
 
@@ -820,13 +827,19 @@ class StreamingEngineController {
   );
 
   Future<void> _preloadUpcoming(List<Track> upcoming) async {
+    if (!_ref.mounted) return;
     final settings = _ref.read(engineSettingsProvider);
     if (!settings.preloadNextTrack || upcoming.isEmpty) return;
     final profile = await currentNetworkProfile();
+    // The engine may have been disposed while the network probe was in
+    // flight (app teardown / container rebuild); never touch the ref again
+    // in that case.
+    if (!_ref.mounted) return;
     final policy = StreamBufferPolicy.auto.forProfile(profile);
     const planner = AdaptiveBufferPlanner();
     for (final track in upcoming) {
       final candidates = await candidatesFor(track);
+      if (!_ref.mounted) return;
       if (candidates.isEmpty) continue;
       final ranked = _resolver.candidates(
         candidates,
