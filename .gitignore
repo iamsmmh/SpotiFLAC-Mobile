@@ -102,3 +102,4 @@ flutter_*.log
 # NOTE: pubspec.lock is intentionally NOT ignored — this is an application
 # (not a library) and reproducible builds require the resolved dependency
 # set to be committed. See PRODUCTION_VALIDATION_REPORT.md → Reproducibility.
+__pycache__
