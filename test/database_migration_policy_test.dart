@@ -56,7 +56,6 @@ const List<_StoreSpec> _stores = <_StoreSpec>[
   ),
 ];
 
-final RegExp _versionDecl = RegExp(r'=\s*(\d+)\s*;');
 final RegExp _stepPattern = RegExp(r'if \(oldVersion < (\d+)\) \{');
 final RegExp _alterPattern = RegExp(r"ALTER TABLE[^\n]*ADD COLUMN", caseSensitive: false);
 

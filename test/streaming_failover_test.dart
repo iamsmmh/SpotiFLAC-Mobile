@@ -3,16 +3,14 @@ import 'package:http/http.dart' as http;
 import 'package:spotimusic/services/multi_provider_stream_service.dart';
 
 /// Handler that records every call and answers with a scripted result.
-class _FakeHandler implements StreamProviderHandler {
-  _FakeHandler(this.id, {this.stream, this.error, this.threshold = 0});
+class _FakeHandler extends StreamProviderHandler {
+  _FakeHandler(this.id, {this.stream, this.error});
 
+  @override
   final StreamProviderId id;
   final ResolvedStream? stream;
   final Object? error;
 
-  /// Number of calls after which the handler starts answering (simulates a
-  /// slow provider so single-flight coalescing can be asserted).
-  final int threshold;
   int calls = 0;
 
   @override
