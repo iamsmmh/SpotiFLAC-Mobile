@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:spotimusic/engine/audio_characteristics.dart';
+import 'package:spotimusic/engine/smart_play.dart';
 import 'package:spotimusic/engine/streaming_engine.dart';
 import 'package:spotimusic/models/track.dart';
 import 'package:spotimusic/providers/engine_settings_provider.dart';
@@ -110,6 +111,20 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
   });
 
+  group('Engine environment canary', () {
+    test('decide() completes with a valid decision under test bindings',
+        () async {
+      final container = _container(adapters: const []);
+      final engine = container.read(streamingEngineControllerProvider);
+      final decision = await engine.decide(_track('canary'));
+      // No local file, no adapters, streaming enabled -> the smart ladder
+      // must end at download&play (download subsystem available), never
+      // throw.
+      expect(decision.mode, SmartPlayMode.downloadAndPlay);
+      expect(decision.networkProfile, NetworkProfile.wifi);
+    });
+  });
+
   group('Provider match-confidence gates', () {
     test('YouTube: official Topic upload with close duration scores high', () {
       final score = scoreYouTubeSearchResult(
@@ -117,6 +132,7 @@ void main() {
         title: 'Song (Official Audio)',
         targetSeconds: 200,
         videoSeconds: 201,
+        requestTitle: 'Song',
       );
       expect(score, greaterThanOrEqualTo(youTubeMinimumMatchScore));
     });
@@ -127,8 +143,22 @@ void main() {
         title: 'totally different thing',
         targetSeconds: 200,
         videoSeconds: 205,
+        requestTitle: 'Song',
       );
-      // No Topic/official marker, duration unknown relative weighting only.
+      // No Topic/official marker, title does not contain the request, and
+      // only weak duration evidence: must stay below the floor.
+      expect(score, lessThan(youTubeMinimumMatchScore));
+    });
+
+    test('YouTube: same-length unrelated video alone never clears the floor',
+        () {
+      final score = scoreYouTubeSearchResult(
+        author: 'Random Channel',
+        title: 'different song entirely',
+        targetSeconds: 200,
+        videoSeconds: 200,
+        requestTitle: 'Song',
+      );
       expect(score, lessThan(youTubeMinimumMatchScore));
     });
 
@@ -138,12 +168,14 @@ void main() {
         title: 'Song (Official Audio)',
         targetSeconds: 200,
         videoSeconds: 200,
+        requestTitle: 'Song',
       );
       final drifted = scoreYouTubeSearchResult(
         author: 'Artist - Topic',
         title: 'Song (Official Audio)',
         targetSeconds: 200,
         videoSeconds: 200 + youTubeMaxDurationDriftSeconds + 30,
+        requestTitle: 'Song',
       );
       expect(drifted, lessThan(close));
     });
@@ -154,6 +186,7 @@ void main() {
         title: 'Song (karaoke cover)',
         targetSeconds: 200,
         videoSeconds: 200,
+        requestTitle: 'Song',
       );
       expect(score, lessThan(youTubeMinimumMatchScore));
     });

@@ -322,8 +322,11 @@ class SpotifyStreamHandler extends StreamProviderHandler {
 // silently substituted — an honest "no stream" beats playing the wrong song.
 // ---------------------------------------------------------------------------
 
-/// Minimum YouTube match score required to accept a candidate.
-const int youTubeMinimumMatchScore = 25;
+/// Minimum YouTube match score required to accept a candidate. Chosen so a
+/// candidate passes only with either a Topic/official-catalog signal or a
+/// title match backed by duration evidence — a same-length unrelated video
+/// alone never clears it.
+const int youTubeMinimumMatchScore = 40;
 
 /// Hard duration guard: a video more than this many seconds off the requested
 /// track can never be the same recording.
@@ -331,21 +334,32 @@ const int youTubeMaxDurationDriftSeconds = 60;
 
 /// Scores one YouTube search result against the requested track.
 ///
-/// Positive signals: "- Topic" author (official catalog upload), "official
-/// audio"/"audio" in the title, duration proximity. Negative signals: live,
-/// concert, cover, karaoke, instrumental uploads and large duration drift.
-/// Returns a negative sentinel for candidates that are hard-rejected.
+/// Positive signals: "- Topic" author (official catalog upload), the requested
+/// title appearing in the video title, "official audio"/"audio" in the title,
+/// duration proximity. Negative signals: live, concert, cover, karaoke,
+/// instrumental uploads, missing title signal and large duration drift.
 int scoreYouTubeSearchResult({
   required String author,
   required String title,
   int? targetSeconds,
   int? videoSeconds,
+  String? requestTitle,
 }) {
   final authorLower = author.toLowerCase();
   final titleLower = title.toLowerCase();
   var score = 0;
   if (authorLower.endsWith('- topic') || authorLower.contains('topic')) {
     score += 60;
+  }
+  final requestedTitle = requestTitle?.trim().toLowerCase() ?? '';
+  if (requestedTitle.isNotEmpty) {
+    if (titleLower.contains(requestedTitle)) {
+      score += 35;
+    } else {
+      // The search engine matched keywords, but the video title does not even
+      // contain the requested song title: weak evidence at best.
+      score -= 15;
+    }
   }
   if (titleLower.contains('official audio') || titleLower.contains('audio')) {
     score += 25;
@@ -367,8 +381,9 @@ int scoreYouTubeSearchResult({
   return score;
 }
 
-/// Minimum SoundCloud match score required to accept a candidate.
-const int soundCloudMinimumMatchScore = 20;
+/// Minimum SoundCloud match score required to accept a candidate: a title
+/// match plus one corroborating signal (duration or official marker).
+const int soundCloudMinimumMatchScore = 40;
 
 /// Scores one SoundCloud search result against the requested track.
 int scoreSoundCloudResult({
@@ -379,7 +394,11 @@ int scoreSoundCloudResult({
 }) {
   final lower = title.toLowerCase();
   var score = 0;
-  if (lower.contains(requestTitle.toLowerCase())) score += 30;
+  if (lower.contains(requestTitle.toLowerCase())) {
+    score += 30;
+  } else {
+    score -= 15;
+  }
   if (lower.contains('official')) score += 10;
   if (lower.contains('cover') || lower.contains('remix')) score -= 25;
   if (targetSeconds != null && durationMs != null) {
@@ -432,6 +451,7 @@ class YouTubeStreamHandler extends StreamProviderHandler {
         title: video.title,
         targetSeconds: targetSeconds,
         videoSeconds: video.duration?.inSeconds,
+        requestTitle: request.title,
       );
       if (score > bestScore) {
         bestScore = score;

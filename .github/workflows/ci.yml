@@ -114,8 +114,10 @@ jobs:
               grep -a "❌" test.log | head -10
               echo "=== reporter summary ==="
               grep -aE "Some tests failed|tests passed" test.log | head -5
+              echo "=== expect mismatches ==="
+              grep -a -B2 -A6 -E "Expected:|Actual:|Which:" test.log | head -60
               echo "=== exception frames ==="
-              grep -a -B6 -A28 "Bad state: No ProviderScope found" test.log | head -80
+              grep -a -B4 -A30 -E "EXCEPTION CAUGHT|Bad state: No ProviderScope found" test.log | head -120
               echo "=== other harness errors ==="
               grep -anE "RenderFlex overflowed|Timer is still pending|pumpAndSettle timed out" test.log | head -10
             } | tr -d '\r' | sed -e 's/\x1b\[[0-9;]*m//g' -e 's/%/%25/g' \

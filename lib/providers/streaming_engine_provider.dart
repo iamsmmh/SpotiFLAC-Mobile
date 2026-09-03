@@ -595,6 +595,18 @@ class StreamingEngineController {
           );
           return null;
         }
+        _session.markSuccess(source);
+        _ref.read(enginePlayContextProvider.notifier).publish(
+              EnginePlayContext(
+                trackId: track.id,
+                mode: SmartPlayMode.stream,
+                providerId: source.providerId,
+                quality: source.quality,
+                characteristics: source.characteristics,
+                offline: false,
+                startedAt: DateTime.now(),
+              ),
+            );
         return source.uri;
       case SmartPlayMode.download:
       case SmartPlayMode.downloadAndPlay:
@@ -978,7 +990,16 @@ class StreamingEngineController {
       requested: decision.requestedQuality,
     );
     if (outcome.resolved == null) {
-      return null;
+      // The Smart Play pick may be expired or health-filtered right now;
+      // consult the full ranked candidate chain before giving up.
+      final candidates = await candidatesFor(track);
+      outcome = _session.resolve(
+        candidates,
+        requested: decision.requestedQuality,
+      );
+      if (outcome.resolved == null) {
+        return null;
+      }
     }
     selected = outcome.resolved!;
 
@@ -1049,8 +1070,10 @@ class StreamingEngineController {
     }
   }
 
-  /// Single-source preflight: records latency, bandwidth, provider health and
-  /// stream-integrity results. Returns whether the source is playable.
+  /// Single-source preflight: records latency, bandwidth and stream-integrity
+  /// results. Provider *health* is recorded by the session transitions
+  /// (`onFailure` / `markSuccess`) so each attempt is counted exactly once.
+  /// Returns whether the source is playable.
   Future<bool> _preflightSource(StreamDescriptor source) async {
     final preflight = await _validator.validate(source);
     _network.noteLatency(preflight.latencyMs);
@@ -1060,7 +1083,6 @@ class StreamingEngineController {
       providerId: source.providerId,
     );
     if (!preflight.ok) {
-      health.recordFailure(source.providerId, latencyMs: preflight.latencyMs);
       integrity.add(
         StreamIntegrityRecord.failure(
           providerId: source.providerId,
@@ -1077,10 +1099,6 @@ class StreamingEngineController {
       );
       return false;
     }
-    health.recordSuccess(
-      source.providerId,
-      latencyMs: preflight.latencyMs,
-    );
     integrity.add(
       StreamIntegrityRecord.success(
         providerId: source.providerId,
