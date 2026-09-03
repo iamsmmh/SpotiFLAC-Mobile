@@ -126,11 +126,12 @@ jobs:
                       continue
                   title = head.splitlines()[0].replace('::group::', '').strip()
                   lines = [l.rstrip() for l in head.splitlines()[1:] if l.strip()]
-                  detail = '\n'.join(lines[:60])
-                  if len(detail) > 2200:
-                      detail = detail[:2200] + ' ...[truncated]'
-                  msg = ('failed test %d: %s\n%s' % (i, title, detail)).replace('%', '%25').replace('\n', '%0A')
-                  print('::error::' + msg)
+                  if not lines:
+                      lines = ['(no detail lines emitted by reporter)']
+                  for part, start in enumerate(range(0, min(len(lines), 120), 25), 1):
+                      chunk = '\n'.join(lines[start:start + 25])
+                      msg = ('failed test %d (part %d): %s\n%s' % (i, part, title, chunk)).replace('%', '%25').replace('\n', '%0A')
+                      print('::error::' + msg)
           m = re.search(r'(?m)^.*(?:Some tests failed|tests passed).*$', text)
           if m:
               print('::error::' + m.group(0).replace('%', '%25').replace('\n', '%0A'))
