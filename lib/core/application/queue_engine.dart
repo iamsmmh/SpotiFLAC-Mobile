@@ -142,6 +142,12 @@ class QueueEngine {
   bool _disposed = false;
   bool _emptiedSignalled = true;
 
+  /// Retries currently waiting on their backoff delay. They hold no worker,
+  /// but they *are* pending work: `drained` and `QueueEmptied` must not fire
+  /// while one is armed, or a caller awaiting the queue would resume before
+  /// the retry even started.
+  int _armedRetries = 0;
+
   // -------------------------------------------------------------------------
   // Reads
   // -------------------------------------------------------------------------
@@ -184,7 +190,7 @@ class QueueEngine {
   /// they consume no resources. When work is (re)queued later, a fresh future
   /// is handed out.
   Future<void> get drained {
-    if (_pending.isEmpty && _running.isEmpty) {
+    if (_pending.isEmpty && _running.isEmpty && _armedRetries == 0) {
       return Future<void>.value();
     }
     final current = _drainCompleter;
@@ -206,21 +212,68 @@ class QueueEngine {
     final id = spec.jobId ?? 'job-${++_idSequence}';
     final existing = _index[id];
     if (existing != null && !existing.job.isTerminal) {
-      return existing.job;
+      return existing.job; // Idempotent: never duplicate a live job.
     }
-    final entry = _JobEntry(
-      QueueJob(
-        id: id,
-        sequence: ++_orderSequence,
-        spec: spec,
-        lifecycle: JobLifecycle.pending,
-      ),
-    );
-    _index[id] = entry;
-    _insertPending(entry);
-    _emit(QueueJobEnqueued(entry.job));
-    _pump();
-    return entry.job;
+    // Pin the resolved id so the batch path cannot mint a second one.
+    return enqueueAll(<DownloadJobSpec>[spec.copyWith(jobId: id)]).first;
+  }
+
+  /// Enqueues a whole batch (e.g. a 5,000-track playlist) in a single pass.
+  ///
+  /// Inserting one-by-one is O(n²) because every `_insertPending` shifts the
+  /// sorted pending list; a batch appends and sorts once, so importing a large
+  /// collection stays O(n log n). Re-enqueueing a live id is idempotent (the
+  /// existing job view is returned and no duplicate is created).
+  /// Returns one job view per [specs] entry, in input order — the existing
+  /// view when the id was already live, the new one otherwise.
+  List<QueueJob> enqueueAll(Iterable<DownloadJobSpec> specs) {
+    _ensureAlive();
+    final created = <QueueJob>[];
+    final resolved = <QueueJob>[];
+    for (final spec in specs) {
+      final id = spec.jobId ?? 'job-${++_idSequence}';
+      final existing = _index[id];
+      if (existing != null) {
+        if (!existing.job.isTerminal) {
+          resolved.add(existing.job);
+          continue;
+        }
+        // A terminal entry with this id can still sit in the finished ring.
+        // Drop it *before* installing the new one: both `clearFinished()`
+        // and `_archiveFinished` eviction remove entries from `_index` by
+        // id, and leaving the stale row behind would make them delete the
+        // replacement's index entry (queue corruption: the job becomes
+        // invisible to cancel/pause while still running).
+        _finished.remove(existing);
+      }
+      final entry = _JobEntry(
+        QueueJob(
+          id: id,
+          sequence: ++_orderSequence,
+          spec: spec,
+          lifecycle: JobLifecycle.pending,
+        ),
+      );
+      _index[id] = entry;
+      _pending.add(entry);
+      created.add(entry.job);
+      resolved.add(entry.job);
+    }
+    if (_pending.isNotEmpty) {
+      _pending.sort(_comparePending);
+    }
+    for (final job in created) {
+      _emit(QueueJobEnqueued(job));
+    }
+    if (created.isNotEmpty) _pump();
+    return resolved;
+  }
+
+  /// Total order of the pending list: priority lane first, then FIFO.
+  static int _comparePending(_JobEntry a, _JobEntry b) {
+    final byPriority = JobPriority.compare(a.job.priority, b.job.priority);
+    if (byPriority != 0) return byPriority;
+    return a.job.sequence.compareTo(b.job.sequence);
   }
 
   void cancel(String jobId) {
@@ -230,11 +283,11 @@ class QueueEngine {
     switch (entry.job.lifecycle) {
       case JobLifecycle.pending:
         _pending.remove(entry);
-        entry.retryArmed = false;
+        _disarmRetry(entry);
         _settlePreStartCancellation(entry, 'cancelled');
       case JobLifecycle.held:
         _held.remove(entry);
-        entry.retryArmed = false;
+        _disarmRetry(entry);
         _settlePreStartCancellation(entry, 'cancelled');
       case JobLifecycle.running:
         // The worker's done-handler finalizes as cancelled.
@@ -253,7 +306,7 @@ class QueueEngine {
     switch (entry.job.lifecycle) {
       case JobLifecycle.pending:
         _pending.remove(entry);
-        entry.retryArmed = false;
+        _disarmRetry(entry);
         entry.pauseRequestedByUser = true;
         _transition(entry, JobLifecycle.held);
         _held.add(entry);
@@ -344,7 +397,9 @@ class QueueEngine {
   /// Drops terminal entries (completed/failed/cancelled) from the snapshot.
   void clearFinished() {
     for (final entry in _finished) {
-      _index.remove(entry.job.id);
+      if (identical(_index[entry.job.id], entry)) {
+        _index.remove(entry.job.id);
+      }
     }
     _finished.clear();
   }
@@ -356,6 +411,9 @@ class QueueEngine {
     _disposed = true;
     for (final entry in _running.values) {
       entry.cancelSource?.cancel('shutdown');
+    }
+    for (final entry in <_JobEntry>[..._pending, ..._held]) {
+      _disarmRetry(entry);
     }
     _pending.clear();
     _held.clear();
@@ -383,20 +441,28 @@ class QueueEngine {
   }
 
   void _insertPending(_JobEntry entry) {
-    var index = _pending.length;
-    for (var i = 0; i < _pending.length; i++) {
-      final other = _pending[i];
-      final byPriority = JobPriority.compare(
-        entry.job.priority,
-        other.job.priority,
-      );
-      if (byPriority < 0 ||
-          (byPriority == 0 && entry.job.sequence < other.job.sequence)) {
-        index = i;
-        break;
+    // The pending list is kept in (priority, sequence) order, so the insertion
+    // point is found by binary search: a 5,000-item playlist enqueued one by
+    // one stays O(n log n) instead of degrading to O(n²) list shifts.
+    var low = 0;
+    var high = _pending.length;
+    while (low < high) {
+      final mid = low + ((high - low) >> 1);
+      final before = _comparePending(entry, _pending[mid]) < 0;
+      if (before) {
+        high = mid;
+      } else {
+        low = mid + 1;
       }
     }
-    _pending.insert(index, entry);
+    _pending.insert(low, entry);
+  }
+
+  /// Disarms a pending engine retry and releases its "work in flight" slot.
+  void _disarmRetry(_JobEntry entry) {
+    if (!entry.retryArmed) return;
+    entry.retryArmed = false;
+    if (_armedRetries > 0) _armedRetries--;
   }
 
   void _emit(QueueEvent event) {
@@ -424,7 +490,7 @@ class QueueEngine {
   }
 
   void _signalEmptinessIfIdle() {
-    if (_pending.isEmpty && _running.isEmpty) {
+    if (_pending.isEmpty && _running.isEmpty && _armedRetries == 0) {
       if (!_emptiedSignalled) {
         _emptiedSignalled = true;
         _emit(const QueueEmptied());
@@ -460,6 +526,9 @@ class QueueEngine {
       cancellation: source.token,
       reportProgress: (double progress) {
         final clamped = progress.clamp(0.0, 1.0).toDouble();
+        // Never rewind: a worker that restarts an internal phase must not
+        // pull the UI's percentage backwards while the job is still running.
+        if (clamped < entry.job.progress) return;
         if ((clamped - entry.job.progress).abs() < 0.0001) return;
         entry.job = entry.job.copyWith(progress: clamped);
         _emit(QueueJobProgress(entry.job.id, clamped));
@@ -579,6 +648,7 @@ class QueueEngine {
   }
 
   void _armRetry(_JobEntry entry, Duration delay) {
+    if (!entry.retryArmed) _armedRetries++;
     entry.retryArmed = true;
     unawaited(_runArmedRetry(entry, delay));
   }
@@ -588,8 +658,9 @@ class QueueEngine {
       await _config.sleeper(delay);
     } catch (_) {
       // A failing sleeper must not strand the job; requeue immediately.
+    } finally {
+      _disarmRetry(entry);
     }
-    entry.retryArmed = false;
     if (_disposed) return;
     // Vetoed by cancel/pause while backing off: the job left `pending`.
     if (entry.job.lifecycle != JobLifecycle.pending) return;
@@ -618,7 +689,12 @@ class QueueEngine {
     _finished.add(entry);
     while (_finished.length > _config.finishedCapacity) {
       final evicted = _finished.removeAt(0);
-      _index.remove(evicted.job.id);
+      // Only touch the index when it still points at the evicted row: a job
+      // id re-used for a fresh enqueue must not have its live entry dropped
+      // by the eviction of the row that previously carried the same id.
+      if (identical(_index[evicted.job.id], evicted)) {
+        _index.remove(evicted.job.id);
+      }
     }
   }
 }

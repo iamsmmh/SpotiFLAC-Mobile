@@ -1,11 +1,20 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:audio_service/audio_service.dart' show MediaItem;
 import 'package:http/http.dart' as http;
 import 'package:just_audio/just_audio.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart' as yt;
 
+import 'package:spotimusic/engine/streaming_engine.dart'
+    show
+        AdaptiveBitrateSelector,
+        StreamRecoveryAction,
+        StreamRecoveryBudget,
+        StreamRecoveryPolicy,
+        StreamVariant;
 import 'package:spotimusic/models/track.dart';
 import 'package:spotimusic/utils/logger.dart';
 
@@ -266,9 +275,7 @@ abstract class StreamProviderHandler {
         .get(
           url,
           headers: <String, String>{
-            'User-Agent':
-                'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 '
-                '(KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36',
+            'User-Agent': _browserUserAgent,
             'Accept': 'application/json, text/plain, */*',
             ...?headers,
           },
@@ -281,7 +288,40 @@ abstract class StreamProviderHandler {
     }
     return response;
   }
+
+  /// JSON POST variant, used by the provider gateways that refuse GET
+  /// (Deezer's `gw-light.php` among them).
+  Future<http.Response> postJson(
+    Uri url, {
+    Map<String, String>? headers,
+    Object? body,
+    Duration timeout = const Duration(seconds: 12),
+  }) async {
+    final response = await http
+        .post(
+          url,
+          headers: <String, String>{
+            'User-Agent': _browserUserAgent,
+            'Accept': 'application/json, text/plain, */*',
+            if (body != null) 'Content-Type': 'application/json',
+            ...?headers,
+          },
+          body: body == null ? null : jsonEncode(body),
+        )
+        .timeout(timeout);
+    if (response.statusCode != 200) {
+      throw http.ClientException(
+        'HTTP ${response.statusCode} for $url',
+      );
+    }
+    return response;
+  }
 }
+
+/// Shared UA so every provider request looks like a normal mobile browser.
+const String _browserUserAgent =
+    'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 '
+    '(KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36';
 
 // ---------------------------------------------------------------------------
 // Provider 1 — Spotify: metadata lookup + official 30s preview playback.
@@ -412,6 +452,44 @@ int scoreSoundCloudResult({
   return score;
 }
 
+/// Safe JSON accessors shared by the credentialed provider handlers.
+///
+/// Provider payloads are untyped JSON; every value is type-checked instead of
+/// being invoked through `dynamic` (the analyzer runs with
+/// `avoid_dynamic_calls`), and a malformed node degrades to "no match" rather
+/// than throwing into the resolution chain.
+Map<String, dynamic>? _asMap(Object? value) =>
+    value is Map<String, dynamic> ? value : null;
+
+List<dynamic>? _asList(Object? value) => value is List<dynamic> ? value : null;
+
+String? _asString(Object? value) => value is String ? value : null;
+
+/// First directly-playable URL in a provider payload, checked across the key
+/// names the licensed endpoints are known to use (`url`, `streamUrl`,
+/// `hlsUrl`, sometimes nested under `urls` / `playbackUrls` / `streams`).
+String? _firstUrlIn(Map<String, dynamic> body) {
+  for (final key in const <String>['url', 'streamUrl', 'hlsUrl', 'playbackUrl']) {
+    final value = _asString(body[key]);
+    if (value != null && value.startsWith('http')) return value;
+  }
+  for (final key in const <String>['urls', 'playbackUrls', 'streams']) {
+    final entries = _asList(body[key]);
+    if (entries == null) continue;
+    for (final entry in entries) {
+      final direct = _asString(entry);
+      if (direct != null && direct.startsWith('http')) return direct;
+      final nested = _asMap(entry);
+      if (nested == null) continue;
+      for (final key in const <String>['url', 'streamUrl', 'hlsUrl']) {
+        final value = _asString(nested[key]);
+        if (value != null && value.startsWith('http')) return value;
+      }
+    }
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Provider 2 — YouTube / YouTube Music: direct audio stream resolution via
 // youtube_explode_dart. This is also the engine that powers the universal
@@ -420,7 +498,17 @@ int scoreSoundCloudResult({
 class YouTubeStreamHandler extends StreamProviderHandler {
   final yt.YoutubeExplode _youtube;
 
-  YouTubeStreamHandler(this._youtube);
+  /// Optional adaptive-bitrate policy. When set, the audio-only ladder is
+  /// walked against the current bandwidth estimate (see [bandwidthProvider])
+  /// instead of blindly taking the highest rung — a 2G link then gets a
+  /// 48kbps Opus stream that plays, rather than a 160kbps one that stalls.
+  AdaptiveBitrateSelector? bitrateSelector;
+
+  /// Supplies the latest throughput estimate in bytes/second (from the
+  /// engine's [BandwidthMonitor]); null when nothing has been measured yet.
+  int Function()? bandwidthProvider;
+
+  YouTubeStreamHandler(this._youtube, {this.bitrateSelector, this.bandwidthProvider});
 
   @override
   StreamProviderInfo get info => StreamProviderInfo.of(StreamProviderId.youtube);
@@ -493,7 +581,38 @@ class YouTubeStreamHandler extends StreamProviderHandler {
       return bAac.compareTo(aAac);
     });
 
-    final best = audioStreams.first;
+    var best = audioStreams.first;
+    // Adaptive bitrate: with a measured throughput the ladder walks down to
+    // the highest rung the link can actually sustain. Without a measurement
+    // (or without a selector) the behaviour is unchanged: highest rung wins.
+    final selector = bitrateSelector;
+    if (selector != null) {
+      final variants = audioStreams
+          .map(
+            (stream) => StreamVariant(
+              uri: stream.url.toString(),
+              bitrateKbps: (stream.bitrate.bitsPerSecond / 1000).round(),
+              codec: stream.audioCodec,
+              container: stream.container.name,
+            ),
+          )
+          .toList(growable: false);
+      final decision = selector.select(
+        variants,
+        measuredBytesPerSecond: bandwidthProvider?.call(),
+      );
+      final target = decision.targetKbps;
+      if (target != null) {
+        // `audioStreams` is sorted high → low, so the first rung at or below
+        // the target is the best sustainable one.
+        for (final stream in audioStreams) {
+          if ((stream.bitrate.bitsPerSecond / 1000).round() <= target) {
+            best = stream;
+            break;
+          }
+        }
+      }
+    }
     final kbps = (best.bitrate.bitsPerSecond / 1000).round();
     final codecLabel = best.audioCodec.toLowerCase().contains('opus')
         ? 'Opus'
@@ -564,10 +683,38 @@ class AppleMusicStreamHandler extends StreamProviderHandler {
     if (request.isrc != null && isrc != null && isrc != request.isrc) {
       return null;
     }
-    // Apple stream URLs are minted through the licensed playback endpoint;
-    // without a playback-session token we surface the metadata match and let
-    // the fallback engine deliver audio.
-    _log.i('Apple Music: matched "${attributes['name']}" (stream token needed)');
+    // Full ALAC playback is minted by Apple's licensed playback endpoint and
+    // is not available to third-party API clients. What *is* available through
+    // the catalog API is the official 30-second preview (`previews[].url`), so
+    // an authorized caller gets a real Apple-hosted stream instead of a
+    // metadata match that can never play.
+    final previews = attributes['previews'] as List<dynamic>?;
+    for (final raw in previews ?? const <dynamic>[]) {
+      final preview = raw as Map<String, dynamic>?;
+      final url = preview?['url'] as String?;
+      if (url == null || url.isEmpty) continue;
+      final uri = Uri.tryParse(url);
+      if (uri == null || !uri.isScheme('HTTPS')) continue;
+      _log.i(
+        'Apple Music: preview stream for "${attributes['name']}" '
+        '(full ALAC needs the licensed playback endpoint)',
+      );
+      return ResolvedStream(
+        uri: uri,
+        provider: StreamProviderId.appleMusic,
+        qualityLabel: 'AAC 256kbps preview',
+        bitrateKbps: 256,
+        isPreview: true,
+        codec: 'aac',
+        expiresAt: DateTime.now().add(const Duration(hours: 6)),
+        matchedTitle: (attributes['name'] as String?) ?? request.title,
+        matchedArtist: (attributes['artistName'] as String?) ?? request.artist,
+      );
+    }
+    _log.i(
+      'Apple Music: matched "${attributes['name']}" but exposed no playable '
+      'URL; deferring to the fallback engine',
+    );
     return null;
   }
 }
@@ -747,27 +894,125 @@ class DeezerStreamHandler extends StreamProviderHandler {
       return null;
     }
     final preview = track['preview'] as String?;
-    if (arlToken == null || arlToken!.isEmpty) {
-      // Public 30s preview — better than nothing while the fallback runs.
-      if (preview == null || preview.isEmpty) return null;
-      return ResolvedStream(
-        uri: Uri.parse(preview),
+    final arl = arlToken;
+    if (arl != null && arl.isNotEmpty) {
+      final authenticated = await _resolveAuthenticated(track, arl, request);
+      if (authenticated != null) return authenticated;
+      _log.i(
+        'Deezer: no licensed stream for "${request.title}" on this account; '
+        'using the public preview',
+      );
+    }
+    // Public 30s preview — better than nothing while the fallback runs.
+    if (preview == null || preview.isEmpty) return null;
+    return ResolvedStream(
+      uri: Uri.parse(preview),
+      provider: StreamProviderId.deezer,
+      qualityLabel: 'MP3 128kbps preview',
+      bitrateKbps: 128,
+      isPreview: true,
+      codec: 'mp3',
+      matchedTitle: (track['title'] as String?) ?? request.title,
+      matchedArtist: (track['artist'] as Map<String, dynamic>?)?['name']
+          as String? ??
+          request.artist,
+    );
+  }
+
+  /// Licensed FLAC/320 resolution through Deezer's gateway.
+  ///
+  /// The gateway is the only surface that hands out full streams, and it
+  /// answers with an encrypted media path for every tier that is not
+  /// entitlement-free. This therefore probes it for a *directly playable*
+  /// URL and returns null when the account can only produce an encrypted
+  /// path — the caller then falls back to the public preview instead of
+  /// handing the player a URL it cannot decode.
+  Future<ResolvedStream?> _resolveAuthenticated(
+    Map<String, dynamic> track,
+    String arl,
+    StreamTrackRequest request,
+  ) async {
+    final sngId = track['id']?.toString();
+    if (sngId == null || sngId.isEmpty) return null;
+    final cookies = <String, String>{'Cookie': 'arl=$arl'};
+    try {
+      final pingUri = Uri.https('www.deezer.com', '/ajax/gw-light.php', {
+        'method': 'deezer.getUserData',
+        'input': '3',
+        'api_version': '1.0',
+        'api_token': '',
+      });
+      final pingBody = jsonDecode(
+        (await getJson(pingUri, headers: cookies)).body,
+      ) as Map<String, dynamic>;
+      final user = pingBody['results'] as Map<String, dynamic>?;
+      final token = (user?['checkForm'] as String?) ?? '';
+      if (token.isEmpty) {
+        // The ARL was rejected: this is a credential problem, not a missing
+        // track, so it is reported once and never retried in this session.
+        _log.i('Deezer: ARL rejected by the gateway');
+        return null;
+      }
+      final dataUri = Uri.https('www.deezer.com', '/ajax/gw-light.php', {
+        'method': 'song.getData',
+        'input': '3',
+        'api_version': '1.0',
+        'api_token': token,
+      });
+      final dataBody = jsonDecode(
+        (await postJson(
+          dataUri,
+          headers: cookies,
+          body: <String, String>{'sng_id': sngId},
+        )).body,
+      ) as Map<String, dynamic>;
+      final data = dataBody['results'] as Map<String, dynamic>?;
+      if (data == null) return null;
+      final url = _firstUrlIn(data);
+      final direct = data['MEDIA'];
+      final mediaUrl = direct is List ? direct : null;
+      if (mediaUrl != null) {
+        for (final raw in mediaUrl) {
+          final medium = raw as Map<String, dynamic>?;
+          final href = medium?['HREF'] as String?;
+          final format = (medium?['TYPE'] ?? medium?['FORMAT']) as String?;
+          if (href == null || !href.startsWith('http')) continue;
+          final isFlac = (format ?? '').toUpperCase().contains('FLAC');
+          return _streamFor(href, request, track, isFlac);
+        }
+      }
+      if (url != null) {
+        // `song.getData` only exposes a raw URL when the account's tier does
+        // not require path decryption.
+        final isFlac = url.toUpperCase().contains('FLAC');
+        return _streamFor(url, request, track, isFlac);
+      }
+      return null;
+    } catch (e) {
+      _log.i('Deezer gateway unavailable for "${request.title}": $e');
+      return null;
+    }
+  }
+
+  ResolvedStream _streamFor(
+    String url,
+    StreamTrackRequest request,
+    Map<String, dynamic> track,
+    bool isFlac,
+  ) =>
+      ResolvedStream(
+        uri: Uri.parse(url),
         provider: StreamProviderId.deezer,
-        qualityLabel: 'MP3 128kbps preview',
-        bitrateKbps: 128,
-        isPreview: true,
-        codec: 'mp3',
+        qualityLabel: isFlac ? 'FLAC 16-bit/44.1kHz' : 'MP3 320kbps',
+        bitrateKbps: isFlac ? 1411 : 320,
+        isLossless: isFlac,
+        codec: isFlac ? 'flac' : 'mp3',
+        expiresAt: DateTime.now().add(const Duration(hours: 1)),
         matchedTitle: (track['title'] as String?) ?? request.title,
         matchedArtist: (track['artist'] as Map<String, dynamic>?)?['name']
             as String? ??
             request.artist,
       );
-    }
-    // Licensed FLAC resolution happens through the authenticated gateway
-    // (track.read?with_seed → FLAC signed URL).
-    _log.i('Deezer: authenticated FLAC gateway not configured; using fallback');
-    return null;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -777,10 +1022,21 @@ class DeezerStreamHandler extends StreamProviderHandler {
 // Anonymous callers always defer to the universal fallback.
 // ---------------------------------------------------------------------------
 class AmazonMusicStreamHandler extends StreamProviderHandler {
-  AmazonMusicStreamHandler({this.bearerToken, this.deviceToken});
+  AmazonMusicStreamHandler({
+    this.bearerToken,
+    this.deviceToken,
+    this.marketplace = 'ATVPDKIKX0DER',
+  });
 
   final String? bearerToken;
   final String? deviceToken;
+
+  /// AMAPI marketplace id (`ATVPDKIKX0DER` = amazon.com).
+  final String marketplace;
+
+  /// Highest quality the AMAPI stream endpoint is asked for.
+  static const String _bitDepth = '24';
+  static const String _sampleRate = '192000';
 
   @override
   StreamProviderInfo get info =>
@@ -788,19 +1044,133 @@ class AmazonMusicStreamHandler extends StreamProviderHandler {
 
   @override
   Future<ResolvedStream?> resolve(StreamTrackRequest request) async {
-    if (bearerToken == null ||
-        bearerToken!.isEmpty ||
-        deviceToken == null ||
-        deviceToken!.isEmpty) {
+    final token = bearerToken;
+    final device = deviceToken;
+    if (token == null ||
+        token.isEmpty ||
+        device == null ||
+        device.isEmpty) {
       _log.i('Amazon Music: no AMAPI credentials; using fallback');
       return null;
     }
-    // https://api.music.amazon.dev/v1/search?... then
-    // /v1/playables/{id}/stream?bitDepth=24&sampleRate=192000 → HD FLAC URL.
-    // Credentials for AMAPI are provisioned through extensions; until present
-    // the fallback engine serves the track.
+    final headers = <String, String>{
+      'Authorization': 'Bearer $token',
+      'x-amz-music-device-token': device,
+      'x-amz-music-marketplace': marketplace,
+      'x-amz-music-customer-id': '',
+    };
+    try {
+      final searchUri = Uri.https('api.music.amazon.dev', '/v1/search', {
+        'query': request.searchQuery,
+        'type': 'TRACK',
+        'limit': '5',
+      });
+      final searchBody =
+          jsonDecode((await getJson(searchUri, headers: headers)).body)
+              as Map<String, dynamic>;
+      final trackId = _firstTrackId(searchBody);
+      if (trackId == null) {
+        _log.i('Amazon Music: no catalog match for "${request.title}"');
+        return null;
+      }
+      final streamUri = Uri.https(
+        'api.music.amazon.dev',
+        '/v1/playables/$trackId/stream',
+        <String, String>{
+          'bitDepth': _bitDepth,
+          'sampleRate': _sampleRate,
+        },
+      );
+      final streamBody =
+          jsonDecode((await getJson(streamUri, headers: headers)).body)
+              as Map<String, dynamic>;
+      final url = _firstUrlIn(streamBody);
+      if (url == null || url.isEmpty) {
+        _log.i(
+          'Amazon Music: no stream URL for "${request.title}" '
+          '(tier not entitled on this account)',
+        );
+        return null;
+      }
+      final bitDepth = streamBody['bitDepth']?.toString() ?? _bitDepth;
+      final sampleRate = streamBody['sampleRate']?.toString() ?? _sampleRate;
+      return ResolvedStream(
+        uri: Uri.parse(url),
+        provider: StreamProviderId.amazonMusic,
+        qualityLabel: 'FLAC Ultra HD $bitDepth-bit/'
+            '${(int.tryParse(sampleRate) ?? 192000) ~/ 1000}kHz',
+        isLossless: true,
+        codec: 'flac',
+        expiresAt: DateTime.now().add(const Duration(minutes: 30)),
+        matchedTitle: _firstTrackName(searchBody) ?? request.title,
+        matchedArtist: _firstArtistName(searchBody) ?? request.artist,
+      );
+    } catch (e) {
+      // AMAPI is device-entitlement gated: a 403 simply means this account
+      // cannot stream, which is a legitimate miss, not a resolution error.
+      _log.i('Amazon Music resolution unavailable for "${request.title}": $e');
+      return null;
+    }
+  }
+
+  /// Track items from an AMAPI search payload. The response nests results
+  /// under `results` → `tracks` → `items`; older deployments return a flat
+  /// `tracks` list, and both shapes are accepted.
+  static List<Map<String, dynamic>> _trackItems(Map<String, dynamic> body) {
+    final items = <Map<String, dynamic>>[];
+    for (final node in <Object?>[body['results'], body]) {
+      final container = _asMap(node);
+      if (container == null) continue;
+      final tracks = container['tracks'];
+      final trackMap = _asMap(tracks);
+      final direct = _asList(tracks);
+      for (final raw in <List<dynamic>?>[
+        direct,
+        if (trackMap != null) _asList(trackMap['items']),
+      ]) {
+        if (raw == null) continue;
+        for (final entry in raw) {
+          final map = _asMap(entry);
+          if (map != null) items.add(map);
+        }
+      }
+    }
+    return items;
+  }
+
+  /// Pulls the first playable track id out of an AMAPI search payload.
+  static String? _firstTrackId(Map<String, dynamic> body) {
+    for (final track in _trackItems(body)) {
+      final id = _asString(track['id']) ?? _asString(track['trackId']);
+      if (id != null && id.isNotEmpty) return id;
+    }
     return null;
   }
+
+  static String? _firstTrackName(Map<String, dynamic> body) {
+    for (final track in _trackItems(body)) {
+      final name = _asString(track['name']) ?? _asString(track['title']);
+      if (name != null && name.isNotEmpty) return name;
+    }
+    return null;
+  }
+
+  static String? _firstArtistName(Map<String, dynamic> body) {
+    for (final track in _trackItems(body)) {
+      final artists = _asList(track['artists']);
+      if (artists != null) {
+        for (final raw in artists) {
+          final artist = _asMap(raw);
+          final name = artist == null ? null : _asString(artist['name']);
+          if (name != null && name.isNotEmpty) return name;
+        }
+      }
+      final display = _asString(track['artistName']);
+      if (display != null && display.isNotEmpty) return display;
+    }
+    return null;
+  }
+
 }
 
 // ---------------------------------------------------------------------------
@@ -949,25 +1319,441 @@ class SoundCloudStreamHandler extends StreamProviderHandler {
 }
 
 // ---------------------------------------------------------------------------
-// The service: orchestrates handlers, resolution order, the result cache and
-// the universal fallback engine.
+// Provider health
+// ---------------------------------------------------------------------------
+
+/// Live health record for one provider, fed by *real* resolution attempts
+/// (not by synthetic pings): every success and failure observed while the app
+/// is in use updates it.
+///
+/// Health is per-process state, intentionally not persisted: a fresh session
+/// deserves a fresh start, and a stale "provider is down" flag would
+/// permanently hide a service that recovered.
+class StreamProviderHealth {
+  const StreamProviderHealth({
+    required this.provider,
+    this.successCount = 0,
+    this.failureCount = 0,
+    this.consecutiveFailures = 0,
+    this.lastLatencyMs,
+    this.lastSuccessAt,
+    this.lastFailureAt,
+    this.cooldownUntil,
+    this.lastError,
+  });
+
+  final StreamProviderId provider;
+
+  final int successCount;
+  final int failureCount;
+
+  /// Failures since the last success — the value the cooldown is derived from.
+  final int consecutiveFailures;
+
+  final int? lastLatencyMs;
+  final DateTime? lastSuccessAt;
+  final DateTime? lastFailureAt;
+
+  /// When the provider may be tried again after repeated failures.
+  final DateTime? cooldownUntil;
+
+  final String? lastError;
+
+  static const int _maxCooldownSeconds = 15 * 60;
+
+  double get successRate {
+    final total = successCount + failureCount;
+    if (total == 0) return 1.0;
+    return successCount / total;
+  }
+
+  /// Whether the provider is currently eligible for resolution attempts.
+  bool isAvailable(DateTime now) {
+    final cooldown = cooldownUntil;
+    if (cooldown == null) return true;
+    return !now.isBefore(cooldown);
+  }
+
+  /// Seconds left on the cooldown (0 when available).
+  int cooldownRemainingSeconds(DateTime now) {
+    final cooldown = cooldownUntil;
+    if (cooldown == null) return 0;
+    final remaining = cooldown.difference(now).inSeconds;
+    return remaining > 0 ? remaining : 0;
+  }
+
+  StreamProviderHealth recordSuccess({required int? latencyMs, DateTime? now}) =>
+      StreamProviderHealth(
+        provider: provider,
+        successCount: successCount + 1,
+        failureCount: failureCount,
+        consecutiveFailures: 0,
+        lastLatencyMs: latencyMs ?? lastLatencyMs,
+        lastSuccessAt: now ?? DateTime.now(),
+        lastFailureAt: lastFailureAt,
+        cooldownUntil: null,
+        lastError: null,
+      );
+
+  StreamProviderHealth recordFailure({
+    required String error,
+    int? latencyMs,
+    DateTime? now,
+  }) {
+    final current = now ?? DateTime.now();
+    final failures = consecutiveFailures + 1;
+    final backoffSeconds = math.min(
+      _maxCooldownSeconds,
+      1 << math.min(failures, 8),
+    );
+    return StreamProviderHealth(
+      provider: provider,
+      successCount: successCount,
+      failureCount: failureCount + 1,
+      consecutiveFailures: failures,
+      lastLatencyMs: latencyMs ?? lastLatencyMs,
+      lastSuccessAt: lastSuccessAt,
+      lastFailureAt: current,
+      cooldownUntil: failures < 2
+          ? null
+          : current.add(Duration(seconds: backoffSeconds)),
+      lastError: error,
+    );
+  }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'provider': provider.name,
+    'success_count': successCount,
+    'failure_count': failureCount,
+    'consecutive_failures': consecutiveFailures,
+    if (lastLatencyMs != null) 'last_latency_ms': lastLatencyMs,
+    if (lastSuccessAt != null)
+      'last_success_at': lastSuccessAt!.toUtc().toIso8601String(),
+    if (lastFailureAt != null)
+      'last_failure_at': lastFailureAt!.toUtc().toIso8601String(),
+    if (cooldownUntil != null)
+      'cooldown_until': cooldownUntil!.toUtc().toIso8601String(),
+    if (lastError != null) 'last_error': lastError,
+  };
+}
+
+/// Health rows for every provider, with bounded memory and a hard cooldown
+/// policy so a dead provider cannot stall every play request.
+class StreamProviderHealthRegistry {
+  final Map<StreamProviderId, StreamProviderHealth> _health =
+      <StreamProviderId, StreamProviderHealth>{};
+
+  StreamProviderHealth of(StreamProviderId id) =>
+      _health[id] ?? StreamProviderHealth(provider: id);
+
+  bool isAvailable(StreamProviderId id, {DateTime? now}) =>
+      of(id).isAvailable(now ?? DateTime.now());
+
+  int cooldownRemainingSeconds(StreamProviderId id, {DateTime? now}) =>
+      of(id).cooldownRemainingSeconds(now ?? DateTime.now());
+
+  int consecutiveFailures(StreamProviderId id) => of(id).consecutiveFailures;
+
+  void recordSuccess(StreamProviderId id, {int? latencyMs, DateTime? now}) {
+    _health[id] = of(id).recordSuccess(latencyMs: latencyMs, now: now);
+  }
+
+  void recordFailure(
+    StreamProviderId id, {
+    required String error,
+    int? latencyMs,
+    DateTime? now,
+  }) {
+    _health[id] = of(
+      id,
+    ).recordFailure(error: error, latencyMs: latencyMs, now: now);
+  }
+
+  void reset(StreamProviderId id) {
+    _health[id] = StreamProviderHealth(provider: id);
+  }
+
+  void resetAll() => _health.clear();
+
+  /// Immutable snapshot ordered by provider id (stable for the UI).
+  List<StreamProviderHealth> snapshot() {
+    final ids = _health.keys.toList(growable: false)
+      ..sort((a, b) => a.name.compareTo(b.name));
+    return List<StreamProviderHealth>.unmodifiable(ids.map(of));
+  }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'providers': snapshot().map((h) => h.toJson()).toList(growable: false),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Stream validation
+// ---------------------------------------------------------------------------
+
+/// Outcome of checking that a resolved URL is actually playable.
+class StreamValidationResult {
+  const StreamValidationResult({
+    required this.ok,
+    this.statusCode,
+    this.contentType,
+    this.contentLengthBytes,
+    this.latencyMs,
+    this.error,
+  });
+
+  final bool ok;
+  final int? statusCode;
+  final String? contentType;
+  final int? contentLengthBytes;
+  final int? latencyMs;
+  final String? error;
+
+  static const StreamValidationResult unsupportedScheme =
+      StreamValidationResult(ok: false, error: 'Unsupported URI scheme');
+
+  /// Cheap guard against HTML error pages served with a 200 status.
+  static bool isPlausibleAudioContentType(String? contentType) {
+    final value = contentType?.trim().toLowerCase() ?? '';
+    if (value.isEmpty) return true; // Unknown is fine; never a hard failure.
+    if (value.startsWith('text/html') || value.startsWith('application/json')) {
+      return false;
+    }
+    return true;
+  }
+
+  @override
+  String toString() =>
+      'StreamValidationResult(ok: $ok, status: $statusCode, error: $error)';
+}
+
+/// Validates a resolved stream before it reaches the audio engine.
+abstract class StreamValidator {
+  Future<StreamValidationResult> validate(ResolvedStream stream);
+}
+
+/// Default validator: a single-byte ranged GET.
+///
+/// A full download would defeat the purpose (and violate provider terms), so
+/// the check only proves that the URL responds, is not an HTML error page, and
+/// reports a plausible audio payload.
+class HttpStreamValidator implements StreamValidator {
+  HttpStreamValidator({http.Client? client, this.timeout = const Duration(seconds: 10)})
+    : _client = client ?? http.Client();
+
+  final http.Client _client;
+  final Duration timeout;
+
+  @override
+  Future<StreamValidationResult> validate(ResolvedStream stream) async {
+    final uri = stream.uri;
+    if (!uri.isScheme('HTTP') && !uri.isScheme('HTTPS')) {
+      return StreamValidationResult.unsupportedScheme;
+    }
+    final stopwatch = Stopwatch()..start();
+    try {
+      final request =
+          http.Request('GET', uri)
+            ..headers['Range'] = 'bytes=0-0'
+            ..headers['Accept'] = 'audio/*, application/octet-stream';
+      final response = await _client.send(request).timeout(
+        timeout,
+        onTimeout: () => throw TimeoutException('stream validation timed out'),
+      );
+      stopwatch.stop();
+      // Drain a single chunk: never buffer the payload.
+      unawaited(
+        response.stream.take(1).drain<void>().catchError((Object _) {}),
+      );
+      final status = response.statusCode;
+      if (status < 200 || status >= 400) {
+        return StreamValidationResult(
+          ok: false,
+          statusCode: status,
+          latencyMs: stopwatch.elapsedMilliseconds,
+          error: 'HTTP $status',
+        );
+      }
+      final contentType = response.headers['content-type'];
+      if (!StreamValidationResult.isPlausibleAudioContentType(contentType)) {
+        return StreamValidationResult(
+          ok: false,
+          statusCode: status,
+          contentType: contentType,
+          latencyMs: stopwatch.elapsedMilliseconds,
+          error: 'Unexpected content type: $contentType',
+        );
+      }
+      final rawLength = response.headers['content-length'];
+      return StreamValidationResult(
+        ok: true,
+        statusCode: status,
+        contentType: contentType,
+        contentLengthBytes: rawLength == null ? null : int.tryParse(rawLength),
+        latencyMs: stopwatch.elapsedMilliseconds,
+      );
+    } on TimeoutException {
+      stopwatch.stop();
+      return StreamValidationResult(
+        ok: false,
+        latencyMs: stopwatch.elapsedMilliseconds,
+        error: 'Timed out',
+      );
+    } catch (e) {
+      stopwatch.stop();
+      return StreamValidationResult(
+        ok: false,
+        latencyMs: stopwatch.elapsedMilliseconds,
+        error: e.toString(),
+      );
+    }
+  }
+
+  void dispose() => _client.close();
+}
+
+// ---------------------------------------------------------------------------
+// Resolution cache
+// ---------------------------------------------------------------------------
+
+class _CacheEntry {
+  _CacheEntry.positive(this.stream)
+    : error = null,
+      storedAt = DateTime.now();
+
+  _CacheEntry.negative(this.error)
+    : stream = null,
+      storedAt = DateTime.now();
+
+  final ResolvedStream? stream;
+  final String? error;
+  final DateTime storedAt;
+
+  bool get isPositive => stream != null;
+
+  bool isExpired(DateTime now, {Duration? negativeTtl}) {
+    if (isPositive) {
+      final expiry = stream!.expiresAt;
+      if (expiry == null) {
+        // Unknown expiry: CDN URLs still rotate, so hold them for 30 minutes.
+        return now.difference(storedAt) > const Duration(minutes: 30);
+      }
+      // Refresh slightly early so a track that starts right at the boundary
+      // never plays a URL that expires mid-buffer.
+      return now.isAfter(expiry.subtract(const Duration(minutes: 5)));
+    }
+    return now.difference(storedAt) > (negativeTtl ?? const Duration(seconds: 45));
+  }
+}
+
+/// Bounded LRU cache of resolved streams, with negative caching and an
+/// explicit invalidation API used by the recovery paths.
+///
+/// Positive entries expire with the signed URL they carry (or after a
+/// conservative 30 minutes when the provider does not publish an expiry).
+/// Negative entries ("this track has no source on this provider") are kept
+/// briefly so a scrolling list cannot hammer a provider with doomed requests.
+class StreamResolutionCache {
+  StreamResolutionCache({
+    this.maxEntries = 128,
+    this.negativeTtl = const Duration(seconds: 45),
+    DateTime Function()? clock,
+  }) : _clock = clock ?? DateTime.now;
+
+  final int maxEntries;
+  final Duration negativeTtl;
+  final DateTime Function() _clock;
+
+  final LinkedHashMap<String, _CacheEntry> _entries = LinkedHashMap<String, _CacheEntry>();
+
+  int get length => _entries.length;
+
+  Iterable<String> get keys => List<String>.unmodifiable(_entries.keys);
+
+  /// Cached stream for [key], or null when absent/expired. Touches the entry
+  /// so hot keys survive eviction.
+  ResolvedStream? get(String key) {
+    final entry = _entries.remove(key);
+    if (entry == null) return null;
+    if (!entry.isPositive || entry.isExpired(_clock(), negativeTtl: negativeTtl)) {
+      return null;
+    }
+    _entries[key] = entry;
+    return entry.stream;
+  }
+
+  /// Error message of a cached failure, or null when the key is not
+  /// negatively cached (or the entry expired).
+  String? negativeError(String key) {
+    final entry = _entries[key];
+    if (entry == null || entry.isPositive) return null;
+    if (entry.isExpired(_clock(), negativeTtl: negativeTtl)) return null;
+    return entry.error;
+  }
+
+  void put(String key, ResolvedStream stream) {
+    _entries.remove(key);
+    _entries[key] = _CacheEntry.positive(stream);
+    _evict();
+  }
+
+  void putNegative(String key, String error) {
+    _entries.remove(key);
+    _entries[key] = _CacheEntry.negative(error);
+    _evict();
+  }
+
+  void invalidate(String key) => _entries.remove(key);
+
+  void clear() => _entries.clear();
+
+  void _evict() {
+    while (_entries.length > maxEntries) {
+      _entries.remove(_entries.keys.first);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The service: orchestrates handlers, health, resolution order, validation,
+// the result cache and the universal fallback engine.
 // ---------------------------------------------------------------------------
 class MultiProviderStreamService {
   final yt.YoutubeExplode _youtube;
   late final YouTubeStreamHandler _youTubeHandler;
   late final Map<StreamProviderId, StreamProviderHandler> _handlers;
-  final http.Client _httpClient;
+  late final http.Client _httpClient;
 
   /// Keyed by "provider|isrc-or-query"; signed URLs are cached until expiry.
-  final Map<String, _CachedResolution> _cache =
-      <String, _CachedResolution>{};
+  final StreamResolutionCache cache;
+
+  /// Live provider health, fed by every resolution attempt.
+  final StreamProviderHealthRegistry health;
+
+  /// Optional URL-check before a resolved stream is handed to the player.
+  late final StreamValidator? validator;
+
+  /// Coalesces concurrent resolutions of the same track so a scrolling list
+  /// (or a flaky UI retry) cannot trigger duplicate provider traffic.
+  final Map<String, Future<ResolvedStream>> _inFlight =
+      <String, Future<ResolvedStream>>{};
 
   MultiProviderStreamService({
     yt.YoutubeExplode? youtube,
     http.Client? httpClient,
     Map<StreamProviderId, StreamProviderHandler>? overrides,
+    StreamResolutionCache? cache,
+    StreamProviderHealthRegistry? health,
+    StreamValidator? validator,
+    this.validateResolutions = true,
   }) : _youtube = youtube ?? yt.YoutubeExplode(),
-       _httpClient = httpClient ?? http.Client() {
+       cache = cache ?? StreamResolutionCache(),
+       health = health ?? StreamProviderHealthRegistry() {
+    // The validator shares the service's HTTP client so `dispose()` closes
+    // both with a single call (an implicit client would leak one per service).
+    final client = httpClient ?? http.Client();
+    _httpClient = client;
+    this.validator = validator ?? HttpStreamValidator(client: client);
     _youTubeHandler = YouTubeStreamHandler(_youtube);
     _handlers = <StreamProviderId, StreamProviderHandler>{
       StreamProviderId.spotify: SpotifyStreamHandler(),
@@ -983,89 +1769,219 @@ class MultiProviderStreamService {
     };
   }
 
+  /// Whether resolved URLs are validated before being returned. Enabled by
+  /// default: handing the audio engine a dead URL costs far more than the
+  /// single-byte ranged GET that proves it is alive.
+  final bool validateResolutions;
+
   StreamProviderHandler handlerFor(StreamProviderId id) => _handlers[id]!;
 
+  /// Publishes the adaptive-bitrate policy and the live bandwidth estimate to
+  /// every provider that exposes a bitrate ladder (YouTube Music today).
+  ///
+  /// Cheap and idempotent: the engine calls it before each candidate
+  /// resolution so the ladder always reflects the latest throughput sample.
+  void configureAdaptiveBitrate({
+    required AdaptiveBitrateSelector selector,
+    required int Function() bandwidthProvider,
+  }) {
+    for (final handler in _handlers.values) {
+      if (handler is YouTubeStreamHandler) {
+        handler.bitrateSelector = selector;
+        handler.bandwidthProvider = bandwidthProvider;
+      }
+    }
+  }
+
   String _cacheKey(StreamProviderId provider, StreamTrackRequest request) {
-    final identity = request.isrc ??
-        '${request.title}|${request.artist}'.toLowerCase();
+    final identity =
+        request.isrc ?? '${request.title}|${request.artist}'.toLowerCase();
     return '${provider.name}|$identity';
+  }
+
+  /// Ordered failover chain for [request].
+  ///
+  /// The preferred provider leads, then the two anonymous providers that can
+  /// always serve a track without credentials (YouTube Music, SoundCloud),
+  /// then the preview-only catalogs as a last resort. Providers that require
+  /// credentials are kept in the chain: they either resolve (credentials were
+  /// supplied via an extension) or return null immediately.
+  List<StreamProviderId> failoverChain(StreamProviderId preferred) {
+    final chain = <StreamProviderId>[
+      preferred,
+      StreamProviderId.youtube,
+      StreamProviderId.soundCloud,
+      StreamProviderId.deezer,
+      StreamProviderId.spotify,
+      StreamProviderId.appleMusic,
+      StreamProviderId.tidal,
+      StreamProviderId.qobuz,
+      StreamProviderId.amazonMusic,
+    ];
+    final seen = <StreamProviderId>{};
+    return chain.where(seen.add).toList(growable: false);
+  }
+
+  /// Drops the cached resolution for [request] (all providers when
+  /// [provider] is omitted). Called by the recovery paths so a dead URL is
+  /// never replayed from cache.
+  void invalidate(
+    StreamTrackRequest request, [
+    StreamProviderId? provider,
+  ]) {
+    if (provider != null) {
+      cache.invalidate(_cacheKey(provider, request));
+      return;
+    }
+    for (final id in StreamProviderId.values) {
+      cache.invalidate(_cacheKey(id, request));
+    }
   }
 
   /// Resolves a playable stream.
   ///
   /// Order:
-  ///   1. [preferredProvider] (if given) — e.g. the chip the user tapped.
-  ///   2. Universal fallback engine: YouTube matched by ISRC or
+  ///   1. The resolution cache (positive hits return immediately).
+  ///   2. [preferredProvider] (if given) — e.g. the chip the user tapped.
+  ///   3. Universal fallback engine: YouTube matched by ISRC or
   ///      "Title + Artist" (YouTube always works without credentials).
-  ///   3. SoundCloud as a secondary anonymous fallback.
+  ///   4. SoundCloud as a secondary anonymous fallback.
+  ///   5. Preview-only catalogs (Deezer, Spotify, Apple) when [allowPreview]
+  ///      is set — otherwise they count as a miss like any other.
+  ///
+  /// Providers in a health cooldown are skipped; the chain is still attempted
+  /// end-to-end once all candidates are cooling down, so a temporary outage
+  /// degrades to "try everything" instead of "silently fail".
   Future<ResolvedStream> resolveStream(
     StreamTrackRequest request, {
     StreamProviderId? preferredProvider,
+    bool allowPreview = false,
+    bool? validate,
   }) async {
     final preferred = preferredProvider ?? StreamProviderId.youtube;
     final cacheKey = _cacheKey(preferred, request);
-    final cached = _cache[cacheKey];
-    if (cached != null && !cached.isExpired) {
-      return cached.stream;
+
+    final cached = cache.get(cacheKey);
+    if (cached != null && (allowPreview || !cached.isPreview)) {
+      return cached;
     }
 
-    if (preferred != StreamProviderId.youtube) {
-      try {
-        final resolved = await _handlers[preferred]?.resolve(request);
-        if (resolved != null && !_isUnplayablePreview(resolved)) {
-          _cache[cacheKey] = _CachedResolution(resolved);
-          return resolved;
-        }
-        _log.i(
-          '${preferred.name} did not yield a full stream for '
-          '"${request.title}"; engaging universal fallback engine',
-        );
-      } catch (e) {
-        _log.w('${preferred.name} resolution failed: $e; using fallback');
-      }
+    final negative = cache.negativeError(cacheKey);
+    if (negative != null) {
+      throw StreamResolutionException(negative);
     }
 
-    // Universal fallback engine — YouTube Explode matched on ISRC (YouTube
-    // Music exposes ISRC via its catalog; a title+artist query is the robust
-    // key) or "Title + Artist".
-    try {
-      final fallback = await _youTubeHandler.resolve(request);
-      if (fallback != null) {
-        final annotated = fallback.viaFallback
-            ? fallback
-            : _withFallbackFlag(fallback, preferred);
-        _cache[cacheKey] = _CachedResolution(annotated);
-        return annotated;
-      }
-    } catch (e) {
-      _log.w('Universal YouTube fallback failed: $e');
-    }
+    final inFlight = _inFlight[cacheKey];
+    if (inFlight != null) return inFlight;
 
-    // Secondary anonymous fallback: SoundCloud progressive streams.
-    if (preferred != StreamProviderId.soundCloud) {
-      try {
-        final sc = await _handlers[StreamProviderId.soundCloud]?.resolve(
-          request,
-        );
-        if (sc != null) {
-          final annotated = _withFallbackFlag(sc, preferred);
-          _cache[cacheKey] = _CachedResolution(annotated);
-          return annotated;
-        }
-      } catch (e) {
-        _log.w('SoundCloud secondary fallback failed: $e');
-      }
-    }
-
-    throw StreamResolutionException(
-      'No playable stream for "${request.title}" by ${request.artist} '
-      'across any provider',
+    final future = _resolveChain(
+      request,
+      preferred: preferred,
+      allowPreview: allowPreview,
+      validate: validate ?? validateResolutions,
     );
+    _inFlight[cacheKey] = future;
+    try {
+      return await future;
+    } finally {
+      if (identical(_inFlight[cacheKey], future)) {
+        _inFlight.remove(cacheKey);
+      }
+    }
   }
 
-  /// Previews from Spotify/Deezer are 30-second clips; when the user asked for
-  /// a full stream they count as a miss and the fallback engine engages.
-  bool _isUnplayablePreview(ResolvedStream stream) => stream.isPreview;
+  Future<ResolvedStream> _resolveChain(
+    StreamTrackRequest request, {
+    required StreamProviderId preferred,
+    required bool allowPreview,
+    required bool validate,
+  }) async {
+    final chain = failoverChain(preferred);
+    final now = DateTime.now();
+    final healthy = chain
+        .where((id) => health.isAvailable(id, now: now))
+        .toList(growable: false);
+    // Never skip everything: if every provider is cooling down, retry them all
+    // rather than failing a track the user can plainly hear elsewhere.
+    final order = healthy.isNotEmpty ? healthy : chain;
+
+    Object? lastError;
+    for (final provider in order) {
+      final handler = _handlers[provider];
+      if (handler == null) continue;
+      final stopwatch = Stopwatch()..start();
+      try {
+        final resolved = await handler.resolve(request);
+        stopwatch.stop();
+        if (resolved == null) {
+          // "No match / no credentials" is not a provider failure: it is a
+          // legitimate miss and must not put the provider in a cooldown.
+          _log.d('${provider.name}: no candidate for "${request.title}"');
+          continue;
+        }
+        if (resolved.isPreview && !allowPreview) {
+          _log.i(
+            '${provider.name} only offers a preview for "${request.title}"; '
+            'continuing down the chain',
+          );
+          continue;
+        }
+        if (validate && validator != null) {
+          final validation = await validator!.validate(resolved);
+          if (!validation.ok) {
+            stopwatch.stop();
+            health.recordFailure(
+              provider,
+              error: validation.error ?? 'validation failed',
+              latencyMs: validation.latencyMs ?? stopwatch.elapsedMilliseconds,
+            );
+            _log.w(
+              '${provider.name} stream failed validation for '
+              '"${request.title}": ${validation.error}',
+            );
+            lastError = StreamResolutionException(
+              '${provider.name}: ${validation.error}',
+            );
+            continue;
+          }
+        }
+        health.recordSuccess(
+          provider,
+          latencyMs: stopwatch.elapsedMilliseconds,
+        );
+        final annotated = provider == preferred
+            ? resolved
+            : _withFallbackFlag(resolved, preferred);
+        cache.put(_cacheKey(preferred, request), annotated);
+        return annotated;
+      } on StreamResolutionException catch (e) {
+        lastError = e;
+        health.recordFailure(
+          provider,
+          error: e.message,
+          latencyMs: stopwatch.elapsedMilliseconds,
+        );
+        _log.w('${provider.name} resolution failed: ${e.message}');
+      } catch (e) {
+        lastError = e;
+        health.recordFailure(
+          provider,
+          error: e.toString(),
+          latencyMs: stopwatch.elapsedMilliseconds,
+        );
+        _log.w('${provider.name} resolution failed: $e');
+      }
+    }
+
+    final message =
+        'No playable stream for "${request.title}" by ${request.artist} '
+        'across any provider';
+    cache.putNegative(
+      _cacheKey(preferred, request),
+      lastError?.toString() ?? message,
+    );
+    throw StreamResolutionException(message, cause: lastError);
+  }
 
   ResolvedStream _withFallbackFlag(
     ResolvedStream stream,
@@ -1091,36 +2007,99 @@ class MultiProviderStreamService {
   void dispose() {
     _youtube.close();
     _httpClient.close();
-    _cache.clear();
+    cache.clear();
   }
 }
 
-class _CachedResolution {
-  final ResolvedStream stream;
-  final DateTime cachedAt;
+// ---------------------------------------------------------------------------
+// Playback resume + recovery
+// ---------------------------------------------------------------------------
 
-  _CachedResolution(this.stream) : cachedAt = DateTime.now();
+/// Where a stream left off, saved so a killed app, a failover, or a URL
+/// refresh can continue instead of restarting.
+class StreamResumePoint {
+  const StreamResumePoint({
+    required this.trackId,
+    required this.position,
+    required this.savedAt,
+  });
 
-  bool get isExpired {
-    final expiry = stream.expiresAt;
-    if (expiry == null) {
-      // Unknown expiry: YouTube/SoundCloud URLs still rotate; hold 30 minutes.
-      return DateTime.now().difference(cachedAt) >
-          const Duration(minutes: 30);
-    }
-    return DateTime.now().isAfter(expiry.subtract(const Duration(minutes: 5)));
-  }
+  final String trackId;
+  final Duration position;
+  final DateTime savedAt;
+
+  bool isFresh(Duration maxAge, DateTime now) =>
+      now.difference(savedAt) <= maxAge;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'track_id': trackId,
+    'position_ms': position.inMilliseconds,
+    'saved_at': savedAt.toUtc().toIso8601String(),
+  };
+
+  factory StreamResumePoint.fromJson(Map<String, dynamic> json) =>
+      StreamResumePoint(
+        trackId: json['track_id']?.toString() ?? '',
+        position: Duration(
+          milliseconds: (json['position_ms'] as num?)?.toInt() ?? 0,
+        ),
+        savedAt:
+            DateTime.tryParse(json['saved_at']?.toString() ?? '') ??
+            DateTime.fromMillisecondsSinceEpoch(0),
+      );
+
+  @override
+  String toString() => 'StreamResumePoint($trackId @ ${position.inSeconds}s)';
 }
 
 // ---------------------------------------------------------------------------
 // just_audio playback binding — the streaming half of the dual-mode engine.
 // The download half (native FLAC pipeline, SAF, extensions) is untouched.
+//
+// On top of plain playback the binding owns three recovery loops:
+//   * **buffering recovery** — a stall longer than the policy's timeout
+//     re-resolves the URL and resumes at the last known position;
+//   * **expiry recovery** — a signed URL is refreshed *before* it expires,
+//     so a 6-hour YouTube URL never dies mid-track;
+//   * **resume support** — positions are recorded per track and replayed by
+//     [play] (and by the recovery paths) so nothing restarts at 0:00.
 // ---------------------------------------------------------------------------
 class MultiProviderPlayer {
-  final MultiProviderStreamService service;
-  final AudioPlayer _player = AudioPlayer();
+  MultiProviderPlayer(
+    this.service, {
+    AudioPlayer? player,
+    StreamRecoveryPolicy recoveryPolicy = const StreamRecoveryPolicy(),
+    this.maxTrackedResumePoints = 64,
+  }) : _player = player ?? AudioPlayer(),
+       recoveryPolicy = recoveryPolicy {
+    _budget = StreamRecoveryBudget(policy: recoveryPolicy);
+  }
 
-  MultiProviderPlayer(this.service);
+  final MultiProviderStreamService service;
+  final AudioPlayer _player;
+
+  /// Stall/expiry/error recovery knobs (pure policy, unit-testable).
+  final StreamRecoveryPolicy recoveryPolicy;
+
+  /// Upper bound on remembered resume points.
+  final int maxTrackedResumePoints;
+
+  StreamSubscription<PlayerState>? _stateSub;
+  StreamSubscription<Duration>? _positionSub;
+  Timer? _stallTimer;
+  Timer? _expiryTimer;
+
+  StreamTrackRequest? _currentRequest;
+  ResolvedStream? _currentStream;
+  Duration _lastPosition = Duration.zero;
+  bool _disposed = false;
+  bool _recovering = false;
+  late final StreamRecoveryBudget _budget;
+  final LinkedHashMap<String, StreamResumePoint> _resumePoints =
+      LinkedHashMap<String, StreamResumePoint>();
+
+  /// Notified after every recovery attempt (diagnostics / UI messaging).
+  void Function(String message)? onRecovery;
 
   AudioPlayer get audioPlayer => _player;
 
@@ -1129,24 +2108,247 @@ class MultiProviderPlayer {
   Stream<Duration?> get durationStream => _player.durationStream;
   bool get isPlaying => _player.playing;
 
+  /// The stream currently loaded (null before the first [play]).
+  ResolvedStream? get currentStream => _currentStream;
+
+  /// Last resume point recorded for [trackId], when still fresh.
+  StreamResumePoint? resumePointFor(
+    String trackId, {
+    Duration maxAge = const Duration(days: 7),
+  }) {
+    final point = _resumePoints[trackId];
+    if (point == null) return null;
+    return point.isFresh(maxAge, DateTime.now()) ? point : null;
+  }
+
+  Map<String, StreamResumePoint> get resumePoints =>
+      Map<String, StreamResumePoint>.unmodifiable(_resumePoints);
+
   /// Resolves [request] via [provider] (or the fallback chain) and starts
-  /// playback immediately.
+  /// playback immediately, optionally resuming at [startAt].
   Future<ResolvedStream> play(
     StreamTrackRequest request, {
     StreamProviderId? provider,
+    Duration? startAt,
   }) async {
-    final resolved = await service.resolveStream(request, preferredProvider: provider);
+    if (_disposed) {
+      throw StateError('MultiProviderPlayer has been disposed');
+    }
+    final trackId = _trackIdFor(request);
+    final resume = startAt ?? resumePointFor(trackId)?.position ?? Duration.zero;
+    final resolved = await service.resolveStream(
+      request,
+      preferredProvider: provider,
+    );
+    _currentRequest = request;
+    _currentStream = resolved;
+    _budget.reset();
+    _lastPosition = resume;
+    _attachWatchers();
     await _player.setUrl(resolved.uri.toString());
+    if (resume > Duration.zero) {
+      await _player.seek(resume);
+    }
     await _player.play();
+    _scheduleExpiryRefresh(resolved);
     return resolved;
   }
 
+  String _trackIdFor(StreamTrackRequest request) =>
+      request.isrc ??
+      '${request.title}|${request.artist}'.toLowerCase();
+
   Future<void> pause() => _player.pause();
+
   Future<void> resume() => _player.play();
-  Future<void> seek(Duration position) => _player.seek(position);
-  Future<void> stop() => _player.stop();
+
+  Future<void> seek(Duration position) {
+    _lastPosition = position;
+    return _player.seek(position);
+  }
+
+  Future<void> stop() async {
+    _cancelTimers();
+    await _player.stop();
+    _currentStream = null;
+    _currentRequest = null;
+  }
+
+  /// Records the current position for [trackId] so a later [play] resumes
+  /// where the listener left off.
+  Future<void> saveResumePoint(String trackId) async {
+    Duration position;
+    try {
+      position = _player.position;
+    } catch (_) {
+      position = _lastPosition;
+    }
+    if (position <= Duration.zero) return;
+    _resumePoints.remove(trackId);
+    _resumePoints[trackId] = StreamResumePoint(
+      trackId: trackId,
+      position: position,
+      savedAt: DateTime.now(),
+    );
+    while (_resumePoints.length > maxTrackedResumePoints) {
+      _resumePoints.remove(_resumePoints.keys.first);
+    }
+  }
+
+  void clearResumePoint(String trackId) => _resumePoints.remove(trackId);
+
+  void _attachWatchers() {
+    _stateSub ??= _player.playerStateStream.listen((state) {
+      if (state.processingState == ProcessingState.buffering) {
+        _stallTimer ??= Timer(
+          recoveryPolicy.stallTimeout,
+          () => unawaited(_recover(reason: 'buffering stall')),
+        );
+      } else {
+        _stallTimer?.cancel();
+        _stallTimer = null;
+      }
+    });
+    _positionSub ??= _player.positionStream.listen((position) {
+      _lastPosition = position;
+      final request = _currentRequest;
+      final seconds = position.inSeconds;
+      // Throttle resume writes: once every 5 seconds of playback is plenty
+      // and keeps the map churn (and its memory) bounded.
+      if (request != null && seconds > 0 && seconds % 5 == 0) {
+        unawaited(saveResumePoint(_trackIdFor(request)));
+      }
+    });
+  }
+
+  void _cancelTimers() {
+    _stallTimer?.cancel();
+    _stallTimer = null;
+    _expiryTimer?.cancel();
+    _expiryTimer = null;
+  }
+
+  void _scheduleExpiryRefresh(ResolvedStream stream) {
+    _expiryTimer?.cancel();
+    _expiryTimer = null;
+    final at = recoveryPolicy.nextRefreshAt(
+      stream.expiresAt,
+      previousExpiryRefreshes: _budget.expiryRefreshes,
+    );
+    if (at == null) return;
+    final delay = at.difference(DateTime.now());
+    _expiryTimer = Timer(
+      delay < Duration.zero ? Duration.zero : delay,
+      () => unawaited(_refreshBeforeExpiry()),
+    );
+  }
+
+  /// Proactive expiry recovery: mint a fresh URL while the current one is
+  /// still playing, then swap the source without losing the position.
+  Future<void> _refreshBeforeExpiry() async {
+    final request = _currentRequest;
+    final stream = _currentStream;
+    if (_disposed || request == null || stream == null) return;
+    final decision = recoveryPolicy.forExpiry(
+      _budget.context(
+        untilExpiry: _untilExpiry(stream),
+      ),
+      previousExpiryRefreshes: _budget.expiryRefreshes,
+    );
+    if (decision != StreamRecoveryAction.reResolve) return;
+    _budget.recordExpiryRefresh();
+    _log.i('Refreshing stream URL before expiry for "${request.title}"');
+    service.invalidate(request, stream.provider);
+    try {
+      final fresh = await service.resolveStream(
+        request,
+        preferredProvider: stream.provider,
+        allowPreview: stream.isPreview,
+      );
+      if (_disposed || _currentStream?.uri == null) return;
+      if (fresh.uri == stream.uri) {
+        _scheduleExpiryRefresh(fresh);
+        return;
+      }
+      final position = _lastPosition;
+      await _player.setUrl(fresh.uri.toString());
+      await _player.seek(position);
+      await _player.play();
+      _currentStream = fresh;
+      _scheduleExpiryRefresh(fresh);
+      onRecovery?.call(
+        'Refreshed ${fresh.provider.name} URL at ${position.inSeconds}s',
+      );
+    } catch (e) {
+      _log.w('Stream expiry refresh failed: $e');
+    }
+  }
+
+  /// Recovery after a stall or an error: re-resolve the current source (or
+  /// fall through the chain) and resume at the last known position.
+  Future<void> _recover({required String reason}) async {
+    final request = _currentRequest;
+    final stream = _currentStream;
+    if (_disposed || _recovering || request == null || stream == null) return;
+    _recovering = true;
+    try {
+      final decision = recoveryPolicy.forStall(
+        _budget.context(
+          buffering: true,
+          stallDuration: recoveryPolicy.stallTimeout,
+          providerFailures: service.health.consecutiveFailures(stream.provider),
+        ),
+      );
+      if (decision == StreamRecoveryAction.abort) {
+        _log.w('Giving up on "${request.title}" after $reason');
+        onRecovery?.call('Playback could not be recovered');
+        return;
+      }
+      _budget.record();
+      _cancelTimers();
+      // Force a fresh resolution: the cached URL is the thing that failed.
+      service.invalidate(request, stream.provider);
+      final fresh = await service.resolveStream(
+        request,
+        preferredProvider: decision == StreamRecoveryAction.failover
+            ? null
+            : stream.provider,
+        allowPreview: stream.isPreview,
+      );
+      if (_disposed) return;
+      final position = _lastPosition;
+      await _player.setUrl(fresh.uri.toString());
+      await _player.seek(position);
+      await _player.play();
+      _currentStream = fresh;
+      _scheduleExpiryRefresh(fresh);
+      _attachWatchers();
+      onRecovery?.call(
+        'Recovered from $reason via ${fresh.provider.name} '
+        'at ${position.inSeconds}s',
+      );
+    } catch (e) {
+      _log.w('Stream recovery failed ($reason): $e');
+    } finally {
+      _recovering = false;
+    }
+  }
+
+  Duration? _untilExpiry(ResolvedStream stream) {
+    final expiry = stream.expiresAt;
+    if (expiry == null) return null;
+    return expiry.difference(DateTime.now());
+  }
 
   Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
+    _cancelTimers();
+    await _stateSub?.cancel();
+    _stateSub = null;
+    await _positionSub?.cancel();
+    _positionSub = null;
+    _resumePoints.clear();
     await _player.dispose();
   }
 }

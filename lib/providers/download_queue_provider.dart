@@ -34,6 +34,8 @@ import 'package:spotimusic/utils/int_utils.dart';
 import 'package:spotimusic/utils/extension_auth_launcher.dart';
 import 'package:spotimusic/utils/progress_stream_poller.dart';
 
+import 'package:spotimusic/core/data/audio_sanity.dart'
+    show AudioMagicSanityChecker, detectAudioContainer;
 import 'package:spotimusic/core/data/network_switch_policy.dart';
 import 'package:spotimusic/providers/download_history_provider.dart';
 

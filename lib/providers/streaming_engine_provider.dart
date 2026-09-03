@@ -431,6 +431,12 @@ class StreamingEngineController {
   final NetworkStatusMonitor _network;
   final StreamHeadWarmer _headWarmer = StreamHeadWarmer();
 
+  /// Adaptive-bitrate policy handed to the providers that publish a bitrate
+  /// ladder. `balanced` leaves ~25% headroom so a jittery link keeps playing
+  /// instead of stalling at the top rung.
+  final AdaptiveBitrateSelector _bitrateSelector =
+      const AdaptiveBitrateSelector();
+
   final Map<String, Track> _trackByMediaId = {};
   final List<String> _trackByMediaIdOrder = [];
   static const int _maxTrackedMediaIds = 256;
@@ -492,6 +498,7 @@ class StreamingEngineController {
   /// All streaming candidates for [track], in adapter order.
   Future<List<StreamDescriptor>> candidatesFor(Track track) async {
     final adapters = _ref.read(streamSourceAdaptersProvider);
+    _publishAdaptiveBitrate(adapters);
     final result = <StreamDescriptor>[];
     for (final adapter in adapters) {
       try {
@@ -511,6 +518,24 @@ class StreamingEngineController {
 
   /// Looks up an already-downloaded *or locally imported* copy so Smart Play
   /// can go local. Verifies the file still exists before returning it.
+  /// Feeds the engine's live bandwidth estimate into the multi-provider
+  /// service so ladder-based providers pick a rung the link can sustain.
+  ///
+  /// Only runs when a ladder-capable adapter is actually registered: reading
+  /// the provider otherwise would spin up a real resolver (YouTube client +
+  /// HTTP client) for queues that never use it.
+  void _publishAdaptiveBitrate(List<StreamSourceAdapter> adapters) {
+    final usesLadder = adapters.any(
+      (adapter) => adapter is MultiProviderStreamAdapter,
+    );
+    if (!usesLadder) return;
+    final service = _ref.read(multiProviderStreamServiceProvider);
+    service.configureAdaptiveBitrate(
+      selector: _bitrateSelector,
+      bandwidthProvider: () => bandwidth.smoothedBytesPerSecond ?? 0,
+    );
+  }
+
   Future<String?> downloadedPathFor(Track track) async {
     try {
       final localLibrary = await LibraryDatabase.instance.findExisting(

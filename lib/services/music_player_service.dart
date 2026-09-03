@@ -371,6 +371,12 @@ class MusicPlayerHandler extends BaseAudioHandler
   final List<int> _recent = [];
   final List<int> _playHistory = [];
 
+  /// Indices already played in the current shuffle cycle. Shuffle has to end
+  /// once every track has had a turn (unless repeat-all is on), and the
+  /// anti-repetition window in [_recent] is deliberately shorter than the
+  /// queue, so it cannot answer "has everything played yet?".
+  final Set<int> _shufflePlayed = <int>{};
+
   // True when playback was paused because another app took audio focus.
   bool _pausedByInterruption = false;
   bool _interruptionActive = false;
@@ -935,6 +941,7 @@ class MusicPlayerHandler extends BaseAudioHandler
       ..addAll(items.map((m) => m.toMediaItem()));
     _recent.clear();
     _playHistory.clear();
+    _shufflePlayed.clear();
     queue.add(List<MediaItem>.unmodifiable(_queueItems));
     await _playIndex(initialIndex.clamp(0, items.length - 1));
   }
@@ -1013,6 +1020,7 @@ class MusicPlayerHandler extends BaseAudioHandler
 
     _recent.clear();
     _playHistory.clear();
+    _shufflePlayed.clear();
 
     queue.add(List<MediaItem>.unmodifiable(_queueItems));
     _broadcastState();
@@ -1041,6 +1049,7 @@ class MusicPlayerHandler extends BaseAudioHandler
     if (recordHistory) {
       _playHistory.add(index);
       if (_playHistory.length > 200) _playHistory.removeAt(0);
+      if (_shuffle) _shufflePlayed.add(index);
       _recent.add(index);
       final maxRecent = ((_media.length - 1) * 0.6).floor().clamp(
         1,
@@ -1257,18 +1266,51 @@ class MusicPlayerHandler extends BaseAudioHandler
     }
   }
 
-  int _pickNextShuffle() {
-    if (_media.length <= 1) return _index;
+  /// Next track in shuffle order, or null when no candidate is left.
+  int? _pickNextShuffle() {
+    if (_media.length <= 1) return null;
     final pool = <int>[];
     for (var i = 0; i < _media.length; i++) {
       if (i != _index && !_recent.contains(i)) pool.add(i);
     }
     if (pool.isEmpty) {
+      // The anti-repetition window is full: fall back to any other track.
       for (var i = 0; i < _media.length; i++) {
         if (i != _index) pool.add(i);
       }
     }
+    if (pool.isEmpty) return null;
     return pool[_random.nextInt(pool.length)];
+  }
+
+  /// Advances a shuffled queue.
+  ///
+  /// A cycle ends when every track has been played once — with repeat-all the
+  /// cycle restarts, otherwise playback stops, matching the sequential branch
+  /// (previously a shuffled queue looped forever regardless of repeat mode).
+  Future<void> _advanceShuffled() async {
+    if (_media.length <= 1) {
+      if (_repeatMode == AudioServiceRepeatMode.all && _media.isNotEmpty) {
+        await _playIndex(_index, recordHistory: false);
+      } else {
+        _broadcastState(playerState: PlayerState.completed);
+      }
+      return;
+    }
+    if (_shufflePlayed.length >= _media.length) {
+      if (_repeatMode != AudioServiceRepeatMode.all) {
+        _broadcastState(playerState: PlayerState.completed);
+        return;
+      }
+      _shufflePlayed.clear();
+      _recent.clear();
+    }
+    final next = _pickNextShuffle();
+    if (next == null) {
+      _broadcastState(playerState: PlayerState.completed);
+      return;
+    }
+    await _playIndex(next);
   }
 
   Future<void> _onComplete() async {
@@ -1279,14 +1321,7 @@ class MusicPlayerHandler extends BaseAudioHandler
       return;
     }
     if (_shuffle) {
-      if (_media.length > 1) {
-        await _playIndex(_pickNextShuffle());
-      } else if (_repeatMode == AudioServiceRepeatMode.all &&
-          _media.isNotEmpty) {
-        await _playIndex(_index, recordHistory: false);
-      } else {
-        _broadcastState(playerState: PlayerState.completed);
-      }
+      await _advanceShuffled();
       return;
     }
     if (_index >= 0 && _index < _media.length - 1) {
@@ -1380,6 +1415,9 @@ class MusicPlayerHandler extends BaseAudioHandler
   @override
   Future<void> setShuffleMode(AudioServiceShuffleMode shuffleMode) async {
     _shuffle = shuffleMode == AudioServiceShuffleMode.all;
+    // Enabling shuffle starts a new cycle: the tracks already heard in
+    // sequential order do not count towards the shuffled rotation.
+    _shufflePlayed.clear();
     _broadcastState();
     if (_media.isNotEmpty && _index >= 0) {
       unawaited(_persistSession(position: playbackState.value.position));
@@ -1413,6 +1451,7 @@ class MusicPlayerHandler extends BaseAudioHandler
     _userPaused = false;
     _recent.clear();
     _playHistory.clear();
+    _shufflePlayed.clear();
     _pendingRestorePosition = null;
     // An explicit stop ends the session for good; nothing to restore later.
     await _enqueueSessionWrite(AppStateDatabase.instance.clearPlaybackSession);
@@ -1430,7 +1469,8 @@ class MusicPlayerHandler extends BaseAudioHandler
     if (_shuffle) {
       if (_media.length > 1) {
         if (current != null) playbackStatsObserver?.onSkip?.call(current);
-        await _playIndex(_pickNextShuffle());
+        final next = _pickNextShuffle();
+        if (next != null) await _playIndex(next);
       }
       return;
     }
@@ -1541,6 +1581,7 @@ class MusicPlayerHandler extends BaseAudioHandler
       ..addAll(kept.map((m) => m.toMediaItem()));
     _recent.clear();
     _playHistory.clear();
+    _shufflePlayed.clear();
     queue.add(List<MediaItem>.unmodifiable(_queueItems));
 
     if (_media.isEmpty) {

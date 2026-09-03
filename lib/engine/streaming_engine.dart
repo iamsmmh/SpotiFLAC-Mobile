@@ -1363,3 +1363,395 @@ extension StreamDescriptorText on StreamDescriptor {
     return '${uriText.substring(0, 44)}…${uriText.substring(uriText.length - 20)}';
   }
 }
+
+// ---------------------------------------------------------------------------
+// Adaptive bitrate selection
+// ---------------------------------------------------------------------------
+
+/// One playable encoding of the same logical stream, as exposed by a provider
+/// that offers a bitrate ladder (YouTube's audio-only renditions, Tidal's
+/// `audioquality` tiers, …).
+class StreamVariant {
+  final String uri;
+  final int bitrateKbps;
+  final String? codec;
+  final String? container;
+  final DateTime? expiresAt;
+
+  const StreamVariant({
+    required this.uri,
+    required this.bitrateKbps,
+    this.codec,
+    this.container,
+    this.expiresAt,
+  });
+
+  /// Bytes/second this variant needs to stream in real time.
+  int get bytesPerSecond => (bitrateKbps * 1000) ~/ 8;
+
+  @override
+  String toString() =>
+      'StreamVariant(${bitrateKbps}kbps, ${codec ?? 'unknown'}, $uri)';
+}
+
+/// How aggressively the ladder is allowed to move.
+enum AdaptiveBitrateMode {
+  /// Always take the highest rung the link can sustain.
+  qualityFirst,
+
+  /// Leave headroom for jitter: never spend more than ~75% of the measured
+  /// link on audio.
+  balanced,
+
+  /// Prefer rungs well below the measured link (mobile data / roaming).
+  dataSaver,
+}
+
+/// Result of one ladder decision, carrying the reasoning so the diagnostics
+/// UI can explain a downgrade instead of silently changing quality.
+class AdaptiveBitrateDecision {
+  final StreamVariant? variant;
+  final int? targetKbps;
+  final int? measuredBytesPerSecond;
+  final String reason;
+
+  const AdaptiveBitrateDecision({
+    this.variant,
+    this.targetKbps,
+    this.measuredBytesPerSecond,
+    this.reason = '',
+  });
+
+  @override
+  String toString() =>
+      'AdaptiveBitrateDecision(${targetKbps ?? 0}kbps, reason: $reason)';
+}
+
+/// Picks a rung of a bitrate ladder that the current link can actually
+/// sustain, bounded by the requested [AudioQualityLevel] and the network
+/// profile.
+///
+/// The selector is pure: the ladder comes from the provider, the throughput
+/// estimate from [BandwidthMonitor], and both are optional — with no
+/// measurement the selector degrades to "highest rung that fits the requested
+/// quality", which is exactly the pre-adaptive behaviour.
+class AdaptiveBitrateSelector {
+  const AdaptiveBitrateSelector({
+    this.mode = AdaptiveBitrateMode.balanced,
+    this.minKbps = 48,
+    this.maxKbps = 9216,
+  });
+
+  final AdaptiveBitrateMode mode;
+
+  /// Floor for playback: below this, audio is not worth playing.
+  final int minKbps;
+
+  /// Ceiling (Hi-Res 24/192 FLAC ≈ 9216 kbps).
+  final int maxKbps;
+
+  /// Fraction of the measured throughput a rung may consume.
+  double get _usableFraction {
+    switch (mode) {
+      case AdaptiveBitrateMode.qualityFirst:
+        return 0.95;
+      case AdaptiveBitrateMode.balanced:
+        return 0.75;
+      case AdaptiveBitrateMode.dataSaver:
+        return 0.5;
+    }
+  }
+
+  /// Upper bound derived from the requested quality (unbounded for `auto`).
+  int? _qualityCeiling(AudioQualityLevel requested) {
+    switch (requested) {
+      case AudioQualityLevel.auto:
+        return null;
+      case AudioQualityLevel.low:
+      case AudioQualityLevel.normal:
+      case AudioQualityLevel.high:
+      case AudioQualityLevel.lossless:
+      case AudioQualityLevel.hires:
+        return requested.referenceBitrateKbps;
+    }
+  }
+
+  /// Selects the best sustainable rung from [variants].
+  ///
+  /// [variants] may be unsorted and may contain duplicates; the highest
+  /// bitrate that fits wins. Returns an empty decision (null variant) only
+  /// when the ladder is empty.
+  AdaptiveBitrateDecision select(
+    List<StreamVariant> variants, {
+    int? measuredBytesPerSecond,
+    AudioQualityLevel requested = AudioQualityLevel.auto,
+    NetworkProfile profile = NetworkProfile.wifi,
+    DateTime? now,
+  }) {
+    final usable = <StreamVariant>[];
+    final effectiveNow = now ?? DateTime.now();
+    for (final variant in variants) {
+      final expiry = variant.expiresAt;
+      if (expiry != null && !effectiveNow.isBefore(expiry)) continue;
+      usable.add(variant);
+    }
+    if (usable.isEmpty) {
+      return const AdaptiveBitrateDecision(
+        reason: 'no usable variant in the ladder',
+      );
+    }
+    usable.sort((a, b) => b.bitrateKbps.compareTo(a.bitrateKbps));
+
+    final qualityCeiling = _qualityCeiling(requested);
+    var ceiling = maxKbps;
+    if (qualityCeiling != null && qualityCeiling > 0) {
+      ceiling = math.min(ceiling, qualityCeiling);
+    }
+    if (profile == NetworkProfile.roaming) {
+      // Roaming is metered per megabyte regardless of the measured link.
+      ceiling = math.min(ceiling, 256);
+    }
+
+    final measured = measuredBytesPerSecond;
+    final budget = measured == null || measured <= 0
+        ? null
+        : (measured * _usableFraction).round();
+
+    var reason = 'no bandwidth measurement; highest rung within quality cap';
+    for (final variant in usable) {
+      if (variant.bitrateKbps > ceiling) continue;
+      if (budget != null && variant.bytesPerSecond > budget) continue;
+      if (variant.bitrateKbps < minKbps) {
+        // Only tolerate an ultra-low rung when nothing else exists.
+        continue;
+      }
+      reason = budget == null
+          ? 'highest rung within ${ceiling}kbps cap'
+          : '${variant.bitrateKbps}kbps fits ${(budget * 8 / 1000).round()}kbps budget'
+              ' (${(_usableFraction * 100).round()}% of link)';
+      return AdaptiveBitrateDecision(
+        variant: variant,
+        targetKbps: variant.bitrateKbps,
+        measuredBytesPerSecond: measured,
+        reason: reason,
+      );
+    }
+
+    // Nothing fits: fall back to the lowest rung so playback still starts
+    // (a stuttering low-bitrate stream beats silence on a saturated link).
+    final lowest = usable.last;
+    final fallbackCeiling = math.min(lowest.bitrateKbps, ceiling);
+    return AdaptiveBitrateDecision(
+      variant: lowest,
+      targetKbps: fallbackCeiling,
+      measuredBytesPerSecond: measured,
+      reason: budget == null
+          ? 'lowest rung (${lowest.bitrateKbps}kbps)'
+          : 'link too slow for any rung ≥ ${minKbps}kbps; using lowest '
+              '(${lowest.bitrateKbps}kbps)',
+    );
+  }
+
+  /// Recommended rung for the next attempt after a stall, i.e. one step below
+  /// [currentKbps]. Returns null when already at the bottom of the ladder.
+  int? stepDown(int currentKbps, List<StreamVariant> variants) {
+    final sorted = variants
+        .map((v) => v.bitrateKbps)
+        .where((kbps) => kbps < currentKbps)
+        .toList(growable: false);
+    if (sorted.isEmpty) return null;
+    sorted.sort((a, b) => b.compareTo(a));
+    final candidate = sorted.first;
+    return candidate < minKbps ? null : candidate;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Buffering / expiry / failure recovery
+// ---------------------------------------------------------------------------
+
+/// What the player should do next when a stream misbehaves.
+enum StreamRecoveryAction {
+  /// Keep going: the condition is transient and within budget.
+  wait,
+
+  /// Re-run preflight on the *same* URL (cheapest check).
+  revalidate,
+
+  /// Ask the provider for a fresh URL (the current one is stale/expired).
+  reResolve,
+
+  /// Abandon this source and move to the next ranked candidate.
+  failover,
+
+  /// Nothing more can be done for this track.
+  abort,
+}
+
+/// Snapshot of the runtime conditions a recovery decision is made from.
+class StreamRecoveryContext {
+  /// How long the player has been unable to advance (buffering/stalled).
+  final Duration stallDuration;
+
+  /// Whether the transport reported buffering rather than an error.
+  final bool buffering;
+
+  /// Time left before the current signed URL expires, when known.
+  final Duration? untilExpiry;
+
+  /// Recoveries already attempted for this play session.
+  final int attempts;
+
+  /// Consecutive failures recorded for the current provider.
+  final int providerFailures;
+
+  const StreamRecoveryContext({
+    this.stallDuration = Duration.zero,
+    this.buffering = false,
+    this.untilExpiry,
+    this.attempts = 0,
+    this.providerFailures = 0,
+  });
+}
+
+/// Turns runtime symptoms into one concrete [StreamRecoveryAction].
+///
+/// The policy is intentionally conservative: recovery is *bounded*
+/// ([maxAttempts], [recoveryWindow]) so a permanently broken source cannot
+/// trap the player in an endless re-resolve loop, and it always prefers the
+/// cheapest action that can plausibly fix the symptom (revalidate → re-resolve
+/// → failover → abort).
+class StreamRecoveryPolicy {
+  const StreamRecoveryPolicy({
+    this.stallTimeout = const Duration(seconds: 8),
+    this.expiryLeadTime = const Duration(minutes: 2),
+    this.maxAttempts = 3,
+    this.recoveryWindow = const Duration(minutes: 5),
+    this.expiryRecoveries = 2,
+  });
+
+  /// How long a buffering/stalled state is tolerated before recovery starts.
+  final Duration stallTimeout;
+
+  /// Refresh a signed URL this long before it actually expires.
+  final Duration expiryLeadTime;
+
+  /// Hard cap on recovery attempts per play session.
+  final int maxAttempts;
+
+  /// Attempts older than this no longer count against [maxAttempts], so a
+  /// long track that recovered once early can still recover later.
+  final Duration recoveryWindow;
+
+  /// Separate, smaller budget for proactive expiry refreshes (those are
+  /// expected and must not consume the failure budget).
+  final int expiryRecoveries;
+
+  /// Decision for a stalled/buffering stream.
+  StreamRecoveryAction forStall(StreamRecoveryContext context) {
+    if (context.attempts >= maxAttempts) return StreamRecoveryAction.abort;
+    if (!context.buffering) return StreamRecoveryAction.wait;
+    if (context.stallDuration < stallTimeout) return StreamRecoveryAction.wait;
+    // A healthy URL that suddenly stops delivering is usually a CDN/connection
+    // hiccup: refresh it. Repeated stalls mean the source itself is bad.
+    return context.attempts == 0
+        ? StreamRecoveryAction.reResolve
+        : StreamRecoveryAction.failover;
+  }
+
+  /// Decision for a playback error (decode failure, HTTP 403/404, …).
+  StreamRecoveryAction forError(StreamRecoveryContext context) {
+    if (context.attempts >= maxAttempts) return StreamRecoveryAction.abort;
+    final expiry = context.untilExpiry;
+    if (expiry != null && expiry <= Duration.zero) {
+      return StreamRecoveryAction.reResolve;
+    }
+    // A provider that failed repeatedly is not worth another URL from the
+    // same source: move down the ranked candidate list immediately.
+    return context.providerFailures >= 2
+        ? StreamRecoveryAction.failover
+        : StreamRecoveryAction.reResolve;
+  }
+
+  /// Proactive decision taken *before* playback breaks: the signed URL is
+  /// about to expire, so mint a fresh one while audio still plays.
+  StreamRecoveryAction forExpiry(
+    StreamRecoveryContext context, {
+    int previousExpiryRefreshes = 0,
+  }) {
+    final expiry = context.untilExpiry;
+    if (expiry == null) return StreamRecoveryAction.wait;
+    if (previousExpiryRefreshes >= expiryRecoveries) {
+      return StreamRecoveryAction.wait;
+    }
+    if (expiry <= expiryLeadTime) return StreamRecoveryAction.reResolve;
+    return StreamRecoveryAction.wait;
+  }
+
+  /// Absolute time at which the current URL should be refreshed, or null when
+  /// it never expires / the refresh budget is spent.
+  DateTime? nextRefreshAt(
+    DateTime? expiresAt, {
+    int previousExpiryRefreshes = 0,
+    DateTime? now,
+  }) {
+    if (expiresAt == null) return null;
+    if (previousExpiryRefreshes >= expiryRecoveries) return null;
+    final candidate = expiresAt.subtract(expiryLeadTime);
+    final effectiveNow = now ?? DateTime.now();
+    return candidate.isBefore(effectiveNow) ? effectiveNow : candidate;
+  }
+}
+
+/// Tracks how many recoveries a single play session has performed inside the
+/// policy's sliding window, so the budget resets on long tracks.
+class StreamRecoveryBudget {
+  StreamRecoveryBudget({required this.policy, DateTime Function()? clock})
+    : _clock = clock ?? DateTime.now;
+
+  final StreamRecoveryPolicy policy;
+  final DateTime Function() _clock;
+  final List<DateTime> _attempts = <DateTime>[];
+  int _expiryRefreshes = 0;
+
+  int get attempts => _prune();
+  int get expiryRefreshes => _expiryRefreshes;
+
+  int _prune() {
+    final now = _clock();
+    _attempts.removeWhere(
+      (at) => now.difference(at) > policy.recoveryWindow,
+    );
+    return _attempts.length;
+  }
+
+  StreamRecoveryContext context({
+    Duration stallDuration = Duration.zero,
+    bool buffering = false,
+    Duration? untilExpiry,
+    int providerFailures = 0,
+  }) => StreamRecoveryContext(
+    stallDuration: stallDuration,
+    buffering: buffering,
+    untilExpiry: untilExpiry,
+    attempts: attempts,
+    providerFailures: providerFailures,
+  );
+
+  /// Records one recovery attempt and returns the updated count.
+  int record() {
+    final count = _prune();
+    _attempts.add(_clock());
+    return count + 1;
+  }
+
+  /// Records a proactive URL refresh (does not consume the failure budget).
+  int recordExpiryRefresh() => ++_expiryRefreshes;
+
+  /// Called when the source changes (failover) or the user skips: the new
+  /// source gets a fresh recovery budget.
+  void reset() {
+    _attempts.clear();
+    _expiryRefreshes = 0;
+  }
+}
