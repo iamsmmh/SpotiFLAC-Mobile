@@ -532,7 +532,7 @@ class StreamingEngineController {
     final service = _ref.read(multiProviderStreamServiceProvider);
     service.configureAdaptiveBitrate(
       selector: _bitrateSelector,
-      bandwidthProvider: () => bandwidth.smoothedBytesPerSecond,
+      bandwidthProvider: () => bandwidth.smoothedBytesPerSecond ?? 0,
     );
   }
 

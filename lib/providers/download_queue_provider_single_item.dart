@@ -885,7 +885,7 @@ class _DownloadRun {
             .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
             .join(' ');
         _failAsCorrupt(
-          'the downloaded file is not audio (${size} bytes, '
+          'the downloaded file is not audio ($size bytes, '
           'header: $preview)',
         );
         return false;
