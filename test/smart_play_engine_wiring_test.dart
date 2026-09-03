@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -6,6 +9,7 @@ import 'package:spotimusic/engine/smart_play.dart';
 import 'package:spotimusic/engine/streaming_engine.dart';
 import 'package:spotimusic/models/track.dart';
 import 'package:spotimusic/providers/engine_settings_provider.dart';
+import 'package:spotimusic/providers/music_player_provider.dart';
 import 'package:spotimusic/providers/streaming_engine_provider.dart';
 import 'package:spotimusic/services/multi_provider_stream_service.dart';
 import 'package:spotimusic/services/music_player_service.dart';
@@ -82,6 +86,44 @@ class _FakeNetworkMonitor extends NetworkStatusMonitor {
   Future<NetworkProfile> current() async => profile;
 }
 
+/// Playback stub for engine-wiring tests.
+///
+/// These tests exercise the Smart Play decision ladder, preflight failover,
+/// queue building and deferred resolution - NOT audio output. The real
+/// [MusicPlayerController] drives audio_service/just_audio, whose platform
+/// channels do not exist under `flutter test`; a real play attempt there
+/// surfaces an asynchronous MissingPluginException through the engine's
+/// playback-failure hook, which would (correctly, for production) penalize
+/// the provider's health and pollute every later resolution in the same
+/// test. Routing the engine's play calls through this stub keeps the
+/// assertions on the engine logic deterministic.
+class _FakePlayerController extends MusicPlayerController {
+  _FakePlayerController();
+
+  final played = <PlayableMedia>[];
+  final enqueued = <PlayableMedia>[];
+
+  @override
+  Future<void> playAll(List<PlayableMedia> items, {int initialIndex = 0}) async {
+    played.addAll(items);
+  }
+
+  @override
+  Future<void> addAllToQueue(List<PlayableMedia> items) async {
+    enqueued.addAll(items);
+  }
+
+  @override
+  Future<void> replaceCurrentAndPlay(PlayableMedia item, {Duration? resumeAt}) async {
+    played.add(item);
+  }
+
+  @override
+  Future<void> pause() async {
+    // Intentionally a no-op: engine-wiring tests never assert on pausing.
+  }
+}
+
 ProviderContainer _container({
   List<StreamSourceAdapter> adapters = const [],
   StreamPreflightValidator? validator,
@@ -97,6 +139,9 @@ ProviderContainer _container({
       networkStatusMonitorProvider.overrideWith(
         (ref) => _FakeNetworkMonitor(network),
       ),
+      musicPlayerControllerProvider.overrideWith(
+        (ref) => _FakePlayerController(),
+      ),
     ],
   );
   addTearDown(container.dispose);
@@ -107,6 +152,33 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
+  });
+  setUp(() {
+    // Smart Play consults the local library / download history, whose SQLite
+    // stores resolve their location through path_provider. The plugin has no
+    // test-channel implementation; answer with a real temp dir so the lookups
+    // fail later at the sqflite layer (where the engine already catches them)
+    // instead of at the path_provider layer.
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('plugins.flutter.io/path_provider'),
+          (call) async {
+            switch (call.method) {
+              case 'getApplicationDocumentsDirectory':
+              case 'getTemporaryDirectory':
+              case 'getApplicationSupportDirectory':
+                return Directory.systemTemp.path;
+            }
+            return null;
+          },
+        );
+  });
+  tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('plugins.flutter.io/path_provider'),
+          null,
+        );
   });
 
   group('Engine environment canary', () {
@@ -355,6 +427,11 @@ void main() {
       expect(failedHealth.failureCount, 1, reason: healthDump);
       final context = container.read(enginePlayContextProvider);
       expect(context?.providerId, 'providerB');
+      // Playback actually started with the failover source, not the dead one.
+      final player =
+          container.read(musicPlayerControllerProvider) as _FakePlayerController;
+      expect(player.played, hasLength(1));
+      expect(player.played.single.source, good.uri);
     });
 
     test('exhausted chain reports failure without endless retries', () async {
@@ -423,6 +500,14 @@ void main() {
       expect(engine.trackFor('t3'), isNotNull);
       // The played media is registered too.
       expect(engine.trackFor('t1'), isNotNull);
+      // The remainder reached the player: the local copy plays directly, the
+      // other track is deferred to play time.
+      final player =
+          container.read(musicPlayerControllerProvider) as _FakePlayerController;
+      expect(player.played, hasLength(1));
+      expect(player.enqueued, hasLength(2));
+      expect(player.enqueued.first.source, '/music/t2.flac');
+      expect(player.enqueued.last.isDeferredStream, isTrue);
     });
 
     test('startIndex rotation reorders both tracks and pre-resolved paths',
@@ -453,6 +538,14 @@ void main() {
       expect(engine.trackFor('t1'), isNotNull);
       expect(engine.trackFor('t2'), isNotNull);
       expect(engine.trackFor('t3'), isNotNull);
+      // Rotation applied to the remainder too: t1 keeps its local path,
+      // t2 is deferred.
+      final player =
+          container.read(musicPlayerControllerProvider) as _FakePlayerController;
+      expect(player.played, hasLength(1));
+      expect(player.enqueued, hasLength(2));
+      expect(player.enqueued.first.source, '/music/t1.flac');
+      expect(player.enqueued.last.isDeferredStream, isTrue);
     });
   });
 

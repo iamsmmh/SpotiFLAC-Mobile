@@ -141,7 +141,7 @@ func buildISRCIndex(outputDir string) *ISRCIndex {
 			go func() {
 				defer wg.Done()
 				for i := range tasks {
-					isrcs[i] = strings.ToUpper(readFileISRC(toParse[i].path))
+					isrcs[i] = readISRCGuarded(toParse[i].path)
 				}
 			}()
 		}
@@ -178,6 +178,25 @@ var isrcIndexExts = map[string]bool{
 	".m4a":  true,
 	".ogg":  true,
 	".opus": true,
+}
+
+// isrcFileReader is the per-file ISRC probe used by the index workers. It is
+// a variable so tests can simulate a parser panic on a malformed file
+// without depending on a real parser bug being present.
+var isrcFileReader = readFileISRC
+
+// readISRCGuarded reads one file's ISRC, converting a panic into an empty
+// result. Index workers run in their own goroutines over the whole download
+// folder, so an unrecovered panic from one malformed file would abort the
+// process; instead that file is indexed without an ISRC and the build
+// continues.
+func readISRCGuarded(path string) (isrc string) {
+	defer func() {
+		if r := recoverWorkerPanic("isrc index", recover()); r != nil {
+			isrc = ""
+		}
+	}()
+	return strings.ToUpper(isrcFileReader(path))
 }
 
 // readFileISRC reads the ISRC tag using the native reader for the format.

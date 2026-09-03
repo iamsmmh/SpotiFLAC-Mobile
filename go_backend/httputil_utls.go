@@ -214,6 +214,14 @@ func retirePooledHTTP2ConnWithTimeout(conn pooledHTTP2ClientConn, timeout time.D
 		forceClose := func() {
 			closeOnce.Do(func() { _ = conn.Close() })
 		}
+		// This runs in a detached goroutine: a panic escaping Shutdown/Close
+		// would abort the process. Contain it and fall back to a hard close so
+		// the socket cannot leak.
+		defer func() {
+			if r := recoverWorkerPanic("http2 retirement", recover()); r != nil {
+				forceClose()
+			}
+		}()
 		if timeout <= 0 {
 			// Streams are still in flight (a track may legitimately stream for
 			// several minutes), so no artificial deadline is imposed here: the
