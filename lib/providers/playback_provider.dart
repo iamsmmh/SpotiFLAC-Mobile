@@ -1,8 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:spotimusic/engine/smart_play.dart';
 import 'package:spotimusic/models/track.dart';
 import 'package:spotimusic/providers/download_queue_provider.dart';
+import 'package:spotimusic/providers/engine_settings_provider.dart';
 import 'package:spotimusic/providers/music_player_provider.dart';
 import 'package:spotimusic/providers/settings_provider.dart';
+import 'package:spotimusic/providers/streaming_engine_provider.dart';
 import 'package:spotimusic/services/library_database.dart';
 import 'package:spotimusic/services/history_database.dart';
 import 'package:spotimusic/services/music_player_service.dart';
@@ -16,6 +19,10 @@ class PlaybackState {
 }
 
 class PlaybackController extends Notifier<PlaybackState> {
+  /// Reason the Smart Play engine could not start playback (used to enrich
+  /// the "no local file" error so users see *why* the track will not play).
+  String? _engineFallbackReason;
+
   @override
   PlaybackState build() => const PlaybackState();
 
@@ -148,6 +155,38 @@ class PlaybackController extends Notifier<PlaybackState> {
     final orderedTracks = _orderedTracksFromStartIndex(tracks, startIndex);
     final resolvedPaths = await _resolveTrackPaths(orderedTracks);
 
+    // Smart Play path: when the streaming engine is enabled and the internal
+    // player is active, the tapped track always plays through the full
+    // decision ladder (local → stream → download & play) and the rest of the
+    // list is queued (local copies directly, remote tracks lazily). This
+    // replaces the old behavior of silently skipping the tapped track when no
+    // local file existed.
+    final engineSettings = ref.read(engineSettingsProvider);
+    if (engineSettings.streamingEnabled && await _useInternalPlayer()) {
+      try {
+        final engine = ref.read(streamingEngineControllerProvider);
+        final result = await engine.playTracks(
+          orderedTracks,
+          startIndex: 0,
+          resolvedPaths: resolvedPaths,
+        );
+        if (result.started ||
+            result.decision.mode == SmartPlayMode.downloadAndPlay ||
+            result.decision.mode == SmartPlayMode.download) {
+          return;
+        }
+        // Engine could not start anything (e.g. offline with no local copy):
+        // fall through so any surviving local files still play, and surface
+        // the engine's reason when nothing local exists either.
+        _engineFallbackReason = result.message;
+      } catch (e) {
+        _log.w('Smart Play engine path failed, using local queue: $e');
+        _engineFallbackReason = null;
+      }
+    } else {
+      _engineFallbackReason = null;
+    }
+
     if (await _useInternalPlayer()) {
       final queue = <PlayableMedia>[];
       var skippedCueVirtualTrack = false;
@@ -183,8 +222,12 @@ class PlaybackController extends Notifier<PlaybackState> {
       if (skippedCueVirtualTrack) {
         throw Exception(cueVirtualTrackRequiresSplitMessage);
       }
+      final engineReason = _engineFallbackReason;
       throw Exception(
-        'No local audio file is available to play. Download the track first.',
+        engineReason == null || engineReason.trim().isEmpty
+            ? 'No local audio file is available to play. '
+                  'Download the track first.'
+            : 'Could not play this track: $engineReason',
       );
     }
 

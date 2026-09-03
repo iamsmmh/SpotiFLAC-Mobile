@@ -4,9 +4,64 @@
 
 ### Added
 
+- **Smart Play as the play path**: pressing play on a track list (playlists,
+  folder view) now routes through the Smart Play engine — the tapped track
+  always starts (local → stream → download & play) instead of being silently
+  skipped when no local file exists, and the rest of the list is queued behind
+  it. The engine resolves the first track immediately and defers remote queue
+  items to play time (fresh local/stream decision per track, so stream URLs
+  are never stale and files downloaded mid-session are picked up).
+- **Multi-provider stream adapter**: the existing multi-provider resolver
+  (YouTube universal fallback, SoundCloud, previews, credential-gated
+  lossless providers) is registered as a `StreamSourceAdapter`, so Smart
+  Play's stream branch ranks real full streams — not only 30-second previews
+  — under provider health, quality and failover policies.
+- **Match-confidence gates**: YouTube and SoundCloud fallback matching now
+  rejects low-confidence candidates (no Topic/official signal, unverifiable
+  duration, cover/karaoke/live uploads) instead of silently substituting an
+  unrelated track; resolution falls through to the next provider or fails
+  with a clear reason.
+
+### Fixed
+
+- **Preflight provider failover**: a failed preflight now walks the ranked
+  alternative candidates (bounded by the configured attempt budget and a
+  tried-URI set) — previously the failover branch received an empty
+  alternative list and could never actually switch providers.
+- **Smart Play local lookup** now also covers locally imported library files
+  (not only download history) and verifies the file still exists before
+  playing.
+- Bounded the engine's media-id → track registry (LRU, 256 entries) so a long
+  listening session cannot grow it without limit.
+- Deferred queue items survive session restore and re-resolve at play time.
 - **Download scheduling**: allow downloads to run only inside a configurable
   time window (Settings → Download → Download scheduling). The queue pauses
   outside the window and resumes itself when the window reopens.
+- **Queue transfer**: Share the active download queue as a portable JSON file
+  and import it on another device from the Library/Queue header actions.
+- **Storage breakdown**: per-format / per-artist / per-album disk usage for
+  downloaded and local-library files (Settings → Files → Storage breakdown).
+- **Streaming integrity reporting**: per-source-url stream attempt records
+  (preflight successes, failures, fallbacks) with readable reasons, shown in
+  Settings → Streaming & Glass → Streaming integrity.
+- **Listening Statistics**: per-track plays/listened time recorded locally via
+  a `PlaybackStatsObserver` in the audio handler, persisted in
+  SharedPreferences, and surfaced in a new **Listening Statistics** page
+  (Settings → Streaming & Glass) with Recently Played / Most Played, totals,
+  streak, and a confirmed reset action.
+- **History/privacy controls**: "Clear restore memory" now clears the engine
+  savepoint from Settings → Streaming & Glass, and listening statistics can be
+  reset from the new Listening Statistics page.
+- **Roaming quality profile**: Settings → Streaming & Glass now exposes an
+  editable per-network quality row for Roaming (alongside Wi-Fi / Mobile /
+  Poor).
+- **Live bandwidth sampling**: the streaming engine records bounded preflight
+  throughput samples (`BandwidthMonitor`) and shows an effective-bandwidth
+  estimate in the Diagnostics Center.
+
+---
+
+## [5.0.0] - 2026-09-02
 - **Queue transfer**: Share the active download queue as a portable JSON file
   and import it on another device from the Library/Queue header actions.
 - **Storage breakdown**: per-format / per-artist / per-album disk usage for

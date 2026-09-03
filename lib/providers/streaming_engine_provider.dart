@@ -14,10 +14,14 @@ import 'package:spotimusic/models/track.dart';
 import 'package:spotimusic/models/download_item.dart';
 import 'package:spotimusic/providers/download_queue_provider.dart';
 import 'package:spotimusic/providers/engine_settings_provider.dart';
+import 'package:spotimusic/providers/multi_provider_stream_provider.dart';
 import 'package:spotimusic/providers/music_player_provider.dart';
 import 'package:spotimusic/providers/playback_provider.dart';
 import 'package:spotimusic/providers/settings_provider.dart';
+import 'package:spotimusic/services/library_database.dart';
+import 'package:spotimusic/services/multi_provider_stream_service.dart';
 import 'package:spotimusic/services/music_player_service.dart';
+import 'package:spotimusic/utils/file_access.dart';
 import 'package:spotimusic/utils/string_utils.dart';
 
 /// ---------------------------------------------------------------------------
@@ -64,9 +68,101 @@ class PreviewStreamAdapter implements StreamSourceAdapter {
   }
 }
 
-final streamSourceAdaptersProvider = Provider<List<StreamSourceAdapter>>(
-  (ref) => const [PreviewStreamAdapter()],
-);
+/// Adapter that exposes the existing multi-provider resolver (YouTube Music
+/// universal fallback, SoundCloud, preview URLs, credential-gated lossless
+/// providers) to the streaming engine as [StreamDescriptor] candidates.
+///
+/// This is the designed registration point ("Streaming provider integrations
+/// are extensions implementing the StreamSourceAdapter API"): Smart Play's
+/// stream branch now ranks *real* full streams alongside previews, and
+/// provider health/failover applies to them exactly like any other source.
+class MultiProviderStreamAdapter implements StreamSourceAdapter {
+  final MultiProviderStreamService service;
+  final StreamProviderId preferredProvider;
+
+  /// Injection point used by tests to avoid real provider traffic.
+  final Future<ResolvedStream?> Function(
+    StreamTrackRequest request,
+    StreamProviderId preferred,
+  )? resolveOverride;
+
+  const MultiProviderStreamAdapter({
+    required this.service,
+    this.preferredProvider = StreamProviderId.youtube,
+    this.resolveOverride,
+  });
+
+  @override
+  String get id => 'multi_provider';
+
+  @override
+  Future<List<StreamDescriptor>> candidatesFor(Track track) async {
+    final resolve = resolveOverride;
+    try {
+      final resolved = resolve != null
+          ? await resolve(StreamTrackRequest.fromTrack(track), preferredProvider)
+          : await service.resolveStream(
+              StreamTrackRequest.fromTrack(track),
+              preferredProvider: preferredProvider,
+            );
+      if (resolved == null) return const [];
+      return [_descriptorFrom(resolved, track)];
+    } on StreamResolutionException {
+      // No playable source anywhere in the chain: not an error, just no
+      // candidates (the resolver already logged the details).
+      return const [];
+    } catch (_) {
+      // Unexpected transport errors must not break candidate aggregation.
+      return const [];
+    }
+  }
+
+  StreamDescriptor _descriptorFrom(ResolvedStream resolved, Track track) {
+    // 30-second previews stay below full streams in the ranking: they are a
+    // last-resort source, never a preferred one.
+    final isPreview = resolved.isPreview;
+    final bitrate = resolved.bitrateKbps ?? 0;
+    final quality = isPreview
+        ? AudioQualityLevel.low
+        : resolved.isLossless
+        ? AudioQualityLevel.lossless
+        : bitrate >= 320
+        ? AudioQualityLevel.high
+        : bitrate >= 128
+        ? AudioQualityLevel.normal
+        : AudioQualityLevel.low;
+    return StreamDescriptor(
+      id: 'stream:${resolved.provider.name}:${track.id}',
+      providerId: resolved.provider.name,
+      kind: StreamSourceKind.httpStream,
+      uri: resolved.uri.toString(),
+      quality: quality,
+      characteristics: AudioCharacteristics(
+        codec: resolved.codec?.toUpperCase(),
+        bitrateKbps: resolved.bitrateKbps,
+        lossless: resolved.isLossless,
+        sourceLabel: resolved.qualityLabel,
+      ),
+      expiresAt: resolved.expiresAt,
+      validFrom: DateTime.now(),
+      // Progressive CDN URLs (YouTube/SoundCloud) are ephemeral, signed and
+      // terms-restricted: never persist them to the playback cache.
+      cachePermitted: false,
+      priority: isPreview ? 12 : 5,
+    );
+  }
+}
+
+final streamSourceAdaptersProvider = Provider<List<StreamSourceAdapter>>((
+  ref,
+) {
+  final service = ref.watch(multiProviderStreamServiceProvider);
+  final preferred = ref.watch(activeStreamProviderProvider);
+  return [
+    const PreviewStreamAdapter(),
+    MultiProviderStreamAdapter(service: service, preferredProvider: preferred),
+  ];
+});
 
 /// Validates stream URLs before handing them to the audio engine.
 ///
@@ -306,7 +402,12 @@ class EnginePlayResult {
 /// ---------------------------------------------------------------------------
 
 class StreamingEngineController {
-  StreamingEngineController._(this._ref);
+  StreamingEngineController._(
+    this._ref, {
+    StreamPreflightValidator? validator,
+    NetworkStatusMonitor? network,
+  }) : _validator = validator ?? HttpStreamPreflightValidator(),
+       _network = network ?? NetworkStatusMonitor();
 
   final Ref _ref;
 
@@ -322,15 +423,17 @@ class StreamingEngineController {
     health: health,
     log: log,
   );
-  final HttpStreamPreflightValidator _validator = HttpStreamPreflightValidator();
+  final StreamPreflightValidator _validator;
   late final StreamPreloader _preloader = StreamPreloader(
     validator: _validator,
     log: log,
   );
-  final NetworkStatusMonitor _network = NetworkStatusMonitor();
+  final NetworkStatusMonitor _network;
   final StreamHeadWarmer _headWarmer = StreamHeadWarmer();
 
   final Map<String, Track> _trackByMediaId = {};
+  final List<String> _trackByMediaIdOrder = [];
+  static const int _maxTrackedMediaIds = 256;
   Timer? _downloadReadyTimer;
   bool _failureHookInstalled = false;
   bool _failedHookReentrant = false;
@@ -347,13 +450,33 @@ class StreamingEngineController {
   /// The engine-owned track for a playing media id (used by "details" flows).
   Track? trackFor(String mediaId) => _trackByMediaId[mediaId];
 
-  /// Installs (once) the runtime playback-failure hook in the audio service.
+  /// Registers a media id -> track mapping, bounded LRU-style so a long
+  /// listening session cannot grow the registry without limit.
+  void _registerTrack(String mediaId, Track track) {
+    if (_trackByMediaId.containsKey(mediaId)) {
+      _trackByMediaIdOrder
+        ..remove(mediaId)
+        ..add(mediaId);
+      _trackByMediaId[mediaId] = track;
+      return;
+    }
+    _trackByMediaId[mediaId] = track;
+    _trackByMediaIdOrder.add(mediaId);
+    while (_trackByMediaIdOrder.length > _maxTrackedMediaIds) {
+      final evicted = _trackByMediaIdOrder.removeAt(0);
+      _trackByMediaId.remove(evicted);
+    }
+  }
+
+  /// Installs (once) the runtime playback-failure hook and the lazy
+  /// deferred-source resolver in the audio service.
   void ensureFailureHook() {
     if (_failureHookInstalled) return;
     _failureHookInstalled = true;
     setPlaybackFailureListener((media, error) {
       unawaited(_onPlaybackFailure(media, error));
     });
+    setDeferredStreamResolver((media) => resolveDeferredSource(media));
   }
 
   Future<NetworkProfile> currentNetworkProfile() async {
@@ -386,8 +509,24 @@ class StreamingEngineController {
     return result;
   }
 
-  /// Looks up an already-downloaded local copy so Smart Play can go local.
+  /// Looks up an already-downloaded *or locally imported* copy so Smart Play
+  /// can go local. Verifies the file still exists before returning it.
   Future<String?> downloadedPathFor(Track track) async {
+    try {
+      final localLibrary = await LibraryDatabase.instance.findExisting(
+        isrc: track.isrc,
+        trackName: track.name,
+        artistName: track.artistName,
+      );
+      final localPath = localLibrary?['filePath']?.toString().trim() ?? '';
+      if (localPath.isNotEmpty && await fileExists(localPath)) {
+        return localPath;
+      }
+    } catch (e) {
+      log.add(
+        EngineEvent.warning('local', 'Library lookup failed: $e'),
+      );
+    }
     try {
       final item = await _ref
           .read(downloadHistoryProvider.notifier)
@@ -400,10 +539,101 @@ class StreamingEngineController {
             ),
           );
       final path = item?.filePath.trim() ?? '';
-      return path.isEmpty ? null : path;
+      if (path.isEmpty) return null;
+      return await fileExists(path) ? path : null;
     } catch (e) {
       log.add(EngineEvent.warning('local', 'Download lookup failed: $e'));
       return null;
+    }
+  }
+
+  /// Resolves a deferred queue item (see [PlayableMedia.deferredStreamUriFor])
+  /// to a concrete local path or fresh stream URL at play time. Returns null
+  /// when the track cannot be resolved; the player then stops gracefully.
+  Future<String?> resolveDeferredSource(PlayableMedia media) async {
+    ensureFailureHook();
+    final known = _trackByMediaId[media.id];
+    final track =
+        known ??
+        Track(
+          id: media.id,
+          name: media.title,
+          artistName: media.artist,
+          albumName: media.album,
+          coverUrl: media.artUri,
+          duration: media.duration?.inSeconds ?? 0,
+          source: 'app',
+        );
+    if (known == null) {
+      _registerTrack(media.id, track);
+    }
+    final decision = await decide(track);
+    switch (decision.mode) {
+      case SmartPlayMode.local:
+        final path = await downloadedPathFor(track);
+        if (path == null) {
+          log.add(
+            EngineEvent.warning(
+              'queue',
+              'Deferred item ${track.name}: local file disappeared',
+            ),
+          );
+          return null;
+        }
+        _ref.read(enginePlayContextProvider.notifier).publish(
+              _contextFor(
+                track,
+                decision,
+                offline: decision.networkProfile.isOffline,
+              ).copyWith(localPath: path),
+            );
+        return path;
+      case SmartPlayMode.stream:
+        final source = await resolveStreamSource(track, decision);
+        if (source == null) {
+          log.add(
+            EngineEvent.warning(
+              'queue',
+              'Deferred item ${track.name}: no stream source resolved',
+            ),
+          );
+          return null;
+        }
+        _session.markSuccess(source);
+        _ref.read(enginePlayContextProvider.notifier).publish(
+              EnginePlayContext(
+                trackId: track.id,
+                mode: SmartPlayMode.stream,
+                providerId: source.providerId,
+                quality: source.quality,
+                characteristics: source.characteristics,
+                offline: false,
+                startedAt: DateTime.now(),
+              ),
+            );
+        return source.uri;
+      case SmartPlayMode.download:
+      case SmartPlayMode.downloadAndPlay:
+        // A queued download cannot start playback from the resolver (it must
+        // complete first); be honest instead of blocking the queue.
+        log.add(
+          EngineEvent.info(
+            'queue',
+            'Deferred item ${track.name} resolves to download - '
+            'queueing download and stopping queue playback',
+          ),
+        );
+        await _startDownload(track, decision);
+        return null;
+      case SmartPlayMode.unavailable:
+        log.add(
+          EngineEvent.warning(
+            'queue',
+            'Deferred item ${track.name} unavailable: '
+            '${decision.reason ?? ''}',
+          ),
+        );
+        return null;
     }
   }
 
@@ -475,12 +705,21 @@ class StreamingEngineController {
     );
   }
 
-  /// Starts a full queue with Smart Play applied per track. The first track is
-  /// preflighted before playback starts; the remainder are preloaded.
+  /// Starts a full queue with Smart Play applied per track. The first track
+  /// runs the complete decision ladder (local -> stream -> download & play);
+  /// the remainder are queued as either direct local items or deferred engine
+  /// items whose source is resolved lazily when playback reaches them, so a
+  /// long queue never pre-resolves dozens of provider URLs up front.
+  ///
+  /// [resolvedPaths] may carry pre-resolved local file paths aligned with
+  /// [tracks] as passed (before [startIndex] rotation) - e.g. the batch
+  /// lookup performed by the playback provider. When omitted the engine
+  /// resolves paths itself.
   Future<EnginePlayResult> playTracks(
     List<Track> tracks, {
     int startIndex = 0,
     String? localPath,
+    List<String?>? resolvedPaths,
   }) async {
     ensureFailureHook();
     if (tracks.isEmpty) {
@@ -493,20 +732,92 @@ class StreamingEngineController {
         ),
       );
     }
-    final first = tracks[startIndex.clamp(0, tracks.length - 1)];
-    final result = await playTrack(first, localPath: localPath);
-
-    if (result.started ||
-        result.decision.mode == SmartPlayMode.downloadAndPlay) {
-      // Preload the next tracks so the natural next-track switch is instant.
-      final upcoming = tracks
-          .skip(startIndex + 1)
-          .take(_ref.read(engineSettingsProvider).preloadWindow)
-          .toList(growable: false);
-      unawaited(_preloadUpcoming(upcoming));
+    final safeStart = startIndex.clamp(0, tracks.length - 1);
+    final ordered = safeStart == 0
+        ? List<Track>.of(tracks, growable: false)
+        : <Track>[
+            ...tracks.sublist(safeStart),
+            ...tracks.sublist(0, safeStart),
+          ];
+    final hasPaths = resolvedPaths != null &&
+        resolvedPaths.length == tracks.length;
+    var paths = hasPaths
+        ? List<String?>.of(resolvedPaths, growable: false)
+        : await _ref
+              .read(playbackProvider.notifier)
+              .resolveTrackFilePaths(ordered);
+    if (safeStart != 0 && hasPaths) {
+      paths = <String?>[
+        ...paths.sublist(safeStart),
+        ...paths.sublist(0, safeStart),
+      ];
     }
-    return result;
+
+    final first = ordered.first;
+    final firstResult = await playTrack(
+      first,
+      localPath: localPath ?? paths.first,
+    );
+
+    if (!firstResult.started &&
+        firstResult.decision.mode != SmartPlayMode.downloadAndPlay &&
+        firstResult.decision.mode != SmartPlayMode.download) {
+      return firstResult;
+    }
+
+    // Queue the remainder after the started item. Local copies play directly;
+    // everything else is deferred to play time (a fresh Smart Play decision
+    // per track: a file downloaded in the meantime is picked up, and stream
+    // URLs are never stale).
+    final remainder = <PlayableMedia>[];
+    for (var i = 1; i < ordered.length; i++) {
+      final track = ordered[i];
+      _registerTrack(track.id, track);
+      final path = i < paths.length ? paths[i] : null;
+      if (path != null && path.trim().isNotEmpty) {
+        remainder.add(_localMediaFor(track, path));
+      } else {
+        remainder.add(_deferredMediaFor(track));
+      }
+    }
+    if (remainder.isNotEmpty) {
+      final controller = _ref.read(musicPlayerControllerProvider);
+      unawaited(controller.addAllToQueue(remainder));
+    }
+
+    // Preload the next tracks so the natural next-track switch is instant.
+    final upcoming = ordered
+        .skip(1)
+        .take(_ref.read(engineSettingsProvider).preloadWindow)
+        .toList(growable: false);
+    unawaited(_preloadUpcoming(upcoming));
+    return firstResult;
   }
+
+  PlayableMedia _localMediaFor(Track track, String path) => PlayableMedia(
+    id: path,
+    source: path,
+    title: track.name.isEmpty ? 'Unknown title' : track.name,
+    artist: track.artistName.isEmpty ? 'Unknown artist' : track.artistName,
+    album: track.albumName,
+    artUri: normalizeRemoteHttpUrl(track.coverUrl),
+    duration: track.duration > 0 ? Duration(seconds: track.duration) : null,
+    explicit: track.isExplicit,
+    playbackMode: 'local',
+  );
+
+  PlayableMedia _deferredMediaFor(Track track) => PlayableMedia(
+    id: track.id,
+    source: PlayableMedia.deferredStreamUriFor(track.id),
+    title: track.name.isEmpty ? 'Unknown title' : track.name,
+    artist: track.artistName.isEmpty ? 'Unknown artist' : track.artistName,
+    album: track.albumName,
+    artUri: normalizeRemoteHttpUrl(track.coverUrl),
+    duration: track.duration > 0 ? Duration(seconds: track.duration) : null,
+    explicit: track.isExplicit,
+    playbackMode: 'stream',
+    sourceLabel: 'Smart Play',
+  );
 
   Future<void> _preloadUpcoming(List<Track> upcoming) async {
     final settings = _ref.read(engineSettingsProvider);
@@ -653,28 +964,46 @@ class StreamingEngineController {
     Track track,
     SmartPlayDecision decision,
   ) async {
-    final source = decision.source;
+    final source = await resolveStreamSource(track, decision);
     if (source == null) {
+      final lastFailure = _session.state.lastFailure;
       return EnginePlayResult(
         started: false,
         decision: decision,
         failure: EnginePlayFailureKind.streamFailed,
-        message: 'No stream source resolved',
+        message: lastFailure?.toString() ?? 'No usable stream source',
       );
     }
+    return _startPlayback(track, decision, source);
+  }
 
-    var selected = source;
+  /// Resolves + preflights the stream source for [decision], walking the
+  /// ranked provider chain on preflight failures (bounded by the configured
+  /// attempt budget). Returns the validated source, or null when the chain is
+  /// exhausted.
+  Future<StreamDescriptor?> resolveStreamSource(
+    Track track,
+    SmartPlayDecision decision,
+  ) async {
+    final initial = decision.source;
+    if (initial == null) return null;
+
+    var selected = initial;
     var outcome = _session.resolve(
       [selected],
       requested: decision.requestedQuality,
     );
     if (outcome.resolved == null) {
-      return EnginePlayResult(
-        started: false,
-        decision: decision,
-        failure: EnginePlayFailureKind.streamFailed,
-        message: outcome.failure?.message ?? 'No usable source',
+      // The Smart Play pick may be expired or health-filtered right now;
+      // consult the full ranked candidate chain before giving up.
+      final candidates = await candidatesFor(track);
+      outcome = _session.resolve(
+        candidates,
+        requested: decision.requestedQuality,
       );
+      if (outcome.resolved == null) {
+        return null;
+      }
     }
     selected = outcome.resolved!;
 
@@ -712,14 +1041,44 @@ class StreamingEngineController {
       _session.proceedWithoutRefresh(selected);
     }
 
-    return _startSource(track, decision, selected);
+    // Preflight with bounded provider failover: every attempt records health
+    // and integrity; URIs already tried are never re-selected.
+    final tried = <String>{};
+    var attempt = 0;
+    final maxAttempts = _maxAttempts();
+    while (true) {
+      attempt += 1;
+      tried.add(selected.uri);
+      if (await _preflightSource(selected)) {
+        return selected;
+      }
+      if (attempt >= maxAttempts) {
+        return null;
+      }
+      final failure = StreamFailure(
+        kind: StreamFailureKind.network,
+        providerId: selected.providerId,
+        attempt: attempt,
+        message: 'preflight failed',
+      );
+      final candidates = await candidatesFor(track);
+      final ranked = _resolver
+          .candidates(candidates, requested: decision.requestedQuality)
+          .where((candidate) => !tried.contains(candidate.uri))
+          .toList(growable: false);
+      final next = _session.onFailure(failure, selected, ranked);
+      if (next == null) {
+        return null;
+      }
+      selected = next;
+    }
   }
 
-  Future<EnginePlayResult> _startSource(
-    Track track,
-    SmartPlayDecision decision,
-    StreamDescriptor source,
-  ) async {
+  /// Single-source preflight: records latency, bandwidth and stream-integrity
+  /// results. Provider *health* is recorded by the session transitions
+  /// (`onFailure` / `markSuccess`) so each attempt is counted exactly once.
+  /// Returns whether the source is playable.
+  Future<bool> _preflightSource(StreamDescriptor source) async {
     final preflight = await _validator.validate(source);
     _network.noteLatency(preflight.latencyMs);
     bandwidth.recordPreflight(
@@ -728,7 +1087,6 @@ class StreamingEngineController {
       providerId: source.providerId,
     );
     if (!preflight.ok) {
-      health.recordFailure(source.providerId, latencyMs: preflight.latencyMs);
       integrity.add(
         StreamIntegrityRecord.failure(
           providerId: source.providerId,
@@ -743,29 +1101,8 @@ class StreamingEngineController {
           'Preflight failed (${source.providerId}): ${preflight.error}',
         ),
       );
-      final failure = StreamFailure(
-        kind: StreamFailureKind.network,
-        providerId: source.providerId,
-        attempt: _session.state.attempt + 1,
-        message: preflight.error,
-      );
-      final next = _session.onFailure(failure, source, const []);
-      if (next == null) {
-        return EnginePlayResult(
-          started: false,
-          decision: decision,
-          failure: EnginePlayFailureKind.streamFailed,
-          message: 'Preflight failed: ${preflight.error}',
-        );
-      }
-      // A real adapter chain usually provides several candidates; try one
-      // more time with the ranked alternative.
-      return _startSource(track, decision, next);
+      return false;
     }
-    health.recordSuccess(
-      source.providerId,
-      latencyMs: preflight.latencyMs,
-    );
     integrity.add(
       StreamIntegrityRecord.success(
         providerId: source.providerId,
@@ -774,15 +1111,24 @@ class StreamingEngineController {
         message: 'Preflight ok',
       ),
     );
+    return true;
+  }
 
+  /// Starts playback of an already-validated [source] through the shared
+  /// audio_service player.
+  Future<EnginePlayResult> _startPlayback(
+    Track track,
+    SmartPlayDecision decision,
+    StreamDescriptor source,
+  ) async {
     final media = _playableFor(track, source);
-    _trackByMediaId[media.id] = track;
+    _registerTrack(media.id, track);
     final controller = _ref.read(musicPlayerControllerProvider);
     try {
       // Progressive URL playback: the audio player streams in real time; the
       // engine only preflight-validates and owns failover.
       await controller.playAll([media]);
-      _session.markSuccess(source, latencyMs: preflight.latencyMs);
+      _session.markSuccess(source);
       _ref.read(enginePlayContextProvider.notifier).publish(
         EnginePlayContext(
           trackId: track.id,
@@ -911,6 +1257,20 @@ class StreamingEngineController {
     if (_failedHookReentrant) return;
     _failedHookReentrant = true;
     try {
+      await _handlePlaybackFailure(media, error);
+    } catch (hookError) {
+      // The failover path must never surface an unhandled async error (e.g.
+      // provider container already disposed during app teardown).
+      log.add(
+        EngineEvent.error('stream', 'Failover hook error: $hookError'),
+      );
+    } finally {
+      _failedHookReentrant = false;
+    }
+  }
+
+  Future<void> _handlePlaybackFailure(PlayableMedia media, Object error) async {
+    {
       final track = _trackByMediaId[media.id];
       if (track == null) return; // Not engine-owned; the player already handled it.
       log.add(
@@ -968,7 +1328,10 @@ class StreamingEngineController {
           ? Duration.zero
           : (await handler.currentPlaybackPosition() ?? Duration.zero);
       if (handler == null) {
-        await _startSource(track, await decide(track), next);
+        final fallbackDecision = await decide(track);
+        if (await _preflightSource(next)) {
+          await _startPlayback(track, fallbackDecision, next);
+        }
         return;
       }
       integrity.add(
@@ -986,8 +1349,6 @@ class StreamingEngineController {
         resumeAt: resumeAt,
       );
       _session.markSuccess(next);
-    } finally {
-      _failedHookReentrant = false;
     }
   }
 
@@ -1189,8 +1550,23 @@ bool shouldAttemptStreamResolution({
 /// Provider wiring
 /// ---------------------------------------------------------------------------
 
+/// Preflight validator used by the engine controller. Overridable in tests.
+final streamPreflightValidatorProvider = Provider<StreamPreflightValidator>(
+  (ref) => HttpStreamPreflightValidator(),
+);
+
+/// Network status monitor used by the engine controller. Overridable in
+/// tests (the connectivity plugin has no test-channel implementation).
+final networkStatusMonitorProvider = Provider<NetworkStatusMonitor>(
+  (ref) => NetworkStatusMonitor(),
+);
+
 final streamingEngineControllerProvider = Provider<StreamingEngineController>(
-  (ref) => StreamingEngineController._(ref),
+  (ref) => StreamingEngineController._(
+    ref,
+    validator: ref.watch(streamPreflightValidatorProvider),
+    network: ref.watch(networkStatusMonitorProvider),
+  ),
 );
 
 final engineDiagnosticsProvider = Provider<StreamingDiagnostics>(

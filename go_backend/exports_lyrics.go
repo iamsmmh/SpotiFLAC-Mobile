@@ -3,7 +3,6 @@ package gobackend
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 )
 
@@ -125,7 +124,7 @@ func FetchAndSaveLyrics(trackName, artistName, spotifyID string, durationMs int6
 	if audioFilePath != "" {
 		existing, err := ExtractLyrics(audioFilePath)
 		if err == nil && rawLyricsHasUsableContent(existing) {
-			if err := os.WriteFile(outputPath, []byte(existing), 0644); err != nil {
+			if err := writeFileAtomic(outputPath, []byte(existing), 0644); err != nil {
 				return fmt.Errorf("failed to write LRC file: %w", err)
 			}
 			GoLog("[Lyrics] Saved LRC from embedded/sidecar to: %s\n", outputPath)
@@ -150,7 +149,7 @@ func FetchAndSaveLyrics(trackName, artistName, spotifyID string, durationMs int6
 		return fmt.Errorf("failed to generate LRC content")
 	}
 
-	if err := os.WriteFile(outputPath, []byte(lrcContent), 0644); err != nil {
+	if err := writeFileAtomic(outputPath, []byte(lrcContent), 0644); err != nil {
 		return fmt.Errorf("failed to write LRC file: %w", err)
 	}
 

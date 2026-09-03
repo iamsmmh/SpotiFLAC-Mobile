@@ -152,6 +152,11 @@ class MusicPlayerController {
   Future<void> addToQueue(PlayableMedia item) async =>
       (await ensureInitialized())?.enqueue(item);
 
+  /// Appends many items after the current one (Smart Play queue building).
+  /// Falls back to replacing the queue when nothing is playing yet.
+  Future<void> addAllToQueue(List<PlayableMedia> items) async =>
+      (await ensureInitialized())?.enqueueAll(items);
+
   Future<void> playNextHistory(DownloadHistoryItem item) async =>
       playNext(playableFromHistory(item));
 

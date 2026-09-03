@@ -382,7 +382,9 @@ func saveLibraryCoverDataToCache(cacheDir, cacheKey string, imageData []byte, mi
 	if strings.Contains(mimeType, "png") {
 		cachePath = pngPath
 	}
-	if err := os.WriteFile(cachePath, imageData, 0644); err != nil {
+	// Atomic write: a torn cover-cache entry would surface as a corrupt
+	// artwork file until the cache key changes.
+	if err := writeFileAtomic(cachePath, imageData, 0644); err != nil {
 		return "", fmt.Errorf("failed to write cover: %w", err)
 	}
 	return cachePath, nil

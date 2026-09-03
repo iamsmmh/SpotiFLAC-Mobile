@@ -129,6 +129,20 @@ class PlayableMedia {
   bool get isRemoteHttp =>
       source.startsWith('http://') || source.startsWith('https://');
 
+  /// Scheme for queue items whose real source (local file or fresh stream
+  /// URL) is resolved lazily by the streaming engine when playback reaches
+  /// them. Long queues cannot resolve every stream URL up front (providers
+  /// rate-limit and URLs expire), so the engine defers resolution to play
+  /// time via [deferredStreamResolver].
+  static const String deferredStreamScheme = 'deferred-stream';
+
+  bool get isDeferredStream => source.startsWith('$deferredStreamScheme://');
+
+  /// Builds a deferred queue item for [trackId]. The engine owns the mapping
+  /// media id → track and resolves a concrete source at play time.
+  static String deferredStreamUriFor(String trackId) =>
+      '$deferredStreamScheme://track/${Uri.encodeComponent(trackId)}';
+
   /// Technical characteristics used for gapless-transition planning.
   AudioCharacteristics get characteristics => AudioCharacteristics(
     codec: format,
@@ -510,6 +524,9 @@ class MusicPlayerHandler extends BaseAudioHandler
     };
   }
 
+  static bool _isHttpSource(String source) =>
+      source.startsWith('http://') || source.startsWith('https://');
+
   bool get _shouldIgnoreComplete =>
       _switchingGeneration != 0 || _interruptionActive || _userPaused;
 
@@ -658,6 +675,15 @@ class MusicPlayerHandler extends BaseAudioHandler
         trackPeak: media.trackPeak,
       );
     }
+    if (media.isDeferredStream && _isHttpSource(path)) {
+      // Deferred queue item that resolved to a stream URL: gains were carried
+      // on the media by the engine, exactly like a pre-resolved URL source.
+      return ReplayGain.volume(
+        trackGainDb: media.trackGainDb,
+        albumGainDb: media.albumGainDb,
+        trackPeak: media.trackPeak,
+      );
+    }
 
     final cached = _normalizationVolumeCache[path];
     if (cached != null) return cached;
@@ -702,6 +728,22 @@ class MusicPlayerHandler extends BaseAudioHandler
   }
 
   Future<String?> _resolveSource(PlayableMedia media) async {
+    if (media.isDeferredStream) {
+      // Engine-owned queue item: resolve a fresh local path / stream URL at
+      // play time (Smart Play ladder re-runs, so an expired URL or a newly
+      // downloaded file is both handled).
+      final resolver = deferredStreamResolver;
+      if (resolver == null) {
+        _log.w('No deferred-stream resolver installed for ${media.title}');
+        return null;
+      }
+      try {
+        return await resolver(media);
+      } catch (e) {
+        _log.e('Deferred source resolution failed for ${media.title}: $e');
+        return null;
+      }
+    }
     if (!media.isContentUri) return media.source;
 
     final cached = _resolvedPathCache[media.source];
@@ -1063,8 +1105,9 @@ class MusicPlayerHandler extends BaseAudioHandler
       await _player.setVolume(normalizationVolume);
       if (!_isCurrentPlayRequest(generation, media)) return;
       // Progressive HTTP sources play with UrlSource (the streaming engine
-      // preflighted them); local/content URIs use DeviceFileSource.
-      final source = media.isRemoteHttp
+      // preflighted them); local/content URIs use DeviceFileSource. Deferred
+      // items decide by their *resolved* source, which may be either.
+      final source = _isHttpSource(resolved)
           ? UrlSource(resolved)
           : DeviceFileSource(resolved);
       await _player.play(
@@ -1081,8 +1124,10 @@ class MusicPlayerHandler extends BaseAudioHandler
       // Plain file paths were already published before loading. Re-publishing
       // them with an identical resolved path made Now Playing clear and probe
       // the same metadata twice on every Next. SAF needs this second event so
-      // the UI can inspect its temporary local copy.
-      if (media.isContentUri) {
+      // the UI can inspect its temporary local copy; deferred engine items
+      // need it so lyrics/metadata flows see the concrete resolved source
+      // instead of the placeholder URI.
+      if (media.isContentUri || media.isDeferredStream) {
         mediaItem.add(media.toMediaItem(resolvedSource: resolved));
       }
       _broadcastPosition(effectiveStartPosition, force: true);
@@ -1562,6 +1607,18 @@ void setPlaybackFailureListener(PlaybackFailureListener listener) {
   playbackFailureListener = listener;
 }
 
+/// Lazy source resolver installed by the streaming engine for queue items
+/// created with [PlayableMedia.deferredStreamUriFor]. Receives the deferred
+/// media and returns a concrete local file path or stream URL (or null when
+/// the track cannot be resolved, which stops playback gracefully).
+typedef DeferredStreamResolver = Future<String?> Function(PlayableMedia media);
+
+DeferredStreamResolver? deferredStreamResolver;
+
+void setDeferredStreamResolver(DeferredStreamResolver? resolver) {
+  deferredStreamResolver = resolver;
+}
+
 /// Runtime observer for privacy-first listening statistics. The callback is
 /// installed by the statistics provider at app bootstrap; it is a plain
 /// function pointer so the audio handler never needs to know about Riverpod.
@@ -1648,7 +1705,11 @@ Future<void> restorePersistedPlaybackSession() async {
       if (entry is! Map) continue;
       final media = PlayableMedia.fromJson(Map<String, dynamic>.from(entry));
       if (media == null) continue;
-      if (!media.isContentUri && !await File(media.source).exists()) {
+      // Deferred engine items are always kept: their real source is resolved
+      // fresh at play time (a persisted URL/path would be stale anyway).
+      if (!media.isContentUri &&
+          !media.isDeferredStream &&
+          !await File(media.source).exists()) {
         continue;
       }
       items.add(media);
