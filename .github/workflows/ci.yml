@@ -121,9 +121,11 @@ jobs:
                   print('::error::' + line.replace('%', '%25').replace('\n', '%0A'))
           else:
               for i, block in enumerate(failing, 1):
-                  head, _, rest = block.partition('::endgroup::')
+                  head, sep, _rest = block.partition('::endgroup::')
+                  if not sep:
+                      continue
                   title = head.splitlines()[0].replace('::group::', '').strip()
-                  lines = [l.rstrip() for l in rest.splitlines() if l.strip()]
+                  lines = [l.rstrip() for l in head.splitlines()[1:] if l.strip()]
                   detail = '\n'.join(lines[:60])
                   if len(detail) > 2200:
                       detail = detail[:2200] + ' ...[truncated]'
