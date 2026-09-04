@@ -55,7 +55,7 @@ internal class AudioEffectsController(private val engineProvider: () -> FlutterE
         fun release() {
             for (effect in listOf(dynamics, equalizer, bassBoost, virtualizer, enhancer)) {
                 try {
-                    effect?.enabled = false
+                    effect?.setEnabled(false)
                 } catch (_: Exception) {}
                 try {
                     effect?.release()
@@ -208,7 +208,7 @@ internal class AudioEffectsController(private val engineProvider: () -> FlutterE
                 }
             } else {
                 chain.dynamics?.let {
-                    try { it.enabled = false } catch (_: Exception) {}
+                    try { it.setEnabled(false) } catch (_: Exception) {}
                     try { it.release() } catch (_: Exception) {}
                 }
                 chain.dynamics = null
@@ -220,7 +220,7 @@ internal class AudioEffectsController(private val engineProvider: () -> FlutterE
                 applyEqualizer(eq, centers, gains)
             } else {
                 chain.equalizer?.let {
-                    try { it.enabled = false } catch (_: Exception) {}
+                    try { it.setEnabled(false) } catch (_: Exception) {}
                     try { it.release() } catch (_: Exception) {}
                 }
                 chain.equalizer = null
@@ -232,10 +232,10 @@ internal class AudioEffectsController(private val engineProvider: () -> FlutterE
             if (effect.strengthSupported) {
                 effect.setStrength(AudioEffectsPolicy.strengthPermille(bassBoost))
             }
-            effect.enabled = true
+            effect.setEnabled(true)
         } else {
             chain.bassBoost?.let {
-                try { it.enabled = false } catch (_: Exception) {}
+                try { it.setEnabled(false) } catch (_: Exception) {}
                 try { it.release() } catch (_: Exception) {}
             }
             chain.bassBoost = null
@@ -246,10 +246,10 @@ internal class AudioEffectsController(private val engineProvider: () -> FlutterE
             if (effect.strengthSupported) {
                 effect.setStrength(AudioEffectsPolicy.strengthPermille(virtualizer))
             }
-            effect.enabled = true
+            effect.setEnabled(true)
         } else {
             chain.virtualizer?.let {
-                try { it.enabled = false } catch (_: Exception) {}
+                try { it.setEnabled(false) } catch (_: Exception) {}
                 try { it.release() } catch (_: Exception) {}
             }
             chain.virtualizer = null
@@ -258,10 +258,10 @@ internal class AudioEffectsController(private val engineProvider: () -> FlutterE
         if (enhancerGainDb > 0.0) {
             val effect = chain.enhancer ?: LoudnessEnhancer(sessionId).also { chain.enhancer = it }
             effect.setTargetGain(AudioEffectsPolicy.enhancerGainMb(enhancerGainDb))
-            effect.enabled = true
+            effect.setEnabled(true)
         } else {
             chain.enhancer?.let {
-                try { it.enabled = false } catch (_: Exception) {}
+                try { it.setEnabled(false) } catch (_: Exception) {}
                 try { it.release() } catch (_: Exception) {}
             }
             chain.enhancer = null
@@ -337,7 +337,7 @@ internal class AudioEffectsController(private val engineProvider: () -> FlutterE
             0f,
         )
         dp.setLimiterAllChannelsTo(limiter)
-        dp.enabled = true
+        dp.setEnabled(true)
     }
 
     private fun applyEqualizer(eq: Equalizer, centers: List<Int>, gains: List<Double>) {
@@ -354,7 +354,7 @@ internal class AudioEffectsController(private val engineProvider: () -> FlutterE
         for (band in 0 until deviceBands) {
             eq.setBandLevel(band.toShort(), levels[band])
         }
-        eq.enabled = true
+        eq.setEnabled(true)
     }
 
     /** playerId → audio session id, for every music player that currently exists. */

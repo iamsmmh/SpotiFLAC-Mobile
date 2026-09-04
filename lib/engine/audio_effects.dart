@@ -289,7 +289,7 @@ class AudioEffectsSettings {
     return AudioEffectsSettings(
       enabled: json['enabled'] as bool? ?? false,
       bandGainsDb: normalizeBandGains(json['band_gains_db']),
-      presetName: presetRaw == null ? null : presetRaw.toString(),
+      presetName: presetRaw?.toString(),
       bassBoost: _finite(json['bass_boost'], 0),
       virtualizer: _finite(json['virtualizer'], 0),
       enhancerGainDb: _finite(json['enhancer_gain_db'], 0),
