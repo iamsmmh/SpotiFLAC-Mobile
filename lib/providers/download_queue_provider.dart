@@ -344,7 +344,10 @@ class DownloadQueueNotifier extends Notifier<DownloadQueueState> {
 
   bool _networkPausedByWifiOnly = false;
   bool _schedulePausedByWindow = false;
+  String? _scheduleBlockReason;
+  bool _scheduleGateInFlight = false;
   Timer? _scheduleTimer;
+  static const Duration _scheduleMonitorInterval = Duration(seconds: 30);
   List<ConnectivityResult>? _lastConnectivityResults;
   DateTime _lastConnectionCleanupAt = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastReconnectRetryPromptAt = DateTime.fromMillisecondsSinceEpoch(0);
@@ -390,7 +393,10 @@ class DownloadQueueNotifier extends Notifier<DownloadQueueState> {
       (previous, next) {
         if (previous?.enabled != next.enabled ||
             previous?.startMinute != next.startMinute ||
-            previous?.endMinute != next.endMinute) {
+            previous?.endMinute != next.endMinute ||
+            previous?.requireCharging != next.requireCharging ||
+            previous?.minBatteryPercent != next.minBatteryPercent ||
+            previous?.requireWifi != next.requireWifi) {
           Future<void>.microtask(_applyScheduleGate);
         }
       },
@@ -1159,7 +1165,7 @@ class DownloadQueueNotifier extends Notifier<DownloadQueueState> {
       if (_hasActiveAndroidNativeWorker) {
         PlatformBridge.resumeNativeDownloadWorker().catchError((_) {});
       }
-      state = state.copyWith(isPaused: false);
+      state = state.copyWith(isPaused: false, scheduleHoldReason: null);
       _persistUserPausedQueue(false);
       _log.i('Queue resumed');
       if (state.queuedCount > 0 && !state.isProcessing) {
@@ -1476,10 +1482,9 @@ class DownloadQueueNotifier extends Notifier<DownloadQueueState> {
       return;
     }
 
-    // Scheduled window gate: the queue waits behind a closed download window
-    // and resumes itself once the window opens.
-    await _applyScheduleGate();
-    if (_scheduleBlocked) return;
+    // Schedule gate (time window + charging/battery/WiFi conditions): the
+    // queue waits behind a closed schedule and resumes itself once it opens.
+    if (await _applyScheduleGate()) return;
 
     var settings = ref.read(settingsProvider);
     updateSettings(settings);

@@ -634,7 +634,15 @@ class _DownloadSettingsPageState extends ConsumerState<DownloadSettingsPage> {
   String _scheduleSubtitle(WidgetRef ref) {
     final schedule = ref.watch(downloadScheduleSettingsProvider);
     if (!schedule.enabled) return 'Off';
-    return '${schedule.startLabel} → ${schedule.endLabel}';
+    final parts = <String>[
+      if (!schedule.allDay) '${schedule.startLabel} → ${schedule.endLabel}',
+      if (schedule.requireWifi) 'WiFi',
+      if (schedule.requireCharging)
+        'charging'
+      else if (schedule.minBatteryPercent > 0)
+        '≥${schedule.minBatteryPercent}%',
+    ];
+    return parts.isEmpty ? 'Any time' : parts.join(' · ');
   }
 
   void _showNetworkModePicker(

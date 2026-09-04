@@ -11,6 +11,7 @@ import 'package:spotimusic/engine/audio_characteristics.dart';
 import 'package:spotimusic/engine/gapless_policy.dart';
 import 'package:spotimusic/engine/replay_gain.dart';
 import 'package:spotimusic/services/app_state_database.dart';
+import 'package:spotimusic/services/media_browse_tree.dart';
 import 'package:spotimusic/services/platform_bridge.dart';
 import 'package:spotimusic/utils/int_utils.dart';
 import 'package:spotimusic/utils/logger.dart';
@@ -1640,16 +1641,38 @@ class MusicPlayerHandler extends BaseAudioHandler
   @override
   Future<void> skipToQueueItem(int index) => _playIndex(index);
 
+  /// Snapshot of the queue as playable media (for the browse tree).
+  List<PlayableMedia> currentQueueMedia() =>
+      List<PlayableMedia>.unmodifiable(_media);
+
+  /// Android Auto / AVRCP browsing. Delegates to the installed
+  /// [MediaBrowseBinding] (library, playlists, albums, recents); without one
+  /// (tests, very early startup) the queue is the whole tree, as before.
   @override
   Future<List<MediaItem>> getChildren(
     String parentMediaId, [
     Map<String, dynamic>? options,
   ]) async {
+    final binding = MediaBrowseBinding.current;
+    if (binding != null) {
+      try {
+        final page = _browsePage(options);
+        return await binding.tree.children(parentMediaId, page: page);
+      } catch (e) {
+        _log.w('Browse children failed for $parentMediaId: $e');
+      }
+    }
     if (parentMediaId == AudioService.browsableRootId ||
         parentMediaId == AudioService.recentRootId) {
       return List<MediaItem>.unmodifiable(_queueItems);
     }
     return const [];
+  }
+
+  static int _browsePage(Map<String, dynamic>? options) {
+    final raw = options?['android.media.browse.extra.PAGE'];
+    if (raw is int && raw >= 0) return raw;
+    return 0;
   }
 
   @override
@@ -1659,13 +1682,81 @@ class MusicPlayerHandler extends BaseAudioHandler
     return _queueItems[index];
   }
 
+  /// Plays a media id coming from the notification, a car head unit or a
+  /// browse result. Queue items play in place; browse results start their
+  /// enclosing container (album, playlist, section) from the tapped track.
   @override
   Future<void> playFromMediaId(
     String mediaId, [
     Map<String, dynamic>? extras,
   ]) async {
     final index = _media.indexWhere((m) => m.id == mediaId);
+    final containerId = extras?[MediaBrowseTree.containerExtraKey]?.toString();
+    if (index >= 0 &&
+        (containerId == null || containerId == MediaBrowseTree.queueId)) {
+      await _playIndex(index);
+      return;
+    }
+    final binding = MediaBrowseBinding.current;
+    if (binding == null) {
+      if (index >= 0) await _playIndex(index);
+      return;
+    }
+    try {
+      final media = containerId == null
+          ? null
+          : await binding.tree.containerMedia(containerId);
+      if (media != null && media.isNotEmpty) {
+        var start = media.indexWhere((m) => m.id == mediaId);
+        if (start < 0) start = 0;
+        await binding.playContainer(media, start);
+        return;
+      }
+    } catch (e) {
+      _log.w('Browse play failed for $mediaId: $e');
+    }
     if (index >= 0) await _playIndex(index);
+  }
+
+  /// Browse-service search (Android Auto search box, AVRCP search).
+  @override
+  Future<List<MediaItem>> search(
+    String query, [
+    Map<String, dynamic>? extras,
+  ]) async {
+    final binding = MediaBrowseBinding.current;
+    if (binding == null) return const [];
+    try {
+      return await binding.tree.search(query);
+    } catch (e) {
+      _log.w('Browse search failed: $e');
+      return const [];
+    }
+  }
+
+  /// Voice request ("play <query>"): plays the best offline match with the
+  /// remaining results queued behind it. An empty query resumes playback.
+  @override
+  Future<void> playFromSearch(
+    String query, [
+    Map<String, dynamic>? extras,
+  ]) async {
+    if (query.trim().isEmpty) {
+      await play();
+      return;
+    }
+    final binding = MediaBrowseBinding.current;
+    if (binding == null) return;
+    try {
+      final media = await binding.tree.source.searchMedia(query, limit: 50);
+      if (media.isEmpty) {
+        _log.i('Voice search "$query": no offline match');
+        return;
+      }
+      await binding.playContainer(media, 0);
+    } catch (e) {
+      _log.w('Voice search failed: $e');
+    }
   }
 
   @override
@@ -1787,6 +1878,35 @@ PlaybackFailureListener? playbackFailureListener;
 
 void setPlaybackFailureListener(PlaybackFailureListener listener) {
   playbackFailureListener = listener;
+}
+
+/// Starts [media] from [startIndex]; installed by the app so the handler can
+/// route browse taps through the same play path as the in-app UI.
+typedef MediaBrowsePlayContainer =
+    Future<void> Function(List<PlayableMedia> media, int startIndex);
+
+/// The browse tree + play callback the audio service uses for Android Auto /
+/// AVRCP browsing. Process-global like the other handler hooks because the
+/// handler is created by `AudioService.init` outside any provider scope.
+class MediaBrowseBinding {
+  const MediaBrowseBinding({required this.tree, required this.playContainer});
+
+  final MediaBrowseTree tree;
+  final MediaBrowsePlayContainer playContainer;
+
+  static MediaBrowseBinding? _current;
+  static MediaBrowseBinding? get current => _current;
+
+  static void install({
+    required MediaBrowseTree tree,
+    required MediaBrowsePlayContainer playContainer,
+  }) {
+    _current = MediaBrowseBinding(tree: tree, playContainer: playContainer);
+  }
+
+  static void uninstall() {
+    _current = null;
+  }
 }
 
 /// Lazy source resolver installed by the streaming engine for queue items

@@ -461,6 +461,12 @@ class StreamingEngineController {
   /// The engine-owned track for a playing media id (used by "details" flows).
   Track? trackFor(String mediaId) => _trackByMediaId[mediaId];
 
+  /// Registers a track that another surface (e.g. the media browse tree)
+  /// enqueues as a deferred item, so [resolveDeferredSource] can resolve it
+  /// with full metadata (ISRC, cover) instead of the placeholder's title only.
+  void registerTrackForDeferred(Track track) =>
+      _registerTrack(track.id, track);
+
   /// Registers a media id -> track mapping, bounded LRU-style so a long
   /// listening session cannot grow the registry without limit.
   void _registerTrack(String mediaId, Track track) {

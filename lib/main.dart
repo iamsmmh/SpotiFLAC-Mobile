@@ -20,6 +20,7 @@ import 'package:spotimusic/providers/download_schedule_settings_provider.dart';
 import 'package:spotimusic/providers/engine_settings_provider.dart';
 import 'package:spotimusic/providers/extension_provider.dart';
 import 'package:spotimusic/providers/local_library_provider.dart';
+import 'package:spotimusic/providers/media_browse_provider.dart';
 import 'package:spotimusic/providers/playback_statistics_provider.dart';
 import 'package:spotimusic/providers/runtime_profile_provider.dart';
 import 'package:spotimusic/providers/settings_provider.dart';
@@ -453,6 +454,10 @@ class _EagerInitializationState extends ConsumerState<_EagerInitialization>
     final statsNotifier = ref.read(playbackStatisticsProvider.notifier);
     unawaited(statsNotifier.load());
     installPlaybackStatisticsRecording(ref);
+
+    // Android Auto / AVRCP browse tree (queue, recents, loved, playlists,
+    // albums, songs) backed by the offline stores; voice search included.
+    installMediaBrowsing(ref);
   }
 
   Timer _scheduleProviderWarmup(Duration delay, VoidCallback action) {

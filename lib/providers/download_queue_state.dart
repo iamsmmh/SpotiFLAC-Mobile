@@ -12,6 +12,10 @@ class DownloadQueueState {
   final DownloadItem? currentDownload;
   final bool isProcessing;
   final bool isPaused;
+
+  /// Why the download schedule is holding the queue (e.g. "waiting for
+  /// charger"); null when the pause is user-initiated or the queue runs.
+  final String? scheduleHoldReason;
   final String outputDir;
   final String filenameFormat;
   final String singleFilenameFormat;
@@ -24,6 +28,7 @@ class DownloadQueueState {
     this.currentDownload,
     this.isProcessing = false,
     this.isPaused = false,
+    this.scheduleHoldReason,
     this.outputDir = '',
     this.filenameFormat = '{artist} - {title}',
     this.singleFilenameFormat = '{title} - {artist}',
@@ -37,6 +42,7 @@ class DownloadQueueState {
     Object? currentDownload = _noChange,
     bool? isProcessing,
     bool? isPaused,
+    Object? scheduleHoldReason = _noChange,
     String? outputDir,
     String? filenameFormat,
     String? singleFilenameFormat,
@@ -56,6 +62,9 @@ class DownloadQueueState {
           : currentDownload as DownloadItem?,
       isProcessing: isProcessing ?? this.isProcessing,
       isPaused: isPaused ?? this.isPaused,
+      scheduleHoldReason: identical(scheduleHoldReason, _noChange)
+          ? this.scheduleHoldReason
+          : scheduleHoldReason as String?,
       outputDir: outputDir ?? this.outputDir,
       filenameFormat: filenameFormat ?? this.filenameFormat,
       singleFilenameFormat: singleFilenameFormat ?? this.singleFilenameFormat,

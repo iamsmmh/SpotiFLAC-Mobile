@@ -18,10 +18,7 @@ void main() {
     title: title,
     artist: artist,
     duration: const Duration(minutes: 3),
-    extras: {
-      'source': source,
-      if (resolvedSource != null) 'resolvedSource': resolvedSource,
-    },
+    extras: {'source': source, 'resolvedSource': ?resolvedSource},
   );
 
   group('isStreamedMediaItem', () {

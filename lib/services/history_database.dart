@@ -757,6 +757,22 @@ class HistoryDatabase {
     return rows.map(_dbRowToJson).toList(growable: false);
   }
 
+  /// Tracks of one album by its stable `album_key` (the key the queue tab's
+  /// album grouping and the media browse tree hand around).
+  Future<List<Map<String, dynamic>>> getAlbumTracksByKey(
+    String albumKey,
+  ) async {
+    final db = await database;
+    final rows = await db.query(
+      'history',
+      where: 'album_key = ?',
+      whereArgs: [albumKey],
+      orderBy:
+          'COALESCE(disc_number, 0), COALESCE(track_number, 0), track_name',
+    );
+    return rows.map(_dbRowToJson).toList(growable: false);
+  }
+
   Future<Map<String, dynamic>?> findByTrackAndArtist(
     String trackName,
     String artistName,

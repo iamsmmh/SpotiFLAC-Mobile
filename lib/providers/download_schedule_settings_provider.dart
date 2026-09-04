@@ -20,11 +20,59 @@ class DownloadScheduleSettings {
   /// End of the allowed download window (minutes since local midnight).
   final int endMinute;
 
+  /// Only download while the device is plugged in (charging or full).
+  final bool requireCharging;
+
+  /// Do not start/continue downloads below this battery percentage
+  /// (0 = disabled). Ignored while charging.
+  final int minBatteryPercent;
+
+  /// Only download on WiFi/ethernet while scheduling is enabled. Independent
+  /// of the global "WiFi only" download network mode so a nightly window can
+  /// be WiFi-gated without changing daytime behavior.
+  final bool requireWifi;
+
   const DownloadScheduleSettings({
     this.enabled = false,
     this.startMinute = 22 * 60, // 22:00
     this.endMinute = 7 * 60, // 07:00 (next day)
+    this.requireCharging = false,
+    this.minBatteryPercent = 0,
+    this.requireWifi = false,
   });
+
+  /// Whether the time window is the "whole day" (start == end), i.e. the
+  /// schedule consists only of device conditions.
+  bool get allDay => startMinute == endMinute;
+
+  /// Whether any device condition (charging/battery/WiFi) is configured.
+  bool get hasDeviceConditions =>
+      requireCharging || minBatteryPercent > 0 || requireWifi;
+
+  /// Evaluates the device conditions against a live snapshot. Unknown power
+  /// information never blocks (the platform could not tell, so the user's
+  /// intent cannot be honored either way and downloads must not silently
+  /// stall forever); an unknown network is treated as "not WiFi".
+  ///
+  /// Returns null when downloads may run, otherwise a short reason.
+  String? blockedReason({
+    required bool charging,
+    required int batteryLevel,
+    required bool powerKnown,
+    required bool onWifi,
+  }) {
+    if (requireWifi && !onWifi) return 'waiting for WiFi';
+    if (powerKnown) {
+      if (requireCharging && !charging) return 'waiting for charger';
+      if (minBatteryPercent > 0 &&
+          !charging &&
+          batteryLevel >= 0 &&
+          batteryLevel < minBatteryPercent) {
+        return 'battery below $minBatteryPercent%';
+      }
+    }
+    return null;
+  }
 
   /// Whether a window that crosses midnight is active now.
   bool isWithinWindow(DateTime now) {
@@ -72,23 +120,43 @@ class DownloadScheduleSettings {
     bool? enabled,
     int? startMinute,
     int? endMinute,
+    bool? requireCharging,
+    int? minBatteryPercent,
+    bool? requireWifi,
   }) => DownloadScheduleSettings(
     enabled: enabled ?? this.enabled,
     startMinute: (startMinute ?? this.startMinute).clamp(0, 1439),
     endMinute: (endMinute ?? this.endMinute).clamp(0, 1439),
+    requireCharging: requireCharging ?? this.requireCharging,
+    minBatteryPercent: (minBatteryPercent ?? this.minBatteryPercent).clamp(
+      0,
+      100,
+    ),
+    requireWifi: requireWifi ?? this.requireWifi,
   );
 
   Map<String, dynamic> toJson() => {
     'enabled': enabled,
     'start_minute': startMinute,
     'end_minute': endMinute,
+    'require_charging': requireCharging,
+    'min_battery_percent': minBatteryPercent,
+    'require_wifi': requireWifi,
   };
 
+  /// Older stores (v1 without device conditions) decode with the conditions
+  /// off, so an existing nightly window keeps behaving exactly as before.
   factory DownloadScheduleSettings.fromJson(Map<String, dynamic> json) =>
       DownloadScheduleSettings(
         enabled: json['enabled'] as bool? ?? false,
-        startMinute: (json['start_minute'] as num?)?.toInt() ?? 22 * 60,
-        endMinute: (json['end_minute'] as num?)?.toInt() ?? 7 * 60,
+        startMinute:
+            ((json['start_minute'] as num?)?.toInt() ?? 22 * 60).clamp(0, 1439),
+        endMinute:
+            ((json['end_minute'] as num?)?.toInt() ?? 7 * 60).clamp(0, 1439),
+        requireCharging: json['require_charging'] as bool? ?? false,
+        minBatteryPercent:
+            ((json['min_battery_percent'] as num?)?.toInt() ?? 0).clamp(0, 100),
+        requireWifi: json['require_wifi'] as bool? ?? false,
       );
 }
 
@@ -143,6 +211,30 @@ class DownloadScheduleSettingsNotifier
 
   Future<void> setEndMinute(int value) =>
       _apply(state.copyWith(endMinute: value));
+
+  Future<void> setRequireCharging(bool value) =>
+      _apply(state.copyWith(requireCharging: value));
+
+  Future<void> setMinBatteryPercent(int value) =>
+      _apply(state.copyWith(minBatteryPercent: value));
+
+  Future<void> setRequireWifi(bool value) =>
+      _apply(state.copyWith(requireWifi: value));
+
+  /// One-tap presets shown in the scheduling page.
+  Future<void> applyNightPreset() => _apply(
+    state.copyWith(enabled: true, startMinute: 22 * 60, endMinute: 7 * 60),
+  );
+
+  Future<void> applyChargingWifiPreset() => _apply(
+    state.copyWith(
+      enabled: true,
+      startMinute: 0,
+      endMinute: 0,
+      requireCharging: true,
+      requireWifi: true,
+    ),
+  );
 }
 
 final downloadScheduleEnabledProvider = Provider<bool>(
