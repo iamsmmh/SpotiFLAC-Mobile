@@ -300,11 +300,11 @@ internal class AudioEffectsController(private val engineProvider: () -> FlutterE
             val eqBand = DynamicsProcessing.EqBand(true, cutoffs[band], gains[band].toFloat())
             dp.setPreEqBandAllChannelsTo(band, eqBand)
         }
-        val preEq = dp.getPreEqByChannel(0)
+        val preEq = dp.getPreEqByChannelIndex(0)
         preEq.isEnabled = gains.any { it != 0.0 }
         dp.setPreEqAllChannelsTo(preEq)
 
-        val mbc = dp.getMbcByChannel(0)
+        val mbc = dp.getMbcByChannelIndex(0)
         mbc.isEnabled = compressorEnabled
         if (compressorEnabled && mbc.bandCount > 0) {
             val band = mbc.getBand(0)
