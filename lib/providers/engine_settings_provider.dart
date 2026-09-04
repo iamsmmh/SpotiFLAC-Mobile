@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:spotimusic/engine/audio_characteristics.dart';
+import 'package:spotimusic/engine/crossfade_policy.dart';
 import 'package:spotimusic/engine/smart_play.dart';
 
 /// Engine settings.
@@ -59,6 +60,17 @@ class EngineSettings {
   /// teardown for compatible lossless tracks).
   final bool gaplessEnabled;
 
+  /// Crossfade overlap between consecutive queue items in seconds
+  /// (0 = off, 1–12). Applied by the audio service with a second player.
+  final int crossfadeSeconds;
+
+  CrossfadeSettings get crossfade =>
+      CrossfadeSettings(seconds: crossfadeSeconds, smart: crossfadeSmart);
+
+  /// Smart crossfade: skip the overlap for album-continuous neighbours,
+  /// lossless pairs that splice gaplessly, and very short tracks.
+  final bool crossfadeSmart;
+
   /// Extra lookahead (seconds) buffered on low-bandwidth networks so a brief
   /// stall never interrupts playback.
   final int lowBandwidthBufferSeconds;
@@ -104,6 +116,8 @@ class EngineSettings {
     this.maxCacheSizeMb = 0,
     this.autoCleanCache = true,
     this.gaplessEnabled = true,
+    this.crossfadeSeconds = 0,
+    this.crossfadeSmart = true,
     this.lowBandwidthBufferSeconds = 30,
     this.prebufferHeadBytesKb = 512,
     this.saveEngineSavepoints = true,
@@ -140,6 +154,8 @@ class EngineSettings {
     int? maxCacheSizeMb,
     bool? autoCleanCache,
     bool? gaplessEnabled,
+    int? crossfadeSeconds,
+    bool? crossfadeSmart,
     int? lowBandwidthBufferSeconds,
     int? prebufferHeadBytesKb,
     bool? saveEngineSavepoints,
@@ -175,6 +191,8 @@ class EngineSettings {
     maxCacheSizeMb: maxCacheSizeMb ?? this.maxCacheSizeMb,
     autoCleanCache: autoCleanCache ?? this.autoCleanCache,
     gaplessEnabled: gaplessEnabled ?? this.gaplessEnabled,
+    crossfadeSeconds: crossfadeSeconds ?? this.crossfadeSeconds,
+    crossfadeSmart: crossfadeSmart ?? this.crossfadeSmart,
     lowBandwidthBufferSeconds:
         lowBandwidthBufferSeconds ?? this.lowBandwidthBufferSeconds,
     prebufferHeadBytesKb: prebufferHeadBytesKb ?? this.prebufferHeadBytesKb,
@@ -221,6 +239,8 @@ class EngineSettings {
     'max_cache_size_mb': maxCacheSizeMb,
     'auto_clean_cache': autoCleanCache,
     'gapless_enabled': gaplessEnabled,
+    'crossfade_seconds': crossfadeSeconds,
+    'crossfade_smart': crossfadeSmart,
     'low_bandwidth_buffer_seconds': lowBandwidthBufferSeconds,
     'prebuffer_head_bytes_kb': prebufferHeadBytesKb,
     'save_engine_savepoints': saveEngineSavepoints,
@@ -267,6 +287,9 @@ class EngineSettings {
       maxCacheSizeMb: (json['max_cache_size_mb'] as num?)?.toInt() ?? 0,
       autoCleanCache: json['auto_clean_cache'] as bool? ?? true,
       gaplessEnabled: json['gapless_enabled'] as bool? ?? true,
+      crossfadeSeconds: ((json['crossfade_seconds'] as num?)?.toInt() ?? 0)
+          .clamp(0, CrossfadeSettings.maxSeconds),
+      crossfadeSmart: json['crossfade_smart'] as bool? ?? true,
       lowBandwidthBufferSeconds:
           (json['low_bandwidth_buffer_seconds'] as num?)?.toInt() ?? 30,
       prebufferHeadBytesKb:
@@ -407,6 +430,15 @@ class EngineSettingsNotifier extends Notifier<EngineSettings> {
 
   Future<void> setGaplessEnabled(bool value) =>
       _apply(state.copyWith(gaplessEnabled: value));
+
+  Future<void> setCrossfadeSeconds(int value) => _apply(
+    state.copyWith(
+      crossfadeSeconds: value.clamp(0, CrossfadeSettings.maxSeconds),
+    ),
+  );
+
+  Future<void> setCrossfadeSmart(bool value) =>
+      _apply(state.copyWith(crossfadeSmart: value));
 
   Future<void> setLowBandwidthBufferSeconds(int value) => _apply(
     state.copyWith(lowBandwidthBufferSeconds: value.clamp(5, 120)),

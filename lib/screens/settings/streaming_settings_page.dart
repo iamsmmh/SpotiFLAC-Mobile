@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:spotimusic/engine/audio_characteristics.dart';
+import 'package:spotimusic/engine/crossfade_policy.dart';
 import 'package:spotimusic/engine/smart_play.dart';
 import 'package:spotimusic/engine/streaming_engine.dart';
 import 'package:spotimusic/providers/engine_settings_provider.dart';
@@ -314,6 +315,30 @@ class _StreamingSettingsPageState
                     'Splice consecutive lossless tracks without a silence gap',
                 value: settings.gaplessEnabled,
                 onChanged: notifier.setGaplessEnabled,
+              ),
+              _StepperItem(
+                icon: Icons.swap_horiz_rounded,
+                title: 'Crossfade',
+                subtitle: settings.crossfadeSeconds == 0
+                    ? 'Off — tracks change without overlap'
+                    : 'Overlap the end of a track with the start of the next',
+                value: settings.crossfadeSeconds,
+                suffix: 's',
+                min: 0,
+                max: CrossfadeSettings.maxSeconds,
+                onChanged: notifier.setCrossfadeSeconds,
+              ),
+              SettingsSwitchItem(
+                icon: Icons.auto_awesome_outlined,
+                title: 'Smart crossfade',
+                subtitle:
+                    'Skip the overlap between album tracks, lossless pairs '
+                    'and short interludes',
+                value: settings.crossfadeSmart,
+                enabled: settings.crossfadeSeconds > 0,
+                onChanged: settings.crossfadeSeconds > 0
+                    ? notifier.setCrossfadeSmart
+                    : null,
               ),
               _StepperItem(
                 icon: Icons.storage_outlined,

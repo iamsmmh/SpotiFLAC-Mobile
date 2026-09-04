@@ -80,6 +80,32 @@ current track plays, and `AdaptiveBufferPlanner` sizes that prefix from the
 network profile and live bandwidth — poor links open a deeper low-bandwidth
 lookahead window.
 
+### Crossfade
+
+`CrossfadePolicy` (`lib/engine/crossfade_policy.dart`) is pure and evaluated on
+every position tick of the active player. Given the user setting
+(`EngineSettings.crossfadeSeconds` 0–12, `crossfadeSmart`), the outgoing
+track's duration and both items' `AudioCharacteristics`, it returns the
+overlap to use — or none for repeat-one, unknown durations, tracks shorter
+than 10 s (30 s in smart mode), and, in smart mode, album-continuous
+neighbours and lossless pairs the `GaplessPolicy` would splice instead. The
+overlap is capped at a third (smart: an eighth) of the track and clamped to
+1–12 s.
+
+When the remaining time drops inside the overlap the handler swaps roles
+*synchronously*: the current `AudioPlayer` becomes the outgoing half (its
+state/complete/error events are ignored from then on), the standby player
+(`music-player-crossfade`, created lazily and reused) takes the next item at
+volume 0, and once the source is ready a 60 ms timer ramps both players with
+`CrossfadePolicy.equalPowerGains` scaled by each track's normalisation volume,
+then stops the outgoing player and parks it as standby. The ramp never runs
+past the moment the outgoing track would end by itself, so a slow source
+resolve degrades to a shorter fade rather than a stretch of silence. Pause,
+seek, skip, stop, audio-focus loss and a failed incoming source all end the
+fade immediately (`_endCrossfade`) and restore the active player's full
+volume. Crossfade takes precedence over the gapless splice for a transition;
+with crossfade off (default) the gapless path is unchanged.
+
 ## Smart Play ladder
 
 ```

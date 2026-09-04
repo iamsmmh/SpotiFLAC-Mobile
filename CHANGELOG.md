@@ -29,6 +29,27 @@
   instead of showing "No lyrics"; results are memoized per track for the
   session (LRU + in-flight coalescing) and offline mode never touches the
   network.
+- **Crossfade (1–12 s, smart mode)**: a second engine player overlaps the
+  tail of the playing track with the head of the next one and ramps both
+  with an equal-power curve (ReplayGain volumes preserved through the fade).
+  *Smart crossfade* keeps consecutive tracks of the same album, lossless
+  pairs that can be spliced gaplessly, and short interludes intact, and
+  shortens the overlap for short tracks. Off by default; works for local
+  files and progressive streams, never on repeat-one, and is cut short by
+  pause / seek / skip / audio-focus loss. Settings → Streaming → Audio
+  pipeline.
+- **Download scheduler conditions**: the schedule can now require WiFi,
+  charging, and a minimum battery level in addition to (or instead of) the
+  time window; presets *Overnight* and *Charging on WiFi*. A new
+  `getPowerStatus` platform call feeds the charger/battery gate on Android
+  and iOS; conditions are re-checked every 30 s while a batch runs and the
+  queue header explains why it is holding (e.g. "waiting for WiFi").
+- **Android Auto / AVRCP browse tree**: the media browser exposes Now
+  playing, Recently played, Most played, Loved, Playlists, Albums and Songs
+  (paged) instead of a flat copy of the queue; tapping a song plays its
+  container from that song and voice search maps to the library. Tracks
+  without a local copy are enqueued as deferred engine items so they still
+  play through Smart Play.
 - **Proactive stream URL refresh**: resolved stream URLs carry their expiry
   (`PlayableMedia.expiresAt`, persisted with the queue); the player hands the
   item back to the streaming engine two minutes before a signed URL dies so
