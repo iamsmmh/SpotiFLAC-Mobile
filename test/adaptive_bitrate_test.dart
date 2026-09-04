@@ -249,6 +249,7 @@ void main() {
         policy.nextRefreshAt(
           now.add(const Duration(hours: 1)),
           previousExpiryRefreshes: 2,
+          now: now,
         ),
         isNull,
       );
