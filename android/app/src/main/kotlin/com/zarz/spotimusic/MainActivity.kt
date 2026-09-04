@@ -929,6 +929,7 @@ class MainActivity: FlutterFragmentActivity() {
 
         val channel = MethodChannel(messenger, CHANNEL)
         backendChannel = channel
+        AudioEffectsController.bind(flutterEngine)
         registerLibraryStorageReceiver()
         if (pendingSessionGrantEvents.isNotEmpty()) {
             val events = pendingSessionGrantEvents.toList()
@@ -962,6 +963,14 @@ class MainActivity: FlutterFragmentActivity() {
                         }
                         "getPowerStatus" -> {
                             result.success(readPowerStatus())
+                        }
+                        "audioEffectsCapabilities" -> {
+                            result.success(AudioEffectsController.shared.capabilities())
+                        }
+                        "applyAudioEffects" -> {
+                            @Suppress("UNCHECKED_CAST")
+                            val config = call.arguments as? Map<String, Any?> ?: emptyMap()
+                            result.success(AudioEffectsController.shared.apply(config))
                         }
                         "exitApp" -> {
                             flutterBackCallback?.isEnabled = false

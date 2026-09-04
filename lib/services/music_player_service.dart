@@ -1554,6 +1554,7 @@ class MusicPlayerHandler extends BaseAudioHandler
       unawaited(_persistSession(position: effectiveStartPosition));
       _log.i('Playing: ${media.title}');
       if (crossfade) _startCrossfadeRamp(generation);
+      playbackSourceStartedListener?.call();
       _armExpiryRefresh(media, resolved, generation);
       // Some files do not emit onDurationChanged reliably (stuck at 0:00);
       // poll the engine for the real duration as a fallback.
@@ -2178,6 +2179,12 @@ PlaybackFailureListener? playbackFailureListener;
 void setPlaybackFailureListener(PlaybackFailureListener listener) {
   playbackFailureListener = listener;
 }
+
+/// Invoked right after an engine player has started a source. The native
+/// audio effects chain binds to player audio sessions, which only exist from
+/// this moment on (and may change when a player is recreated), so the DSP
+/// controller re-attaches here. Unset in tests / when effects are off.
+void Function()? playbackSourceStartedListener;
 
 /// Starts [media] from [startIndex]; installed by the app so the handler can
 /// route browse taps through the same play path as the in-app UI.

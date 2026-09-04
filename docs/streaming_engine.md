@@ -106,6 +106,31 @@ fade immediately (`_endCrossfade`) and restore the active player's full
 volume. Crossfade takes precedence over the gapless splice for a transition;
 with crossfade off (default) the gapless path is unchanged.
 
+### Equalizer / DSP chain
+
+`AudioEffectsSettings` (`lib/engine/audio_effects.dart`) is the platform-neutral
+description of the chain: ten band gains in dB, bass boost / virtualizer
+strengths (0–1), enhancer gain, compressor threshold/ratio, limiter ceiling.
+`audioEffectsProvider` persists it (`audio_effects_v1`) together with user
+presets, debounces changes, and pushes `toPlatformMap()` through
+`PlatformBridge.applyAudioEffects`. The handler exposes
+`playbackSourceStartedListener`, fired right after `play()` succeeds, because
+Android effect objects bind to an *audio session id* that only exists once a
+`MediaPlayer` has a source — and changes when audioplayers recreates the
+player.
+
+On Android `AudioEffectsController` (a process singleton, since the engine
+outlives the Activity) resolves the session ids of `music-player` and
+`music-player-crossfade` reflectively from the audioplayers plugin (kept by
+ProGuard), then owns one effect chain per session: `DynamicsProcessing`
+(API 28+: pre-EQ with exact octave cutoffs, one MBC band as the compressor,
+limiter) or `Equalizer` (older devices; `AudioEffectsPolicy.mapToDeviceBands`
+projects the ten requested bands onto whatever bands the device has), plus
+`BassBoost`, `Virtualizer` and `LoudnessEnhancer`. When the master switch is
+off or every stage is neutral the chain is released entirely, so the default
+audio path is untouched. Capabilities are reported to the UI so unsupported
+stages render disabled with a reason instead of silently doing nothing.
+
 ## Smart Play ladder
 
 ```

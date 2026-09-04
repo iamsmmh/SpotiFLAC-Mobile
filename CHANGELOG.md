@@ -38,6 +38,16 @@
   files and progressive streams, never on repeat-one, and is cut short by
   pause / seek / skip / audio-focus loss. Settings → Streaming → Audio
   pipeline.
+- **Equalizer & effects (Android)**: new Settings page with a 10-band
+  equalizer (31 Hz–16 kHz, ±12 dB), twelve built-in presets, user presets
+  with save / delete / import / export (`.eqpresets.json`), bass boost,
+  virtualizer, loudness enhancer, and — on Android 9+ via
+  `DynamicsProcessing` — a single-band compressor and a brick-wall limiter.
+  The chain binds to both engine players' audio sessions (so crossfades stay
+  equalised) and re-binds whenever a source starts; older devices fall back
+  to the system `Equalizer` with the curve mapped onto the device's bands.
+  Everything is off by default. iOS reports the chain as unavailable (AVPlayer
+  output cannot host effect units) and the page disables the stages honestly.
 - **Download scheduler conditions**: the schedule can now require WiFi,
   charging, and a minimum battery level in addition to (or instead of) the
   time window; presets *Overnight* and *Charging on WiFi*. A new

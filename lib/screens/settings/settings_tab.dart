@@ -9,6 +9,7 @@ import 'package:spotimusic/screens/settings/backup_restore_page.dart';
 import 'package:spotimusic/screens/settings/cache_management_page.dart';
 import 'package:spotimusic/screens/settings/donate_page.dart';
 import 'package:spotimusic/screens/settings/download_settings_page.dart';
+import 'package:spotimusic/screens/settings/equalizer_page.dart';
 import 'package:spotimusic/screens/settings/extensions_page.dart';
 import 'package:spotimusic/screens/settings/files_settings_page.dart';
 import 'package:spotimusic/screens/settings/library_settings_page.dart';
@@ -127,6 +128,24 @@ class _SettingsTabState extends ConsumerState<SettingsTab> {
               'adaptive',
             ],
             pageBuilder: () => const StreamingSettingsPage(),
+          ),
+          _Destination(
+            icon: Icons.graphic_eq_rounded,
+            title: 'Equalizer & effects',
+            subtitle: '10-band EQ, bass boost, virtualizer, dynamics',
+            keywords: const [
+              'eq',
+              'equalizer',
+              'bass',
+              'treble',
+              'virtualizer',
+              'compressor',
+              'limiter',
+              'loudness',
+              'preset',
+              'dsp',
+            ],
+            pageBuilder: () => const EqualizerPage(),
           ),
         ],
       ),

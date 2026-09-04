@@ -16,6 +16,7 @@ import 'package:spotimusic/core/data/session_resource_budget.dart';
 import 'package:spotimusic/core/presentation/core_queue_providers.dart';
 import 'package:spotimusic/models/settings.dart';
 import 'package:spotimusic/providers/download_queue_provider.dart';
+import 'package:spotimusic/providers/audio_effects_provider.dart';
 import 'package:spotimusic/providers/download_schedule_settings_provider.dart';
 import 'package:spotimusic/providers/engine_settings_provider.dart';
 import 'package:spotimusic/providers/extension_provider.dart';
@@ -447,6 +448,15 @@ class _EagerInitializationState extends ConsumerState<_EagerInitialization>
     unawaited(
       SharedPreferences.getInstance()
           .then(ref.read(downloadScheduleSettingsProvider.notifier).attach),
+    );
+
+    // Equalizer / DSP chain: restore the persisted curve and presets, query
+    // device capabilities and hook the player so the chain re-binds to each
+    // new audio session.
+    unawaited(
+      SharedPreferences.getInstance().then(
+        ref.read(audioEffectsProvider.notifier).attach,
+      ),
     );
 
     // Privacy-first listening statistics: restore stored stats and install

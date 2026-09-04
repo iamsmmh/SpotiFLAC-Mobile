@@ -429,6 +429,24 @@ private func goCall<T>(_ body: (NSErrorPointer) -> T) throws -> T {
         case "getPowerStatus":
             result(readPowerStatus())
             return
+        case "audioEffectsCapabilities":
+            // The music pipeline renders through AVPlayer, whose output cannot
+            // host AudioUnit effects without re-routing decoding through an
+            // AVAudioEngine graph. Report the chain as unavailable so the
+            // settings UI disables the stages instead of pretending.
+            result([
+                "equalizer": false,
+                "bass_boost": false,
+                "virtualizer": false,
+                "enhancer": false,
+                "compressor": false,
+                "limiter": false,
+                "engine": "unavailable (AVPlayer)",
+            ])
+            return
+        case "applyAudioEffects":
+            result(["attached": false, "players": [], "reason": "unsupported on iOS"])
+            return
         case "startWebAuthSession":
             let args = call.arguments as? [String: Any] ?? [:]
             let urlString = (args["url"] as? String) ?? ""
