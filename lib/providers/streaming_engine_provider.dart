@@ -548,6 +548,22 @@ class StreamingEngineController {
     );
   }
 
+  /// Library + download-history lookup for a whole queue. A broken local
+  /// store must not block playback: on failure every track is treated as
+  /// not downloaded, so the queue still streams.
+  Future<List<String?>> _resolveLocalPathsOrStream(List<Track> tracks) async {
+    try {
+      return await _ref
+          .read(playbackProvider.notifier)
+          .resolveTrackFilePaths(tracks);
+    } catch (e) {
+      log.add(
+        EngineEvent.warning('local', 'Queue library lookup failed: $e'),
+      );
+      return List<String?>.filled(tracks.length, null);
+    }
+  }
+
   Future<String?> downloadedPathFor(Track track) async {
     try {
       final localLibrary = await LibraryDatabase.instance.findExisting(
@@ -787,9 +803,7 @@ class StreamingEngineController {
         resolvedPaths.length == tracks.length;
     var paths = hasPaths
         ? List<String?>.of(resolvedPaths, growable: false)
-        : await _ref
-              .read(playbackProvider.notifier)
-              .resolveTrackFilePaths(ordered);
+        : await _resolveLocalPathsOrStream(ordered);
     if (safeStart != 0 && hasPaths) {
       paths = <String?>[
         ...paths.sublist(safeStart),

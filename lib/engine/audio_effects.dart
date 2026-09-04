@@ -29,6 +29,15 @@ double _finite(Object? value, double fallback) {
   return parsed;
 }
 
+/// Lenient boolean decode: only a real `true` (or the strings "true"/"1")
+/// switches a stage on; corrupt values fall back to off.
+bool _flag(Object? value) {
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  final text = '$value'.trim().toLowerCase();
+  return text == 'true' || text == '1';
+}
+
 /// Normalises any dynamic list to exactly ten finite, clamped gains.
 List<double> normalizeBandGains(Object? raw) {
   final gains = List<double>.filled(equalizerBandFrequencies.length, 0);
@@ -287,16 +296,16 @@ class AudioEffectsSettings {
   factory AudioEffectsSettings.fromJson(Map<String, dynamic> json) {
     final presetRaw = json['preset_name'];
     return AudioEffectsSettings(
-      enabled: json['enabled'] as bool? ?? false,
+      enabled: _flag(json['enabled']),
       bandGainsDb: normalizeBandGains(json['band_gains_db']),
       presetName: presetRaw?.toString(),
       bassBoost: _finite(json['bass_boost'], 0),
       virtualizer: _finite(json['virtualizer'], 0),
       enhancerGainDb: _finite(json['enhancer_gain_db'], 0),
-      compressorEnabled: json['compressor_enabled'] as bool? ?? false,
+      compressorEnabled: _flag(json['compressor_enabled']),
       compressorThresholdDb: _finite(json['compressor_threshold_db'], -18),
       compressorRatio: _finite(json['compressor_ratio'], 3),
-      limiterEnabled: json['limiter_enabled'] as bool? ?? false,
+      limiterEnabled: _flag(json['limiter_enabled']),
       limiterThresholdDb: _finite(json['limiter_threshold_db'], -1),
     );
   }

@@ -7,7 +7,6 @@ import android.media.audiofx.Equalizer
 import android.media.audiofx.LoudnessEnhancer
 import android.media.audiofx.Virtualizer
 import android.os.Build
-import androidx.annotation.RequiresApi
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 
@@ -268,7 +267,7 @@ internal class AudioEffectsController(private val engineProvider: () -> FlutterE
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.P)
+    // Callers guard on Build.VERSION_CODES.P.
     private fun createDynamics(sessionId: Int, bandCount: Int): DynamicsProcessing {
         val config = DynamicsProcessing.Config.Builder(
             DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION,
@@ -284,7 +283,7 @@ internal class AudioEffectsController(private val engineProvider: () -> FlutterE
         return DynamicsProcessing(0, sessionId, config)
     }
 
-    @RequiresApi(Build.VERSION_CODES.P)
+    // Callers guard on Build.VERSION_CODES.P.
     private fun applyDynamics(
         dp: DynamicsProcessing,
         centers: List<Int>,

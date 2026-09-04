@@ -77,10 +77,16 @@ class OnlineLyricsCache {
     if (cached != null) return Future<ParsedLyrics>.value(cached);
     final pending = _inFlight[key];
     if (pending != null) return pending;
-    final future = load().then((value) {
+    late final Future<ParsedLyrics> future;
+    future = load().then((value) {
       put(key, value);
       return value;
-    }).whenComplete(() => _inFlight.remove(key));
+    }).whenComplete(() {
+      // Block body on purpose: `whenComplete` awaits any Future its callback
+      // returns, and `Map.remove` would hand back this very future — an
+      // expression body would make the lookup wait on itself forever.
+      _inFlight.remove(key);
+    });
     _inFlight[key] = future;
     return future;
   }
