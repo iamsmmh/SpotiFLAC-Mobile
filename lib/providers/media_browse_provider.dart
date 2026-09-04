@@ -1,7 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:spotimusic/engine/playback_session.dart';
 import 'package:spotimusic/models/track.dart';
-import 'package:spotimusic/providers/download_history_models.dart';
+import 'package:spotimusic/providers/download_history_provider.dart';
 import 'package:spotimusic/providers/engine_settings_provider.dart';
 import 'package:spotimusic/providers/library_collections_provider.dart';
 import 'package:spotimusic/providers/music_player_provider.dart';
@@ -10,7 +10,6 @@ import 'package:spotimusic/providers/playback_statistics_provider.dart';
 import 'package:spotimusic/providers/streaming_engine_provider.dart';
 import 'package:spotimusic/services/history_database.dart';
 import 'package:spotimusic/services/library_database.dart';
-import 'package:spotimusic/services/library_database_models.dart';
 import 'package:spotimusic/services/media_browse_tree.dart';
 import 'package:spotimusic/services/music_player_service.dart';
 import 'package:spotimusic/utils/logger.dart';

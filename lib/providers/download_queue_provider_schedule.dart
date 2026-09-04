@@ -97,11 +97,14 @@ extension _DownloadQueueSchedule on DownloadQueueNotifier {
 
   void _startScheduleMonitor() {
     if (_scheduleTimer != null) return;
-    _scheduleTimer = Timer.periodic(_scheduleMonitorInterval, (_) {
-      if (_scheduleGateInFlight) return;
-      _scheduleGateInFlight = true;
-      _applyScheduleGate().whenComplete(() => _scheduleGateInFlight = false);
-    });
+    _scheduleTimer = Timer.periodic(
+      DownloadQueueNotifier._scheduleMonitorInterval,
+      (_) {
+        if (_scheduleGateInFlight) return;
+        _scheduleGateInFlight = true;
+        _applyScheduleGate().whenComplete(() => _scheduleGateInFlight = false);
+      },
+    );
   }
 
   void _stopScheduleMonitor() {

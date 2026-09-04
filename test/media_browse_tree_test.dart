@@ -136,6 +136,29 @@ void main() {
       expect(viaQueue.first.extras?['source'], '/music/q1.flac');
     });
 
+    test('recent / most played / loved sections expose playable items',
+        () async {
+      final source = _FakeSource(
+        recent: [_media('r1'), _media('r2'), _media('r3')],
+        top: [_media('t1')],
+        loved: [_media('l1'), _media('l2')],
+      );
+      final tree = MediaBrowseTree(source);
+      final recent = await tree.children(MediaBrowseTree.recentId);
+      final top = await tree.children(MediaBrowseTree.topId);
+      final loved = await tree.children(MediaBrowseTree.lovedId);
+      expect(recent.map((e) => e.id), ['r1', 'r2', 'r3']);
+      expect(top.map((e) => e.id), ['t1']);
+      expect(loved.map((e) => e.id), ['l1', 'l2']);
+      for (final item in [...recent, ...top, ...loved]) {
+        expect(item.playable, isTrue);
+      }
+      expect(
+        loved.first.extras?[MediaBrowseTree.containerExtraKey],
+        MediaBrowseTree.lovedId,
+      );
+    });
+
     test('playlists are browsable folders whose children are playable',
         () async {
       final source = _FakeSource(

@@ -2025,7 +2025,7 @@ class MusicPlayerHandler extends BaseAudioHandler
     }
   }
 
-  /// Voice request ("play <query>"): plays the best offline match with the
+  /// Voice request ("play `<query>`"): plays the best offline match with the
   /// remaining results queued behind it. An empty query resumes playback.
   @override
   Future<void> playFromSearch(
