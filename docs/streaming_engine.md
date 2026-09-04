@@ -180,6 +180,47 @@ alternative candidates (bounded by the configured attempt budget and a
 tried-URI set), so Provider A → Provider B → Provider C succeeds without
 re-trying a URI that already failed.
 
+How a failure reaches the hook:
+
+- **Synchronous** — `play()` throws (audioplayers awaits the platform's
+  *prepared* event, so pre-prepare errors fail the future).
+- **Runtime** — the platform reports CDN drops, expired signed URLs and decoder
+  errors on the player's event-stream *error channel* after `play()` returned.
+  `MusicPlayerHandler` listens to it and forwards the current item once per
+  play generation (`_handleRuntimePlaybackError`).
+- **Proactive** — a resolved `StreamDescriptor.expiresAt` travels on
+  `PlayableMedia.expiresAt` (persisted with the queue; deferred items report it
+  through `noteDeferredSourceExpiry` at resolve time). The handler arms a timer
+  that fires two minutes before expiry (never sooner than 30 s after start,
+  never for an already-expired URL) and calls the hook with
+  `StreamUrlExpiringSignal`. The engine treats it as a refresh, not a failure:
+  same-provider fresh URL first, no health penalty, no backoff.
+
+What the engine does on failure (`_handlePlaybackFailure`):
+
+1. Resolve the *concrete* failed source — for a `deferred-stream://` queue
+   item that is the descriptor it resolved to (`_deferredSourceByMediaId`),
+   never the placeholder — so the dead URL is excluded and the right provider
+   is charged.
+2. Invalidate the multi-provider resolver cache for the track and re-query
+   every adapter for a fresh candidate set.
+3. Pick the next source via the session controller (health-filtered, expiry-
+   filtered), preflight it, and try one more alternative if it is dead on
+   arrival.
+4. `replaceCurrentAndPlay(item, resumeAt: t)` + publish the new play context.
+5. If the chain is exhausted and the queue has a later item, skip to it
+   instead of leaving playback stopped.
+
+## Lyrics for streamed tracks
+
+Local files use their embedded lyrics. Streamed items have no file, so
+`nowPlayingLyricsProvider` (and the classic Now Playing lyrics page) query the
+Go lyrics client — LRCLIB, Musixmatch, Apple Music, NetEase, QQ Music,
+Paxsenix in the priority/fallback order configured under *Lyrics* settings —
+keyed by track id + title + artist so a failover URL swap reuses the entry.
+Lookups are memoized per session (bounded LRU, in-flight coalescing, negative
+results cached) and skipped entirely in offline mode.
+
 ## Match confidence
 
 The anonymous fallback providers (YouTube, SoundCloud) score every candidate

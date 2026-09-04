@@ -37,6 +37,32 @@ void main() {
     expect(restored.explicit, isTrue);
   });
 
+  test('stream URL expiry survives persistence and reaches the media item', () {
+    final expiresAt = DateTime.fromMillisecondsSinceEpoch(1_900_000_000_000);
+    final streamed = PlayableMedia(
+      id: 'track-2',
+      source: 'https://cdn.example/signed.m4a',
+      title: 'Stream',
+      artist: 'Artist',
+      providerId: 'soundcloud',
+      expiresAt: expiresAt,
+    );
+
+    final restored = PlayableMedia.fromJson(streamed.toJson());
+    expect(restored, isNotNull);
+    expect(restored!.expiresAt, expiresAt);
+    expect(restored.providerId, 'soundcloud');
+    expect(restored.isRemoteHttp, isTrue);
+
+    final item = streamed.toMediaItem();
+    expect(item.extras?['expires_at_ms'], expiresAt.millisecondsSinceEpoch);
+    expect(item.extras?['provider_id'], 'soundcloud');
+
+    // Local files never carry an expiry.
+    expect(media.toJson().containsKey('expiresAtMs'), isFalse);
+    expect(PlayableMedia.fromJson(media.toJson())!.expiresAt, isNull);
+  });
+
   test('malformed optional persisted metadata falls back without throwing', () {
     final restored = PlayableMedia.fromJson({
       'id': 7,

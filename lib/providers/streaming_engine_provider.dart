@@ -440,6 +440,11 @@ class StreamingEngineController {
   final Map<String, Track> _trackByMediaId = {};
   final List<String> _trackByMediaIdOrder = [];
   static const int _maxTrackedMediaIds = 256;
+
+  /// The concrete stream each deferred queue item last resolved to. Failover
+  /// for a deferred item must exclude *this* URL (the placeholder source in
+  /// the queue never matches a candidate) and charge *this* provider.
+  final Map<String, StreamDescriptor> _deferredSourceByMediaId = {};
   Timer? _downloadReadyTimer;
   bool _failureHookInstalled = false;
   bool _failedHookReentrant = false;
@@ -471,6 +476,7 @@ class StreamingEngineController {
     while (_trackByMediaIdOrder.length > _maxTrackedMediaIds) {
       final evicted = _trackByMediaIdOrder.removeAt(0);
       _trackByMediaId.remove(evicted);
+      _deferredSourceByMediaId.remove(evicted);
     }
   }
 
@@ -595,6 +601,8 @@ class StreamingEngineController {
     final decision = await decide(track);
     switch (decision.mode) {
       case SmartPlayMode.local:
+        _deferredSourceByMediaId.remove(media.id);
+        musicPlayerHandler?.noteDeferredSourceExpiry(media.id, null);
         final path = await downloadedPathFor(track);
         if (path == null) {
           log.add(
@@ -624,6 +632,11 @@ class StreamingEngineController {
           );
           return null;
         }
+        _deferredSourceByMediaId[media.id] = source;
+        musicPlayerHandler?.noteDeferredSourceExpiry(
+          media.id,
+          source.expiresAt,
+        );
         _session.markSuccess(source);
         _ref.read(enginePlayContextProvider.notifier).publish(
               EnginePlayContext(
@@ -1284,10 +1297,12 @@ class StreamingEngineController {
       playbackMode: 'stream',
       qualityLabel: source.characteristics.compactLabel,
       sourceLabel: source.providerId,
+      providerId: source.providerId,
       explicit: track.isExplicit,
       trackGainDb: source.characteristics.trackGainDb,
       albumGainDb: source.characteristics.albumGainDb,
       trackPeak: source.characteristics.trackPeak,
+      expiresAt: source.expiresAt,
     );
   }
 
@@ -1311,26 +1326,50 @@ class StreamingEngineController {
     {
       final track = _trackByMediaId[media.id];
       if (track == null) return; // Not engine-owned; the player already handled it.
-      log.add(
-        EngineEvent.error(
-          'stream',
-          'Playback failed for ${track.name} (attempt ${_session.state.attempt + 1})',
-        ),
-      );
-      integrity.add(
-        StreamIntegrityRecord.failure(
-          providerId: media.sourceLabel ?? 'unknown',
-          uri: media.source,
-          category: 'playback',
-          message: error.toString(),
-        ),
-      );
+      final proactiveRefresh = error is StreamUrlExpiringSignal;
+      // A deferred queue item failed through the stream it *resolved to*; the
+      // placeholder source in the queue carries neither URL nor provider.
+      final deferredSource = media.isDeferredStream
+          ? _deferredSourceByMediaId[media.id]
+          : null;
+      final failedUri = deferredSource?.uri ?? media.source;
+      final providerId =
+          deferredSource?.providerId ??
+          media.providerId ??
+          media.sourceLabel ??
+          'unknown';
+      if (proactiveRefresh) {
+        log.add(
+          EngineEvent.info(
+            'stream',
+            'Refreshing expiring URL for ${track.name} ($providerId)',
+          ),
+        );
+      } else {
+        log.add(
+          EngineEvent.error(
+            'stream',
+            'Playback failed for ${track.name} (attempt ${_session.state.attempt + 1})',
+          ),
+        );
+        integrity.add(
+          StreamIntegrityRecord.failure(
+            providerId: providerId,
+            uri: failedUri,
+            category: 'playback',
+            message: error.toString(),
+          ),
+        );
+      }
       final failure = StreamFailure(
-        kind: _classify(error),
-        providerId: media.sourceLabel ?? 'unknown',
+        kind: proactiveRefresh ? StreamFailureKind.urlExpired : _classify(error),
+        providerId: providerId,
         attempt: _session.state.attempt + 1,
         message: error.toString(),
       );
+      // The dead URL must not be served again from the resolver cache: every
+      // adapter is asked for a *fresh* candidate set.
+      _invalidateResolvedStreams(track);
       final candidates = await candidatesFor(track);
       final ranked = _resolver.candidates(
         candidates,
@@ -1341,9 +1380,35 @@ class StreamingEngineController {
       );
       // Exclude the source that just failed.
       final alternatives = ranked
-          .where((candidate) => candidate.uri != media.source)
+          .where((candidate) => candidate.uri != failedUri)
           .toList(growable: false);
-      final next = _session.onFailure(failure, _descriptorFromMedia(media), alternatives);
+      StreamDescriptor? next;
+      if (proactiveRefresh) {
+        // Nothing failed yet: prefer the same provider's fresh URL, do not
+        // charge the provider's health, and fall through the ranking only
+        // when it produced nothing.
+        final sameProvider = alternatives
+            .where((candidate) => candidate.providerId == providerId)
+            .toList(growable: false);
+        next = sameProvider.isNotEmpty
+            ? sameProvider.first
+            : (alternatives.isNotEmpty ? alternatives.first : null);
+        if (next == null) {
+          log.add(
+            EngineEvent.warning(
+              'stream',
+              'No fresh URL for ${track.name}; keeping current source',
+            ),
+          );
+          return;
+        }
+      } else {
+        next = _session.onFailure(
+          failure,
+          deferredSource ?? _descriptorFromMedia(media),
+          alternatives,
+        );
+      }
       if (next == null) {
         log.add(
           EngineEvent.error(
@@ -1351,11 +1416,17 @@ class StreamingEngineController {
             'No fallback source for ${track.name}',
           ),
         );
+        // The chain is exhausted for *this* track; do not strand the queue
+        // on a stopped item when there is a next one to play.
+        await _advancePastUnplayable(track);
         return;
       }
       // Retry once after a short backoff even for the same source, then give
       // up — the player has already stopped, so the user sees a fresh attempt.
-      final delay = _session.retryDelay(failure, _maxAttempts());
+      // A proactive refresh is not a failure: swap immediately, no backoff.
+      final delay = proactiveRefresh
+          ? null
+          : _session.retryDelay(failure, _maxAttempts());
       if (delay != null) {
         await Future<void>.delayed(delay);
       }
@@ -1367,6 +1438,7 @@ class StreamingEngineController {
           : (await handler.currentPlaybackPosition() ?? Duration.zero);
       if (handler == null) {
         final fallbackDecision = await decide(track);
+        _deferredSourceByMediaId.remove(media.id);
         if (await _preflightSource(next)) {
           await _startPlayback(track, fallbackDecision, next);
         }
@@ -1376,23 +1448,102 @@ class StreamingEngineController {
         StreamIntegrityRecord.fallback(
           providerId: next.providerId,
           uri: next.uri,
-          category: 'fallback',
+          category: proactiveRefresh ? 'refresh' : 'fallback',
           message:
-              'Switched from ${media.sourceLabel ?? 'previous'} to '
+              'Switched from $providerId to '
               '${next.providerId} at ${resumeAt.inSeconds}s',
         ),
       );
+      var chosen = next;
+      if (!await _preflightSource(chosen)) {
+        // The replacement is dead on arrival: charge it and try the chain
+        // once more (bounded by the attempt budget through onFailure).
+        final failedUri = chosen.uri;
+        final second = _session.onFailure(
+          StreamFailure(
+            kind: StreamFailureKind.network,
+            providerId: chosen.providerId,
+            attempt: _session.state.attempt + 1,
+            message: 'preflight failed',
+          ),
+          chosen,
+          alternatives
+              .where((candidate) => candidate.uri != failedUri)
+              .toList(growable: false),
+        );
+        if (second == null || !await _preflightSource(second)) {
+          if (!proactiveRefresh) await _advancePastUnplayable(track);
+          return;
+        }
+        chosen = second;
+      }
+      // The queue item becomes a concrete stream item from here on.
+      _deferredSourceByMediaId.remove(media.id);
+      handler.noteDeferredSourceExpiry(media.id, null);
       await handler.replaceCurrentAndPlay(
-        _playableFor(track, next),
+        _playableFor(track, chosen),
         resumeAt: resumeAt,
       );
-      _session.markSuccess(next);
+      _session.markSuccess(chosen);
+      _ref.read(enginePlayContextProvider.notifier).publish(
+        EnginePlayContext(
+          trackId: track.id,
+          mode: SmartPlayMode.stream,
+          providerId: chosen.providerId,
+          quality: chosen.quality,
+          characteristics: chosen.characteristics,
+          offline: false,
+          startedAt: DateTime.now(),
+        ),
+      );
+    }
+  }
+
+  /// Drops the resolver-side cache entries for [track] so the next candidate
+  /// query goes back to the providers instead of replaying a URL that just
+  /// failed (or is about to expire).
+  void _invalidateResolvedStreams(Track track) {
+    final adapters = _ref.read(streamSourceAdaptersProvider);
+    final usesResolver = adapters.any(
+      (adapter) => adapter is MultiProviderStreamAdapter,
+    );
+    if (!usesResolver) return;
+    try {
+      _ref
+          .read(multiProviderStreamServiceProvider)
+          .invalidate(StreamTrackRequest.fromTrack(track));
+    } catch (e) {
+      log.add(EngineEvent.warning('stream', 'Cache invalidation failed: $e'));
+    }
+  }
+
+  /// When every source for the current track is exhausted, keep the listening
+  /// session alive by moving on to the next queue item (if any). The player
+  /// is already stopped at this point, so this never interrupts audio.
+  Future<void> _advancePastUnplayable(Track track) async {
+    final handler = musicPlayerHandler;
+    if (handler == null) return;
+    final queue = handler.queue.value;
+    final item = handler.mediaItem.value;
+    if (item == null || queue.length < 2) return;
+    final index = queue.indexWhere((entry) => entry.id == item.id);
+    if (index < 0 || index >= queue.length - 1) return;
+    log.add(
+      EngineEvent.warning(
+        'queue',
+        'Skipping ${track.name}: no playable source; advancing queue',
+      ),
+    );
+    try {
+      await handler.skipToNext();
+    } catch (e) {
+      log.add(EngineEvent.warning('queue', 'Auto-advance failed: $e'));
     }
   }
 
   StreamDescriptor _descriptorFromMedia(PlayableMedia media) => StreamDescriptor(
     id: media.id,
-    providerId: media.sourceLabel ?? 'unknown',
+    providerId: media.providerId ?? media.sourceLabel ?? 'unknown',
     kind: StreamSourceKind.httpStream,
     uri: media.source,
     quality: AudioQualityLevel.fromLabel(media.qualityLabel),

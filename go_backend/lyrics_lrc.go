@@ -3,7 +3,6 @@ package gobackend
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -305,7 +304,9 @@ func SaveLRCFile(audioFilePath, lrcContent string) (string, error) {
 
 	lrcFilePath := filepath.Join(dir, baseName+".lrc")
 
-	if err := os.WriteFile(lrcFilePath, []byte(lrcContent), 0644); err != nil {
+	// Atomic write: a process kill mid-write must never leave a truncated
+	// sidecar next to the audio file (players would show half the lyrics).
+	if err := writeFileAtomic(lrcFilePath, []byte(lrcContent), 0644); err != nil {
 		return "", fmt.Errorf("failed to write LRC file: %w", err)
 	}
 

@@ -100,6 +100,12 @@ class PlayableMedia {
   final double? albumGainDb;
   final double? trackPeak;
 
+  /// When a signed stream URL stops being valid (null = unknown/long-lived).
+  /// Carried from the resolved `StreamDescriptor` so the player can hand the
+  /// item back to the engine for a proactive refresh *before* the CDN starts
+  /// rejecting range requests mid-track.
+  final DateTime? expiresAt;
+
   const PlayableMedia({
     required this.id,
     required this.source,
@@ -120,6 +126,7 @@ class PlayableMedia {
     this.trackGainDb,
     this.albumGainDb,
     this.trackPeak,
+    this.expiresAt,
   });
 
   bool get isContentUri => source.startsWith('content://');
@@ -176,6 +183,7 @@ class PlayableMedia {
     if (trackGainDb != null) 'trackGainDb': trackGainDb,
     if (albumGainDb != null) 'albumGainDb': albumGainDb,
     if (trackPeak != null) 'trackPeak': trackPeak,
+    if (expiresAt != null) 'expiresAtMs': expiresAt!.millisecondsSinceEpoch,
   };
 
   static PlayableMedia? fromJson(Map<String, dynamic> json) {
@@ -207,7 +215,14 @@ class PlayableMedia {
       trackGainDb: readFiniteDouble(json['trackGainDb']),
       albumGainDb: readFiniteDouble(json['albumGainDb']),
       trackPeak: readFiniteDouble(json['trackPeak']),
+      expiresAt: _readEpochMs(json['expiresAtMs']),
     );
+  }
+
+  static DateTime? _readEpochMs(dynamic value) {
+    final ms = readPositiveInt(value);
+    if (ms == null) return null;
+    return DateTime.fromMillisecondsSinceEpoch(ms);
   }
 
   MediaItem toMediaItem({String? resolvedSource}) {
@@ -241,6 +256,8 @@ class PlayableMedia {
         if (trackGainDb != null) 'track_gain_db': trackGainDb,
         if (albumGainDb != null) 'album_gain_db': albumGainDb,
         if (trackPeak != null) 'track_peak': trackPeak,
+        if (expiresAt != null)
+          'expires_at_ms': expiresAt!.millisecondsSinceEpoch,
       },
     );
   }
@@ -395,6 +412,23 @@ class MusicPlayerHandler extends BaseAudioHandler
   static const Duration _positionPersistInterval = Duration(seconds: 10);
   static const int _maxResolvedPathCacheEntries = 64;
 
+  /// Proactive stream-URL refresh (see [PlayableMedia.expiresAt]). Armed per
+  /// play request for remote sources with a known expiry; cancelled on any
+  /// track change/stop so a stale timer can never refresh the wrong item.
+  Timer? _expiryRefreshTimer;
+  static const Duration _expiryRefreshLeadTime = Duration(minutes: 2);
+  static const Duration _expiryRefreshMinDelay = Duration(seconds: 30);
+
+  /// Expiry of the concrete stream a *deferred* queue item resolved to. The
+  /// engine reports it right after resolution (the deferred placeholder
+  /// itself carries no expiry).
+  final Map<String, DateTime> _deferredSourceExpiry = {};
+
+  /// Runtime (post-`play()`) failures already forwarded for the current play
+  /// generation. audioplayers may report the same underlying error more than
+  /// once (platform error + log event); the failover hook must run once.
+  int _runtimeFailureGeneration = -1;
+
   MusicPlayerHandler() {
     _activeMusicPlayerHandler = this;
     _init();
@@ -434,7 +468,94 @@ class MusicPlayerHandler extends BaseAudioHandler
       _player.onPlayerComplete.listen((_) {
         unawaited(_handlePlayerComplete());
       }),
+      // Runtime failures (CDN drop, expired signed URL, decoder error) arrive
+      // on the event stream's *error* channel after play() has already
+      // returned. Without this listener they were only logged by the plugin
+      // and a streamed track silently stopped; now they reach the streaming
+      // engine's failover hook exactly like a synchronous play() failure.
+      _player.eventStream.listen(
+        (_) {},
+        onError: (Object error, StackTrace stack) {
+          _handleRuntimePlaybackError(error);
+        },
+      ),
     ]);
+  }
+
+  /// Forwards an asynchronous player error for the current item to the
+  /// failover hook (once per play generation) and reflects the stop in the
+  /// broadcast state so the UI never shows "playing" for a dead source.
+  void _handleRuntimePlaybackError(Object error) {
+    if (_disposed) return;
+    if (_index < 0 || _index >= _media.length) return;
+    // Errors raised while a source is still being prepared also fail the
+    // pending play() future (audioplayers awaits the prepared event), and
+    // that path already reports to the failover hook. Only *post*-prepare
+    // failures are handled here.
+    if (_switchingGeneration != 0 || !_sourceReady) return;
+    final generation = _playRequestGeneration;
+    if (_runtimeFailureGeneration == generation) return;
+    _runtimeFailureGeneration = generation;
+    final media = _media[_index];
+    _log.e('Runtime playback error for ${media.title}: $error');
+    _cancelExpiryRefresh();
+    _sourceReady = false;
+    final listener = playbackFailureListener;
+    if (listener != null && (media.isRemoteHttp || media.isDeferredStream)) {
+      listener(media, error);
+    }
+    _broadcastState(playerState: PlayerState.stopped);
+  }
+
+  void _cancelExpiryRefresh() {
+    _expiryRefreshTimer?.cancel();
+    _expiryRefreshTimer = null;
+  }
+
+  /// Records when the stream a deferred item just resolved to will expire
+  /// (null clears it). Called by the streaming engine from its deferred
+  /// resolver, before the handler starts the source.
+  void noteDeferredSourceExpiry(String mediaId, DateTime? expiresAt) {
+    if (expiresAt == null) {
+      _deferredSourceExpiry.remove(mediaId);
+      return;
+    }
+    if (_deferredSourceExpiry.length > 64) _deferredSourceExpiry.clear();
+    _deferredSourceExpiry[mediaId] = expiresAt;
+  }
+
+  /// Arms a one-shot refresh for a remote source whose signed URL expires at
+  /// a known time. The refresh is delegated to the engine through the same
+  /// failure hook used for failover, with a synthetic "expired" error, so the
+  /// engine re-resolves and swaps the source at the live position.
+  void _armExpiryRefresh(PlayableMedia media, String resolved, int generation) {
+    _cancelExpiryRefresh();
+    final expiresAt =
+        media.expiresAt ??
+        (media.isDeferredStream ? _deferredSourceExpiry[media.id] : null);
+    if (expiresAt == null || !_isHttpSource(resolved)) return;
+    if (playbackFailureListener == null) return;
+    final now = DateTime.now();
+    // Already expired: the source is played as-is and a real error (not a
+    // proactive refresh) drives failover, so a short-lived replacement URL
+    // can never loop refresh -> resolve -> refresh.
+    if (!expiresAt.isAfter(now)) return;
+    var delay = expiresAt.subtract(_expiryRefreshLeadTime).difference(now);
+    if (delay < _expiryRefreshMinDelay) delay = _expiryRefreshMinDelay;
+    _expiryRefreshTimer = Timer(delay, () {
+      _expiryRefreshTimer = null;
+      if (_disposed || generation != _playRequestGeneration) return;
+      if (_index < 0 || _index >= _media.length) return;
+      if (!identical(_media[_index], media)) return;
+      // Only refresh while audio is actually running; a paused stream is
+      // refreshed lazily by the next play() -> engine resolution.
+      if (_player.state != PlayerState.playing) return;
+      _log.i('Stream URL for ${media.title} is about to expire; refreshing');
+      playbackFailureListener?.call(
+        media,
+        const StreamUrlExpiringSignal(),
+      );
+    });
   }
 
   /// Configures the OS audio session and reacts to interruptions (e.g. another
@@ -539,6 +660,7 @@ class MusicPlayerHandler extends BaseAudioHandler
   Future<void> _pauseForFocusLoss({required String reason}) async {
     _log.i('Pausing internal player because of $reason');
     _playRequestGeneration++;
+    _cancelExpiryRefresh();
     _switchingGeneration = 0;
     try {
       await _player.pause();
@@ -1040,6 +1162,7 @@ class MusicPlayerHandler extends BaseAudioHandler
       _pendingRestorePosition = null;
     }
     final generation = ++_playRequestGeneration;
+    _cancelExpiryRefresh();
     final previousIndex = _index;
     _index = index;
     _pausedByInterruption = false;
@@ -1147,6 +1270,7 @@ class MusicPlayerHandler extends BaseAudioHandler
       }
       unawaited(_persistSession(position: effectiveStartPosition));
       _log.i('Playing: ${media.title}');
+      _armExpiryRefresh(media, resolved, generation);
       // Some files do not emit onDurationChanged reliably (stuck at 0:00);
       // poll the engine for the real duration as a fallback.
       unawaited(_ensureDurationKnown(index, generation));
@@ -1176,7 +1300,10 @@ class MusicPlayerHandler extends BaseAudioHandler
   }) async {
     if (_index < 0 || _index >= _media.length) return;
     final current = _media[_index];
-    if (!current.isRemoteHttp) return; // Engine-owned streams only.
+    // Engine-owned items only: pre-resolved progressive URLs *and* deferred
+    // queue items (whose placeholder source resolved to a stream at play
+    // time). Local files never go through failover.
+    if (!current.isRemoteHttp && !current.isDeferredStream) return;
     _media[_index] = item;
     _queueItems[_index] = item.toMediaItem();
     queue.add(List<MediaItem>.unmodifiable(_queueItems));
@@ -1398,6 +1525,7 @@ class MusicPlayerHandler extends BaseAudioHandler
   Future<void> pause() async {
     _log.i('Pausing internal player by user/control request');
     _playRequestGeneration++;
+    _cancelExpiryRefresh();
     _switchingGeneration = 0;
     _userPaused = true;
     _pausedByInterruption = false;
@@ -1439,6 +1567,7 @@ class MusicPlayerHandler extends BaseAudioHandler
   @override
   Future<void> stop() async {
     _playRequestGeneration++;
+    _cancelExpiryRefresh();
     _switchingGeneration = 0;
     _userPaused = true;
     await _player.stop();
@@ -1606,6 +1735,7 @@ class MusicPlayerHandler extends BaseAudioHandler
       _activeMusicPlayerHandler = null;
     }
     _playRequestGeneration++;
+    _cancelExpiryRefresh();
     for (final sub in _subscriptions) {
       await sub.cancel();
     }
@@ -1641,6 +1771,17 @@ typedef PlaybackFailureListener = void Function(
   PlayableMedia media,
   Object error,
 );
+
+/// Passed to [PlaybackFailureListener] when a stream's signed URL is about to
+/// expire and should be re-resolved proactively. The engine treats it as an
+/// `urlExpired` failure: same-provider re-resolution at the live position,
+/// and *not* a health penalty (nothing actually failed).
+class StreamUrlExpiringSignal implements Exception {
+  const StreamUrlExpiringSignal();
+
+  @override
+  String toString() => 'StreamUrlExpiringSignal: stream URL expiring soon';
+}
 
 PlaybackFailureListener? playbackFailureListener;
 

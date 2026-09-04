@@ -22,7 +22,41 @@
   unrelated track; resolution falls through to the next provider or fails
   with a clear reason.
 
+- **Lyrics for streamed tracks**: the lyrics sheet (liquid player) and the
+  classic Now Playing lyrics page now query the configured online providers
+  (LRCLIB, Musixmatch, Apple Music, NetEase, QQ Music, Paxsenix — same
+  priority/fallback order as the download pipeline) for streamed tracks
+  instead of showing "No lyrics"; results are memoized per track for the
+  session (LRU + in-flight coalescing) and offline mode never touches the
+  network.
+- **Proactive stream URL refresh**: resolved stream URLs carry their expiry
+  (`PlayableMedia.expiresAt`, persisted with the queue); the player hands the
+  item back to the streaming engine two minutes before a signed URL dies so
+  the engine re-resolves the same provider and swaps the source at the live
+  position — no health penalty, no audible failure.
+
 ### Fixed
+
+- **Mid-stream failures reached nobody**: the audio pipeline reports runtime
+  errors (CDN drop, expired signed URL, decoder error) on its event-stream
+  error channel *after* `play()` returned; only synchronous `play()` failures
+  were wired to the engine's failover hook, so a streamed track that died
+  mid-way simply stopped. Runtime errors now trigger the same failover path,
+  once per play generation.
+- **Deferred queue items could not fail over**: `replaceCurrentAndPlay`
+  rejected the `deferred-stream://` placeholder every non-tapped queue entry
+  is enqueued with, and failover compared candidate URLs against the
+  placeholder (never excluding the URL that actually died) and charged the
+  wrong provider. The engine now tracks the concrete stream each deferred
+  item resolved to, excludes it, charges its provider, invalidates the
+  resolver cache, preflights the replacement (one bounded second attempt) and
+  publishes the new play context.
+- **Exhausted chain stranded the queue**: when every source for a track is
+  dead the engine now auto-advances to the next queue item instead of
+  leaving playback stopped on it.
+- **Atomic writes (Go)**: the remaining lyrics `.lrc`, extension registry
+  cache and cover-art writes go through the fsync + rename helper so a kill
+  mid-write can no longer leave truncated files.
 
 - **Preflight provider failover**: a failed preflight now walks the ranked
   alternative candidates (bounded by the configured attempt budget and a
@@ -60,6 +94,13 @@
   estimate in the Diagnostics Center.
 
 ---
+
+### Removed
+
+- **Dead `just_audio` player**: `MultiProviderPlayer` / `StreamResumePoint`
+  (never instantiated — playback runs on the audio_service + audioplayers
+  handler) and the `just_audio` dependency. One audio pipeline, one fewer
+  native plugin in both app binaries.
 
 ## [5.0.0] - 2026-09-02
 - **Queue transfer**: Share the active download queue as a portable JSON file
