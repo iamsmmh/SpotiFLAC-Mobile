@@ -238,7 +238,7 @@ class _ServersPageState extends ConsumerState<ServersPage> {
     );
     final passwordController = TextEditingController();
 
-    return showDialog<MusicServerConfig>(
+    return showDialog<(MusicServerConfig, String)>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) => AlertDialog(

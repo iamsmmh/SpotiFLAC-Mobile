@@ -433,6 +433,9 @@ class _FakeProvider implements StreamProvider {
   String get displayName => 'Fake $id';
 
   @override
+  int get priority => 0;
+
+  @override
   Future<StreamSource?> resolveTrack(Track track) async {
     calls += 1;
     return source;
