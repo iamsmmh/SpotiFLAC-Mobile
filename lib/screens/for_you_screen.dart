@@ -128,6 +128,10 @@ class ForYouScreen extends ConsumerWidget {
         return context.l10n.forYouSectionArtists;
       case RecommendationSectionKind.discoveryMix:
         return context.l10n.forYouSectionDiscoveryMix;
+      case RecommendationSectionKind.becauseYouListened:
+        // The engine supplies a producer title naming the seed artist;
+        // this generic fallback covers remote providers that do not.
+        return context.l10n.forYouSectionBecauseYouListened;
       case RecommendationSectionKind.trending:
         // Remote providers may supply their own title; this is the fallback.
         return context.l10n.forYouTitle;

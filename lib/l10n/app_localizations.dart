@@ -8282,6 +8282,7 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Discovery mix'**
   String get forYouSectionDiscoveryMix;
+  String get forYouSectionBecauseYouListened;
 
   /// Settings entry title for optional cloud synchronization
   ///

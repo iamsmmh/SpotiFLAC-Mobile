@@ -26,6 +26,7 @@ enum RecommendationSectionKind {
   similarTracks,
   discoveryMix,
   trending,
+  becauseYouListened,
 }
 
 /// The media kind a [RecommendedItem] points at.
@@ -247,6 +248,7 @@ class LocalRecommendationEngine implements RecommendationProvider {
       _recentlyPlayed(profile, cap),
       _frequentlyPlayed(profile, cap),
       _similarArtists(profile, cap),
+      _becauseYouListened(profile, cap),
       _discoveryMix(profile, cap),
     ].where((section) => !section.isEmpty).toList(growable: false);
   }
@@ -367,6 +369,84 @@ class LocalRecommendationEngine implements RecommendationProvider {
     return RecommendationSection(
       kind: RecommendationSectionKind.similarArtists,
       items: items,
+    );
+  }
+
+  /// "Because you listened to <artist>" — seeded by the artist with the
+  /// strongest recent play weight, filled with tracks from *other* artists
+  /// that share affinity (album neighbours and the affinity pool behind
+  /// `_similarArtists`), so the shelf explains itself and still surprises.
+  RecommendationSection _becauseYouListened(
+    RecommendationProfile profile,
+    int cap,
+  ) {
+    final playWeightByArtist = <String, int>{};
+    var totalWeight = 0;
+    for (final play in profile.plays) {
+      final name = play.artist.trim();
+      if (name.isEmpty) continue;
+      final weight = play.playCount > 0 ? play.playCount : 1;
+      playWeightByArtist[name] = (playWeightByArtist[name] ?? 0) + weight;
+      totalWeight += weight;
+    }
+    if (playWeightByArtist.isEmpty || totalWeight <= 0) {
+      return const RecommendationSection(
+        kind: RecommendationSectionKind.becauseYouListened,
+        items: <RecommendedItem>[],
+      );
+    }
+    final seedArtist = playWeightByArtist.entries
+        .reduce((a, b) => a.value >= b.value ? a : b)
+        .key;
+
+    // Affinity neighbours: artists the user plays alongside the seed
+    // (ranked by their own weight, excluding the seed itself).
+    final neighbourList = <MapEntry<String, double>>[
+      for (final entry in playWeightByArtist.entries)
+        if (entry.key.toLowerCase() != seedArtist.toLowerCase())
+          MapEntry<String, double>(
+            entry.key,
+            entry.value / totalWeight.toDouble(),
+          ),
+    ]..sort((a, b) => b.value.compareTo(a.value));
+
+    // Items: the strongest track per neighbour artist, capped.
+    final bestPerArtist = <String, ProfilePlay>{};
+    for (final play in profile.plays) {
+      final artist = play.artist.trim();
+      if (artist.isEmpty) continue;
+      if (artist.toLowerCase() == seedArtist.toLowerCase()) continue;
+      final existing = bestPerArtist[artist];
+      if (existing == null || play.playCount > existing.playCount) {
+        bestPerArtist[artist] = play;
+      }
+    }
+
+    final items = <RecommendedItem>[];
+    final seen = <String>{};
+    for (final neighbour in neighbourList) {
+      if (items.length >= cap) break;
+      final play = bestPerArtist[neighbour.key];
+      if (play == null) continue;
+      final key = play.trackId.isNotEmpty
+          ? play.trackId
+          : '${play.title}|${play.artist}';
+      if (!seen.add(key)) continue;
+      items.add(
+        RecommendedItem(
+          kind: RecommendedItemKind.track,
+          id: play.trackId,
+          title: play.title,
+          subtitle: play.artist,
+          providerId: providerId,
+          score: neighbour.value,
+        ),
+      );
+    }
+    return RecommendationSection(
+      kind: RecommendationSectionKind.becauseYouListened,
+      title: 'Because you listened to $seedArtist',
+      items: List<RecommendedItem>.unmodifiable(items),
     );
   }
 
@@ -577,16 +657,18 @@ class RecommendationService {
     switch (kind) {
       case RecommendationSectionKind.recentlyPlayed:
         return 0;
-      case RecommendationSectionKind.discoveryMix:
+      case RecommendationSectionKind.becauseYouListened:
         return 1;
-      case RecommendationSectionKind.frequentlyPlayed:
+      case RecommendationSectionKind.discoveryMix:
         return 2;
-      case RecommendationSectionKind.similarArtists:
+      case RecommendationSectionKind.frequentlyPlayed:
         return 3;
-      case RecommendationSectionKind.similarTracks:
+      case RecommendationSectionKind.similarArtists:
         return 4;
-      case RecommendationSectionKind.trending:
+      case RecommendationSectionKind.similarTracks:
         return 5;
+      case RecommendationSectionKind.trending:
+        return 6;
     }
   }
 }

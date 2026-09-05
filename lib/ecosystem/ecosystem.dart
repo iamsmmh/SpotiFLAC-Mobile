@@ -10,7 +10,8 @@
 ///   * `recommendations/`  — cloud + similarity + daily-mix providers (Group 5)
 ///   * `smart_playlists/`  — auto-updating playlists (Group 6)
 ///   * `cache/`            — streaming cache (Group 7)
-///   * `offline/`          — smart offline mode (Group 8)
+///   * `servers/`          — Jellyfin/Navidrome/Subsonic/Airsonic/Plex
+///   * `offline/`          — smart offline mode (Group 8; tables reserved)
 ///   * `podcasts/`         — RSS platform (Group 9)
 ///   * `recognition/`      — music identification (Group 10)
 ///   * `social/`           — optional social layer (Group 11)
@@ -55,3 +56,24 @@ export 'package:spotimusic/ecosystem/recognition/recognition_service.dart';
 
 export 'package:spotimusic/ecosystem/social/social_models.dart';
 export 'package:spotimusic/ecosystem/social/social_service.dart';
+
+// ---- smart playlists (Group 6) -----------------------------------------
+export 'package:spotimusic/ecosystem/smart_playlists/smart_playlist_engine.dart';
+export 'package:spotimusic/ecosystem/smart_playlists/smart_playlist_models.dart';
+export 'package:spotimusic/ecosystem/smart_playlists/smart_playlist_store.dart';
+
+// ---- streaming cache (Group 7) -----------------------------------------
+export 'package:spotimusic/ecosystem/cache/cache_cipher.dart';
+export 'package:spotimusic/ecosystem/cache/cache_cleanup_worker.dart';
+export 'package:spotimusic/ecosystem/cache/cache_index.dart';
+export 'package:spotimusic/ecosystem/cache/cache_models.dart';
+export 'package:spotimusic/ecosystem/cache/cache_repository.dart';
+export 'package:spotimusic/ecosystem/cache/streaming_cache_manager.dart';
+
+// ---- self-hosted servers (Jellyfin/Navidrome/Subsonic/Airsonic/Plex) ----
+export 'package:spotimusic/ecosystem/servers/jellyfin_provider.dart';
+export 'package:spotimusic/ecosystem/servers/music_server_models.dart';
+export 'package:spotimusic/ecosystem/servers/music_server_provider.dart';
+export 'package:spotimusic/ecosystem/servers/music_server_registry.dart';
+export 'package:spotimusic/ecosystem/servers/plex_provider.dart';
+export 'package:spotimusic/ecosystem/servers/subsonic_provider.dart';
