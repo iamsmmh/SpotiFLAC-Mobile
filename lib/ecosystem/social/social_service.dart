@@ -66,16 +66,29 @@ class SocialSettings {
   }
 }
 
+/// Port for social payload caching.
+///
+/// An interface so tests can substitute an in-memory double: a class with
+/// private fields cannot be `implement`ed from another library.
+abstract interface class SocialCacheStore {
+  Future<Map<String, Object?>?> read(String key);
+
+  Future<void> write(String key, Map<String, Object?> payload);
+
+  Future<void> clear();
+}
+
 /// Local cache for social payloads, backed by `ec_social_cache`.
 ///
 /// Keeps profiles and feeds readable offline and lets the UI render instantly
 /// before the network answers.
-class SocialCache {
+class SocialCache implements SocialCacheStore {
   SocialCache({EcosystemDatabase? database})
     : _database = database ?? EcosystemDatabase.instance;
 
   final EcosystemDatabase _database;
 
+  @override
   Future<Map<String, Object?>?> read(String key) async {
     final db = await _database.database;
     final rows = await db.query(
@@ -94,6 +107,7 @@ class SocialCache {
     return null;
   }
 
+  @override
   Future<void> write(String key, Map<String, Object?> payload) async {
     final db = await _database.database;
     await db.insert(tableSocialCache, <String, Object?>{
@@ -103,6 +117,7 @@ class SocialCache {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
+  @override
   Future<void> clear() async {
     final db = await _database.database;
     await db.delete(tableSocialCache);
@@ -114,14 +129,14 @@ class ProfileSystem {
   ProfileSystem({
     required SocialSettings settings,
     SocialBackend? backend,
-    SocialCache? cache,
+    SocialCacheStore? cache,
   }) : _settings = settings,
        _backend = backend,
        _cache = cache ?? SocialCache();
 
   final SocialSettings _settings;
   final SocialBackend? _backend;
-  final SocialCache _cache;
+  final SocialCacheStore _cache;
 
   /// Fetches a profile, falling back to the local cache when offline.
   /// Returns null when social features are disabled.
@@ -173,14 +188,14 @@ class PlaylistSharing {
   PlaylistSharing({
     required SocialSettings settings,
     SocialBackend? backend,
-    SocialCache? cache,
+    SocialCacheStore? cache,
   }) : _settings = settings,
        _backend = backend,
        _cache = cache ?? SocialCache();
 
   final SocialSettings _settings;
   final SocialBackend? _backend;
-  final SocialCache _cache;
+  final SocialCacheStore _cache;
 
   /// Publishes a playlist and returns its share record.
   ///
@@ -301,7 +316,7 @@ class ActivityFeed {
   ActivityFeed({
     required SocialSettings settings,
     SocialBackend? backend,
-    SocialCache? cache,
+    SocialCacheStore? cache,
   }) : _settings = settings,
        _backend = backend,
        _cache = cache ?? SocialCache();
@@ -310,7 +325,7 @@ class ActivityFeed {
 
   final SocialSettings _settings;
   final SocialBackend? _backend;
-  final SocialCache _cache;
+  final SocialCacheStore _cache;
 
   /// Newest first; empty when the feature is off.
   Future<List<ActivityEntry>> entries({int limit = 50}) async {

@@ -18,14 +18,33 @@ import 'package:sqflite/sqflite.dart';
 
 final _log = AppLogger('RecognitionService');
 
-/// Stores and queries past identifications.
-class RecognitionHistoryRepository {
+/// Port for recognition history storage.
+///
+/// Declared as an interface so the service can be unit-tested against an
+/// in-memory double: a class with private fields cannot be `implement`ed from
+/// another library.
+abstract interface class RecognitionHistoryStore {
+  /// Most recent first.
+  Future<List<RecognitionResult>> recent({int limit});
+
+  Future<void> save(RecognitionResult result);
+
+  Future<void> remove(String resultId);
+
+  Future<void> clear();
+
+  Future<int> count();
+}
+
+/// SQLite-backed [RecognitionHistoryStore].
+class RecognitionHistoryRepository implements RecognitionHistoryStore {
   RecognitionHistoryRepository({EcosystemDatabase? database})
     : _database = database ?? EcosystemDatabase.instance;
 
   final EcosystemDatabase _database;
 
   /// Most recent first.
+  @override
   Future<List<RecognitionResult>> recent({int limit = 100}) async {
     final db = await _database.database;
     final rows = await db.query(
@@ -41,6 +60,7 @@ class RecognitionHistoryRepository {
 
   /// Saves a hit. Re-identifying the same song refreshes its timestamp rather
   /// than creating a duplicate row.
+  @override
   Future<void> save(RecognitionResult result) async {
     final db = await _database.database;
     await db.insert(
@@ -50,6 +70,7 @@ class RecognitionHistoryRepository {
     );
   }
 
+  @override
   Future<void> remove(String resultId) async {
     final db = await _database.database;
     await db.delete(
@@ -59,11 +80,13 @@ class RecognitionHistoryRepository {
     );
   }
 
+  @override
   Future<void> clear() async {
     final db = await _database.database;
     await db.delete(tableRecognitionHistory);
   }
 
+  @override
   Future<int> count() async {
     final db = await _database.database;
     final rows = await db.rawQuery(
@@ -93,7 +116,7 @@ class MusicRecognitionService {
     required RecognitionRecorder recorder,
     required List<RecognitionProvider> providers,
     FingerprintEngine? fingerprintEngine,
-    RecognitionHistoryRepository? history,
+    RecognitionHistoryStore? history,
   }) : _recorder = recorder,
        _providers = providers,
        _fingerprintEngine =
@@ -107,9 +130,9 @@ class MusicRecognitionService {
   final RecognitionRecorder _recorder;
   final List<RecognitionProvider> _providers;
   final FingerprintEngine _fingerprintEngine;
-  final RecognitionHistoryRepository _history;
+  final RecognitionHistoryStore _history;
 
-  RecognitionHistoryRepository get history => _history;
+  RecognitionHistoryStore get history => _history;
 
   /// Providers that are actually usable right now.
   List<RecognitionProvider> get availableProviders =>

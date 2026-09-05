@@ -18,7 +18,7 @@ class _MemoryStore implements KeyValueStore {
 }
 
 /// In-memory social cache so tests never touch SQLite.
-class _MemoryCache implements SocialCache {
+class _MemoryCache implements SocialCacheStore {
   final Map<String, Map<String, Object?>> entries =
       <String, Map<String, Object?>>{};
 

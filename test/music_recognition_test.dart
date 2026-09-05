@@ -422,7 +422,7 @@ void main() {
 }
 
 /// In-memory history so service tests never touch SQLite.
-class _NoopHistory implements RecognitionHistoryRepository {
+class _NoopHistory implements RecognitionHistoryStore {
   final List<RecognitionResult> saved = <RecognitionResult>[];
 
   @override
