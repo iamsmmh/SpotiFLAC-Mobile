@@ -267,6 +267,18 @@ extension _QueueTabNavigation on _QueueTabState {
     );
   }
 
+  void _openFavoriteAlbumsFolder() {
+    _navigateWithUnfocus(
+      MaterialPageRoute(builder: (_) => const FavoriteAlbumsScreen()),
+    );
+  }
+
+  void _openForYou() {
+    _navigateWithUnfocus(
+      MaterialPageRoute(builder: (_) => const ForYouScreen()),
+    );
+  }
+
   void _openPlaylistById(String playlistId) {
     _navigateWithUnfocus(
       MaterialPageRoute(

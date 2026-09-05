@@ -8181,6 +8181,186 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'About & support'**
   String get settingsGroupHelp;
+  /// Collection folder title for favorite albums
+  ///
+  /// In en, this message translates to:
+  /// **'Favorite Albums'**
+  String get collectionFavoriteAlbums;
+
+  /// Empty state title for favorite albums screen
+  ///
+  /// In en, this message translates to:
+  /// **'No favorite albums yet'**
+  String get collectionFavoriteAlbumsEmptyTitle;
+
+  /// Empty state subtitle for favorite albums screen
+  ///
+  /// In en, this message translates to:
+  /// **'Albums you mark as favorite will appear here.'**
+  String get collectionFavoriteAlbumsEmptySubtitle;
+
+  /// Snackbar after adding an album to favorite albums
+  ///
+  /// In en, this message translates to:
+  /// **'\"{albumName}\" added to Favorite Albums'**
+  String collectionAddedToFavoriteAlbums(String albumName);
+
+  /// Snackbar after removing an album from favorite albums
+  ///
+  /// In en, this message translates to:
+  /// **'\"{albumName}\" removed from Favorite Albums'**
+  String collectionRemovedFromFavoriteAlbums(String albumName);
+
+  /// Tooltip/menu action: add this album to favorite albums
+  ///
+  /// In en, this message translates to:
+  /// **'Add to favorite albums'**
+  String get albumOptionAddToFavorites;
+
+  /// Tooltip/menu action: remove this album from favorite albums
+  ///
+  /// In en, this message translates to:
+  /// **'Remove from favorite albums'**
+  String get albumOptionRemoveFromFavorites;
+
+  /// Album count label for favorite albums
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 album} other{{count} albums}}'**
+  String collectionAlbumCount(int count);
+
+  /// Backup contents row for favorite albums count
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 favorite album} other{{count} favorite albums}}'**
+  String backupContentsAlbums(int count);
+
+  /// Section title above recent search queries on the home tab
+  ///
+  /// In en, this message translates to:
+  /// **'Recent searches'**
+  String get homeRecentSearches;
+
+  /// Title of the personalized recommendations screen
+  ///
+  /// In en, this message translates to:
+  /// **'For You'**
+  String get forYouTitle;
+
+  /// Empty state title for the For You screen
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing to recommend yet'**
+  String get forYouEmptyTitle;
+
+  /// Empty state subtitle for the For You screen
+  ///
+  /// In en, this message translates to:
+  /// **'Play music and your personalized picks will appear here.'**
+  String get forYouEmptySubtitle;
+
+  /// Recommendations section: recently played tracks
+  ///
+  /// In en, this message translates to:
+  /// **'Recently played'**
+  String get forYouSectionRecentlyPlayed;
+
+  /// Recommendations section: most played tracks
+  ///
+  /// In en, this message translates to:
+  /// **'Frequently played'**
+  String get forYouSectionFrequentlyPlayed;
+
+  /// Recommendations section: similar/favorite artists
+  ///
+  /// In en, this message translates to:
+  /// **'Artists for you'**
+  String get forYouSectionArtists;
+
+  /// Recommendations section: rotating discovery mix
+  ///
+  /// In en, this message translates to:
+  /// **'Discovery mix'**
+  String get forYouSectionDiscoveryMix;
+
+  /// Settings entry title for optional cloud synchronization
+  ///
+  /// In en, this message translates to:
+  /// **'Cloud sync'**
+  String get syncTitle;
+
+  /// Settings entry subtitle for cloud synchronization
+  ///
+  /// In en, this message translates to:
+  /// **'Optional account sync for favorites, playlists and settings'**
+  String get syncSubtitle;
+
+  /// Cloud sync status: no backend configured
+  ///
+  /// In en, this message translates to:
+  /// **'Not configured'**
+  String get syncStatusDisabled;
+
+  /// Cloud sync status: signed out
+  ///
+  /// In en, this message translates to:
+  /// **'Signed out'**
+  String get syncStatusSignedOut;
+
+  /// Cloud sync status: idle / everything synchronized
+  ///
+  /// In en, this message translates to:
+  /// **'Up to date'**
+  String get syncStatusIdle;
+
+  /// Cloud sync status: sync cycle running
+  ///
+  /// In en, this message translates to:
+  /// **'Syncing…'**
+  String get syncStatusSyncing;
+
+  /// Cloud sync status: last cycle failed
+  ///
+  /// In en, this message translates to:
+  /// **'Sync error'**
+  String get syncStatusError;
+
+  /// Cloud sync page message when no provider adapter is registered
+  ///
+  /// In en, this message translates to:
+  /// **'No sync backend is configured in this build. Firebase, Supabase and self-hosted adapters plug in here (docs/CLOUD_SYNC.md).'**
+  String get syncUnavailableMessage;
+
+  /// Cloud sync page: timestamp of last successful sync
+  ///
+  /// In en, this message translates to:
+  /// **'Last sync: {time}'**
+  String syncLastSync(String time);
+
+  /// Cloud sync page: number of offline changes pending upload
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 change waiting to upload} other{{count} changes waiting to upload}}'**
+  String syncPendingChanges(int count);
+
+  /// Cloud sync page: sign-in button
+  ///
+  /// In en, this message translates to:
+  /// **'Sign in'**
+  String get syncSignIn;
+
+  /// Cloud sync page: sign-out button
+  ///
+  /// In en, this message translates to:
+  /// **'Sign out'**
+  String get syncSignOut;
+
+  /// Cloud sync page: manual sync button
+  ///
+  /// In en, this message translates to:
+  /// **'Sync now'**
+  String get syncNow;
+
 }
 
 class _AppLocalizationsDelegate

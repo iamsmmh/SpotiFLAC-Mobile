@@ -331,6 +331,11 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
                   icon: Icons.person_outline,
                   label: l10n.backupContentsArtists(bundle.favoriteArtistCount),
                 ),
+              if (bundle.favoriteAlbumCount > 0)
+                _ContentRow(
+                  icon: Icons.album_outlined,
+                  label: l10n.backupContentsAlbums(bundle.favoriteAlbumCount),
+                ),
               if (bundle.extensionCount > 0)
                 _ContentRow(
                   icon: Icons.extension_outlined,

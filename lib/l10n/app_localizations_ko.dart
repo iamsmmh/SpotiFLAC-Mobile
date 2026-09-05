@@ -4844,4 +4844,124 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get settingsGroupHelp => '정보 및 지원';
+
+  @override
+  String get collectionFavoriteAlbums => 'Favorite Albums';
+
+  @override
+  String get collectionFavoriteAlbumsEmptyTitle => 'No favorite albums yet';
+
+  @override
+  String get collectionFavoriteAlbumsEmptySubtitle => 'Albums you mark as favorite will appear here.';
+
+  @override
+  String collectionAddedToFavoriteAlbums(String albumName) {
+    return '\"$albumName\" added to Favorite Albums';
+  }
+
+  @override
+  String collectionRemovedFromFavoriteAlbums(String albumName) {
+    return '\"$albumName\" removed from Favorite Albums';
+  }
+
+  @override
+  String get albumOptionAddToFavorites => 'Add to favorite albums';
+
+  @override
+  String get albumOptionRemoveFromFavorites => 'Remove from favorite albums';
+
+  @override
+  String collectionAlbumCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count albums',
+      one: '1 album',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String backupContentsAlbums(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count favorite albums',
+      one: '1 favorite album',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get homeRecentSearches => 'Recent searches';
+
+  @override
+  String get forYouTitle => 'For You';
+
+  @override
+  String get forYouEmptyTitle => 'Nothing to recommend yet';
+
+  @override
+  String get forYouEmptySubtitle => 'Play music and your personalized picks will appear here.';
+
+  @override
+  String get forYouSectionRecentlyPlayed => 'Recently played';
+
+  @override
+  String get forYouSectionFrequentlyPlayed => 'Frequently played';
+
+  @override
+  String get forYouSectionArtists => 'Artists for you';
+
+  @override
+  String get forYouSectionDiscoveryMix => 'Discovery mix';
+
+  @override
+  String get syncTitle => 'Cloud sync';
+
+  @override
+  String get syncSubtitle => 'Optional account sync for favorites, playlists and settings';
+
+  @override
+  String get syncStatusDisabled => 'Not configured';
+
+  @override
+  String get syncStatusSignedOut => 'Signed out';
+
+  @override
+  String get syncStatusIdle => 'Up to date';
+
+  @override
+  String get syncStatusSyncing => 'Syncing…';
+
+  @override
+  String get syncStatusError => 'Sync error';
+
+  @override
+  String get syncUnavailableMessage => 'No sync backend is configured in this build. Firebase, Supabase and self-hosted adapters plug in here (docs/CLOUD_SYNC.md).';
+
+  @override
+  String syncLastSync(String time) {
+    return 'Last sync: $time';
+  }
+
+  @override
+  String syncPendingChanges(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count changes waiting to upload',
+      one: '1 change waiting to upload',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get syncSignIn => 'Sign in';
+
+  @override
+  String get syncSignOut => 'Sign out';
+
+  @override
+  String get syncNow => 'Sync now';
 }

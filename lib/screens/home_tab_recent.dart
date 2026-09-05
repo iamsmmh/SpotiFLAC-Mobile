@@ -12,6 +12,7 @@ extension _HomeTabRecentUI on _HomeTabState {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _buildSearchDiscoverySection(colorScheme),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -372,5 +373,121 @@ extension _HomeTabRecentUI on _HomeTabState {
       force: result == true,
       onChanged: _onEmbeddedCoverChanged,
     );
+  }
+
+  /// Phase 9 search discovery: recent queries (empty input) or live local
+  /// suggestions (short input, before the provider search takes over).
+  /// Renders nothing when there is genuinely nothing to offer.
+  Widget _buildSearchDiscoverySection(ColorScheme colorScheme) {
+    final query = _urlController.text.trim();
+    final suggestions = ref.watch(searchSuggestionsProvider(query));
+    if (suggestions.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    if (query.isEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                context.l10n.homeRecentSearches,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+              TextButton(
+                onPressed: () async {
+                  await ref
+                      .read(searchHistoryProvider.notifier)
+                      .clearAll();
+                },
+                child: Text(
+                  context.l10n.dialogClearAll,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: colorScheme.primary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              for (final suggestion in suggestions)
+                InputChip(
+                  avatar: const Icon(Icons.history, size: 18),
+                  label: Text(suggestion.label),
+                  onPressed: () => _rerunSearch(suggestion.label),
+                  onDeleted: () async {
+                    await ref
+                        .read(searchHistoryProvider.notifier)
+                        .remove(suggestion.label);
+                  },
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final suggestion in suggestions)
+          ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(
+              _suggestionIcon(suggestion.kind),
+              color: colorScheme.onSurfaceVariant,
+            ),
+            title: Text(
+              suggestion.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            subtitle: suggestion.subtitle.isEmpty
+                ? null
+                : Text(
+                    suggestion.subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+            onTap: () => _rerunSearch(suggestion.label),
+          ),
+        const SizedBox(height: 8),
+      ],
+    );
+  }
+
+  IconData _suggestionIcon(SearchSuggestionKind kind) {
+    switch (kind) {
+      case SearchSuggestionKind.history:
+        return Icons.history;
+      case SearchSuggestionKind.lovedTrack:
+        return Icons.favorite_border;
+      case SearchSuggestionKind.favoriteArtist:
+        return Icons.person_outline;
+      case SearchSuggestionKind.favoriteAlbum:
+        return Icons.album_outlined;
+    }
+  }
+
+  /// Re-runs a stored/suggested query through the same path the search bar
+  /// submit uses (controller text + provider search + history record).
+  void _rerunSearch(String query) {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return;
+    _urlController.value = TextEditingValue(
+      text: trimmed,
+      selection: TextSelection.collapsed(offset: trimmed.length),
+    );
+    _lastSearchQuery = null;
+    _performSearch(trimmed);
   }
 }

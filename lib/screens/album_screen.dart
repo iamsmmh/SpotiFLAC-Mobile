@@ -483,6 +483,8 @@ class _AlbumScreenState extends ConsumerState<AlbumScreen>
           : Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
+                _buildFavoriteAlbumButton(),
+                const SizedBox(width: 12),
                 _buildLoveAllButton(),
                 const SizedBox(width: 12),
                 Flexible(
@@ -705,6 +707,58 @@ class _AlbumScreenState extends ConsumerState<AlbumScreen>
       onPressed: tracks == null || tracks.isEmpty
           ? null
           : () => _loveAll(tracks),
+    );
+  }
+
+  /// Favorites the album itself (Phase 4) — distinct from loving every track:
+  /// this keeps the album browsable from Library → Favorite Albums.
+  Widget _buildFavoriteAlbumButton() {
+    final collectionsState = ref.watch(libraryCollectionsProvider);
+    final albumId = widget.albumId.trim();
+    if (albumId.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final extensionId = widget.extensionId?.trim();
+    final providerId = extensionId != null && extensionId.isNotEmpty
+        ? extensionId
+        : null;
+    final isFavorite = collectionsState.isFavoriteAlbum(
+      albumId: albumId,
+      providerId: providerId,
+    );
+
+    return HeaderCircleButton(
+      icon: isFavorite ? Icons.bookmark : Icons.bookmark_border,
+      iconColor: isFavorite ? Theme.of(context).colorScheme.primary : null,
+      tooltip: isFavorite
+          ? context.l10n.albumOptionRemoveFromFavorites
+          : context.l10n.albumOptionAddToFavorites,
+      onPressed: () async {
+        final added = await ref
+            .read(libraryCollectionsProvider.notifier)
+            .toggleFavoriteAlbum(
+              albumId: albumId,
+              providerId: providerId,
+              name: widget.albumName,
+              artistName: widget.artistName,
+              artistId: _artistId ?? widget.artistId,
+              imageUrl: widget.coverUrl,
+            );
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              added
+                  ? context.l10n.collectionAddedToFavoriteAlbums(
+                      widget.albumName,
+                    )
+                  : context.l10n.collectionRemovedFromFavoriteAlbums(
+                      widget.albumName,
+                    ),
+            ),
+          ),
+        );
+      },
     );
   }
 

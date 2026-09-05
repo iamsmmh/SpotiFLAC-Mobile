@@ -13,6 +13,7 @@ import 'package:spotimusic/services/shell_navigation_service.dart';
 import 'package:spotimusic/models/settings.dart';
 import 'package:spotimusic/models/track.dart';
 import 'package:spotimusic/providers/track_provider.dart';
+import 'package:spotimusic/providers/search_history_provider.dart';
 import 'package:spotimusic/providers/download_queue_provider.dart';
 import 'package:spotimusic/providers/settings_provider.dart';
 import 'package:spotimusic/providers/extension_provider.dart';
@@ -468,6 +469,12 @@ class _HomeTabState extends ConsumerState<HomeTab>
     _activeSearchInput = query;
     _searchSortOption = HomeSearchSortOption.defaultOrder;
     _invalidateSearchSortCaches();
+
+    // Phase 9: remember the committed query for recent-searches/suggestions.
+    // URLs and spotify: URIs are navigation inputs, not content searches.
+    if (!looksLikeUrlOrSpotifyUri(query)) {
+      unawaited(ref.read(searchHistoryProvider.notifier).recordQuery(query));
+    }
     ref.read(trackProvider.notifier).setSearchText(query.trim().isNotEmpty);
 
     final isExtensionEnabled =

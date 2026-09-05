@@ -19,7 +19,7 @@ class BackupBundle {
   final List<Map<String, dynamic>> history;
 
   /// Collections in `LibraryCollectionsState.toJson()` shape
-  /// (wishlist / loved / playlists / favoriteArtists).
+  /// (wishlist / loved / playlists / favoriteArtists / favoriteAlbums).
   final Map<String, dynamic> collections;
 
   /// Playlist cover images keyed by playlist id: `{ id: { ext, data } }`.
@@ -52,6 +52,7 @@ class BackupBundle {
   int get wishlistCount => _collectionListCount('wishlist');
   int get playlistCount => _collectionListCount('playlists');
   int get favoriteArtistCount => _collectionListCount('favoriteArtists');
+  int get favoriteAlbumCount => _collectionListCount('favoriteAlbums');
 
   int get extensionCount {
     final items = extensions['items'];
@@ -67,6 +68,7 @@ class BackupBundle {
       wishlistCount == 0 &&
       playlistCount == 0 &&
       favoriteArtistCount == 0 &&
+      favoriteAlbumCount == 0 &&
       extensionCount == 0;
 }
 

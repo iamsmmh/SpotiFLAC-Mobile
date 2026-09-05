@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:spotimusic/l10n/l10n.dart';
 import 'package:spotimusic/providers/download_queue_provider.dart';
 import 'package:spotimusic/providers/settings_provider.dart';
+import 'package:spotimusic/screens/settings/cloud_sync_page.dart';
 import 'package:spotimusic/widgets/settings_group.dart';
 import 'package:spotimusic/widgets/app_sliver_header.dart';
 
@@ -69,6 +70,16 @@ class AppSettingsPage extends ConsumerWidget {
             SliverToBoxAdapter(
               child: SettingsGroup(
                 children: [
+                  SettingsItem(
+                    icon: Icons.cloud_outlined,
+                    title: context.l10n.syncTitle,
+                    subtitle: context.l10n.syncSubtitle,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const CloudSyncPage(),
+                      ),
+                    ),
+                  ),
                   SettingsItem(
                     icon: Icons.cleaning_services_outlined,
                     title: context.l10n.cleanupOrphanedDownloads,

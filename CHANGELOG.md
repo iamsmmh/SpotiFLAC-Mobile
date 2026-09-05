@@ -4,6 +4,37 @@
 
 ### Added
 
+- **Favorite albums (favorites parity)**: albums can now be hearted from the
+  album page (bookmark action next to love-all), live in a new Library →
+  Favorite Albums folder (grid + list), ride backup/restore and the SQLite
+  collections schema (v3 migration, `favorite_albums` table), and are part of
+  search suggestions and recommendations — completing the like tracks /
+  albums / artists / playlists set.
+- **For You recommendations**: a new recommendation engine
+  (`lib/engine/recommendations.dart`) with a provider-agnostic
+  `RecommendationProvider` port, a fully on-device engine (recently played,
+  frequently played, artists-for-you affinity, deterministic daily discovery
+  mix built from listening stats + favorites), and a fail-open provider chain
+  so future remote recommenders (extensions/backend) override local shelves
+  per section. Surfaced as the For You screen + Library tile; tapping a card
+  queues the whole shelf through Smart Play.
+- **Search history & local suggestions**: queries are remembered on-device
+  (capped, deduped, clearable) and surfaced as recent-search chips on the
+  Home recent surface; short-input typing now ranks local suggestions
+  (history + loved tracks + favorite artists/albums) through a new fuzzy
+  scorer (diacritics folding, word-boundary/contiguity weighting) before the
+  provider search takes over.
+- **Cloud sync architecture**: optional account sync layer
+  (`lib/core/sync/`) — `CloudSyncProvider` port with NoOp default, LWW+
+  tombstone merge orchestrator with persisted offline outbox, favorites
+  outbox hooks, and an honest Settings → Cloud sync page. Firebase /
+  Supabase / self-hosted adapters register by overriding
+  `cloudSyncBackendProvider` (see `docs/CLOUD_SYNC.md`).
+- **Docs**: `ARCHITECTURE.md`, `docs/CLOUD_SYNC.md`, and the 2026-09-05 full
+  repository audit (`docs/AUDIT_2026-09-05.md`).
+
+### Added (earlier in this cycle)
+
 - **Smart Play as the play path**: pressing play on a track list (playlists,
   folder view) now routes through the Smart Play engine — the tapped track
   always starts (local → stream → download & play) instead of being silently

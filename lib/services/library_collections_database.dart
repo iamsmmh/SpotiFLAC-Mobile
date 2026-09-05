@@ -8,13 +8,14 @@ import 'package:spotimusic/utils/logger.dart';
 final _log = AppLogger('LibraryCollectionsDb');
 
 const _dbFileName = 'library_collections.db';
-const _dbVersion = 2;
+const _dbVersion = 3;
 
 const _tableWishlist = 'wishlist_tracks';
 const _tableLoved = 'loved_tracks';
 const _tablePlaylists = 'playlists';
 const _tablePlaylistTracks = 'playlist_tracks';
 const _tableFavoriteArtists = 'favorite_artists';
+const _tableFavoriteAlbums = 'favorite_albums';
 
 const _legacyCollectionsStorageKey = 'library_collections_v1';
 const _migrationDoneKey = 'library_collections_migrated_to_sqlite_v1';
@@ -25,6 +26,7 @@ class LibraryCollectionsSnapshot {
   final List<Map<String, dynamic>> playlistRows;
   final List<Map<String, dynamic>> playlistTrackRows;
   final List<Map<String, dynamic>> favoriteArtistRows;
+  final List<Map<String, dynamic>> favoriteAlbumRows;
 
   const LibraryCollectionsSnapshot({
     required this.wishlistRows,
@@ -32,6 +34,7 @@ class LibraryCollectionsSnapshot {
     required this.playlistRows,
     required this.playlistTrackRows,
     required this.favoriteArtistRows,
+    required this.favoriteAlbumRows,
   });
 }
 
@@ -120,6 +123,7 @@ class LibraryCollectionsDatabase {
     ''');
 
     await _createFavoriteArtistsTable(db);
+    await _createFavoriteAlbumsTable(db);
 
     await db.execute(
       'CREATE INDEX idx_${_tableWishlist}_added_at ON $_tableWishlist(added_at DESC)',
@@ -143,6 +147,9 @@ class LibraryCollectionsDatabase {
     if (oldVersion < 2) {
       await _createFavoriteArtistsTable(db);
     }
+    if (oldVersion < 3) {
+      await _createFavoriteAlbumsTable(db);
+    }
   }
 
   Future<void> _createFavoriteArtistsTable(Database db) async {
@@ -155,6 +162,19 @@ class LibraryCollectionsDatabase {
     ''');
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_${_tableFavoriteArtists}_added_at ON $_tableFavoriteArtists(added_at DESC)',
+    );
+  }
+
+  Future<void> _createFavoriteAlbumsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $_tableFavoriteAlbums (
+        album_key TEXT PRIMARY KEY,
+        album_json TEXT NOT NULL,
+        added_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_${_tableFavoriteAlbums}_added_at ON $_tableFavoriteAlbums(added_at DESC)',
     );
   }
 
@@ -286,6 +306,10 @@ class LibraryCollectionsDatabase {
       _tableFavoriteArtists,
       orderBy: 'added_at DESC, rowid DESC',
     );
+    final favoriteAlbumRows = await db.query(
+      _tableFavoriteAlbums,
+      orderBy: 'added_at DESC, rowid DESC',
+    );
 
     return LibraryCollectionsSnapshot(
       wishlistRows: wishlistRows,
@@ -293,6 +317,7 @@ class LibraryCollectionsDatabase {
       playlistRows: playlistRows,
       playlistTrackRows: playlistTrackRows,
       favoriteArtistRows: favoriteArtistRows,
+      favoriteAlbumRows: favoriteAlbumRows,
     );
   }
 
@@ -486,6 +511,21 @@ class LibraryCollectionsDatabase {
   Future<void> deleteFavoriteArtistEntry(String artistKey) =>
       _deleteEntry(_tableFavoriteArtists, 'artist', artistKey);
 
+  Future<void> upsertFavoriteAlbumEntry({
+    required String albumKey,
+    required String albumJson,
+    required String addedAt,
+  }) => _upsertEntry(
+    _tableFavoriteAlbums,
+    'album',
+    key: albumKey,
+    json: albumJson,
+    addedAt: addedAt,
+  );
+
+  Future<void> deleteFavoriteAlbumEntry(String albumKey) =>
+      _deleteEntry(_tableFavoriteAlbums, 'album', albumKey);
+
   Future<void> upsertPlaylist({
     required String id,
     required String name,
@@ -611,9 +651,10 @@ class LibraryCollectionsDatabase {
   /// Wipes every collection table and rewrites them from a restored backup.
   ///
   /// [collectionsJson] must use the same shape as
-  /// `LibraryCollectionsState.toJson()` (wishlist/loved/playlists/favoriteArtists).
+  /// `LibraryCollectionsState.toJson()` (wishlist/loved/playlists/
+  /// favoriteArtists/favoriteAlbums).
   /// Track entries carry a nested `track` map (stored as `track_json`); favorite
-  /// artist entries are stored whole as `artist_json`.
+  /// artist/album entries are stored whole as `artist_json`/`album_json`.
   Future<void> replaceAllFromBackup(
     Map<String, dynamic> collectionsJson,
   ) async {
@@ -632,6 +673,7 @@ class LibraryCollectionsDatabase {
     final loved = listOf('loved');
     final playlists = listOf('playlists');
     final favoriteArtists = listOf('favoriteArtists');
+    final favoriteAlbums = listOf('favoriteAlbums');
 
     final db = await database;
     await db.transaction((txn) async {
@@ -640,6 +682,7 @@ class LibraryCollectionsDatabase {
       await txn.delete(_tableWishlist);
       await txn.delete(_tableLoved);
       await txn.delete(_tableFavoriteArtists);
+      await txn.delete(_tableFavoriteAlbums);
 
       Future<void> insertTrackEntries(
         String table,
@@ -667,6 +710,16 @@ class LibraryCollectionsDatabase {
           'artist_key': key,
           'artist_json': jsonEncode(artist),
           'added_at': (artist['addedAt'] as String?) ?? nowIso,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+
+      for (final album in favoriteAlbums) {
+        final key = album['key'] as String?;
+        if (key == null || key.isEmpty) continue;
+        await txn.insert(_tableFavoriteAlbums, {
+          'album_key': key,
+          'album_json': jsonEncode(album),
+          'added_at': (album['addedAt'] as String?) ?? nowIso,
         }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
 

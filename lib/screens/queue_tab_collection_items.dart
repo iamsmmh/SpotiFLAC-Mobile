@@ -425,10 +425,26 @@ extension _QueueTabCollectionItemWidgets on _QueueTabState {
     );
   }
 
+  /// Total recommendation items across all For You shelves (0 when the engine
+  /// is cold or still resolving): gates the For You collection tile.
+  int get _forYouItemCount {
+    final sections = ref.watch(forYouSectionsProvider).valueOrNull;
+    if (sections == null) return 0;
+    var count = 0;
+    for (final section in sections) {
+      count += section.items.length;
+    }
+    return count;
+  }
+
   List<_CollectionEntry> _getVisibleCollectionEntries(
-    LibraryCollectionsState collectionState,
-  ) {
+    LibraryCollectionsState collectionState, {
+    int forYouItemCount = 0,
+  }) {
     final entries = <_CollectionEntry>[];
+    if (forYouItemCount > 0) {
+      entries.add(_CollectionEntry.forYou);
+    }
     if (collectionState.wishlistCount > 0) {
       entries.add(_CollectionEntry.wishlist);
     }
@@ -437,6 +453,9 @@ extension _QueueTabCollectionItemWidgets on _QueueTabState {
     }
     if (collectionState.favoriteArtistCount > 0) {
       entries.add(_CollectionEntry.favoriteArtists);
+    }
+    if (collectionState.favoriteAlbumCount > 0) {
+      entries.add(_CollectionEntry.favoriteAlbums);
     }
     for (var i = 0; i < collectionState.playlists.length; i++) {
       entries.add(_CollectionEntry.playlist(i));
@@ -452,6 +471,17 @@ extension _QueueTabCollectionItemWidgets on _QueueTabState {
     List<UnifiedLibraryItem> filteredUnifiedItems = const [],
   }) {
     switch (entry.type) {
+      case _CollectionEntryType.forYou:
+        return _buildCollectionGridItem(
+          context: context,
+          colorScheme: colorScheme,
+          icon: Icons.auto_awesome,
+          iconColor: Colors.white,
+          iconBgColor: const Color(0xFF673AB7),
+          title: context.l10n.forYouTitle,
+          count: _forYouItemCount,
+          onTap: _openForYou,
+        );
       case _CollectionEntryType.wishlist:
         return _buildCollectionGridItem(
           context: context,
@@ -484,6 +514,17 @@ extension _QueueTabCollectionItemWidgets on _QueueTabState {
           title: context.l10n.collectionFavoriteArtists,
           count: collectionState.favoriteArtistCount,
           onTap: _openFavoriteArtistsFolder,
+        );
+      case _CollectionEntryType.favoriteAlbums:
+        return _buildCollectionGridItem(
+          context: context,
+          colorScheme: colorScheme,
+          icon: Icons.album,
+          iconColor: Colors.white,
+          iconBgColor: const Color(0xFF3F51B5),
+          title: context.l10n.collectionFavoriteAlbums,
+          count: collectionState.favoriteAlbumCount,
+          onTap: _openFavoriteAlbumsFolder,
         );
       case _CollectionEntryType.playlist:
         final playlist = collectionState.playlists[entry.playlistIndex];
@@ -580,6 +621,18 @@ extension _QueueTabCollectionItemWidgets on _QueueTabState {
     List<UnifiedLibraryItem> filteredUnifiedItems = const [],
   }) {
     switch (entry.type) {
+      case _CollectionEntryType.forYou:
+        return _buildCollectionListItem(
+          context: context,
+          colorScheme: colorScheme,
+          icon: Icons.auto_awesome,
+          iconColor: Colors.white,
+          iconBgColor: const Color(0xFF673AB7),
+          title: context.l10n.forYouTitle,
+          subtitle:
+              '${context.l10n.collectionFoldersTitle} • ${context.l10n.itemCount(_forYouItemCount)}',
+          onTap: _openForYou,
+        );
       case _CollectionEntryType.wishlist:
         return _buildCollectionListItem(
           context: context,
@@ -615,6 +668,18 @@ extension _QueueTabCollectionItemWidgets on _QueueTabState {
           subtitle:
               '${context.l10n.collectionFoldersTitle} • ${context.l10n.collectionArtistCount(collectionState.favoriteArtistCount)}',
           onTap: _openFavoriteArtistsFolder,
+        );
+      case _CollectionEntryType.favoriteAlbums:
+        return _buildCollectionListItem(
+          context: context,
+          colorScheme: colorScheme,
+          icon: Icons.album,
+          iconColor: Colors.white,
+          iconBgColor: const Color(0xFF3F51B5),
+          title: context.l10n.collectionFavoriteAlbums,
+          subtitle:
+              '${context.l10n.collectionFoldersTitle} • ${context.l10n.collectionAlbumCount(collectionState.favoriteAlbumCount)}',
+          onTap: _openFavoriteAlbumsFolder,
         );
       case _CollectionEntryType.playlist:
         final playlist = collectionState.playlists[entry.playlistIndex];
