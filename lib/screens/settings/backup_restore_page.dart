@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show Clipboard;
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart' show ShareParams, SharePlus, XFile;
 import 'package:spotimusic/l10n/l10n.dart';
@@ -103,11 +103,13 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
   Future<void> _importLedger() async {
     if (_isBusy) return;
     final messenger = ScaffoldMessenger.of(context);
-    String? content;
+    List<LedgerEntry>? imported;
     try {
       final picked = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: const ['json']);
       if (picked == null) return;
-      content = utf8.decode(await picked.readAsBytes());
+      imported = LibraryLedgerService.decodeLedger(
+        utf8.decode(await picked.readAsBytes()),
+      );
     } catch (e) {
       _log.e('Failed to read ledger file: $e');
       messenger.showSnackBar(
@@ -116,7 +118,6 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
       return;
     }
 
-    final imported = content == null ? null : LibraryLedgerService.decodeLedger(content);
     if (imported == null) {
       messenger.showSnackBar(
         SnackBar(content: Text(StagedStrings.ledgerInvalidFile)),

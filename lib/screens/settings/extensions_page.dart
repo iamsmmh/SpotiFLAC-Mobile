@@ -271,7 +271,9 @@ class _ExtensionsPageState extends ConsumerState<ExtensionsPage> {
         }
       }
       if (addedPermissions.isNotEmpty) {
-        final proceed = await buildPermissionConfirmer(context)(addedPermissions);
+        if (!mounted) return;
+        final confirmer = buildPermissionConfirmer(context);
+        final proceed = await confirmer(addedPermissions);
         if (!proceed || !mounted) return;
       }
 

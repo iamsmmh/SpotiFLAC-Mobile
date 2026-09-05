@@ -81,6 +81,9 @@ exists", "cover/sidecar writes are non-atomic" — both fixed since).
    long queues; denial is currently handled gracefully, not scheduled around.
 4. Executed DB-migration tests (`sqflite_common_ffi`) to replace the current
    source-contract assertions; iOS EQ engine; car mode.
-5. **LAN web player**: currently serves the download folder read-only; pairing /
+5. Make the Go suite order-independent enough to enable `-shuffle=on` (a
+   first attempt in CI exposed shared package-level state between tests);
+   `-race` stays on regardless.
+6. **LAN web player**: currently serves the download folder read-only; pairing /
    HTTPS / per-device PIN would be needed before this could ever leave the LAN
    scope. Extension-side audio for non-local files is not exposed.

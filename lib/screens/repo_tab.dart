@@ -556,6 +556,7 @@ class _RepoTabState extends ConsumerState<RepoTab> {
   }
 
   Future<void> _installExtension(RepoExtension ext) async {
+    final permissionConfirmer = buildPermissionConfirmer(context);
     final tempDir = await getTemporaryDirectory();
     final appDir = await getApplicationDocumentsDirectory();
     final extensionsDir = '${appDir.path}/extensions';
@@ -566,7 +567,7 @@ class _RepoTabState extends ConsumerState<RepoTab> {
           ext.id,
           tempDir.path,
           extensionsDir,
-          permissionConfirmer: buildPermissionConfirmer(context),
+          permissionConfirmer: permissionConfirmer,
         );
 
     if (mounted) {
@@ -609,6 +610,7 @@ class _RepoTabState extends ConsumerState<RepoTab> {
   }
 
   Future<void> _updateExtension(RepoExtension ext) async {
+    final permissionConfirmer = buildPermissionConfirmer(context);
     final tempDir = await getTemporaryDirectory();
 
     final success = await ref
@@ -616,7 +618,7 @@ class _RepoTabState extends ConsumerState<RepoTab> {
         .updateExtension(
           ext.id,
           tempDir.path,
-          permissionConfirmer: buildPermissionConfirmer(context),
+          permissionConfirmer: permissionConfirmer,
         );
 
     if (mounted) {
