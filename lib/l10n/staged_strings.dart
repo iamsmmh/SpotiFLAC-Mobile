@@ -54,6 +54,27 @@ abstract final class StagedStrings {
   static const String providerAccountsTestHint =
       'Saved tokens apply to the next stream immediately — no restart needed.';
 
+  // Offline download registry (issue #516).
+  static const String ledgerSectionTitle = 'Offline registry';
+  static const String ledgerExportButton = 'Export downloaded registry';
+  static const String ledgerExportDescription =
+      'Share a JSON list of what this device has downloaded — no audio files.';
+  static const String ledgerImportButton = 'Import registry & find missing';
+  static const String ledgerImportDescription =
+      'Compare another device\'s registry with this one and list the tracks this '
+      'device is missing.';
+  static const String ledgerExported = 'Registry exported';
+  static const String ledgerExportFailed = 'Could not export the registry';
+  static const String ledgerInvalidFile = 'This is not a SpotiFLAC registry file';
+  static const String ledgerAllPresent =
+      'Everything in this registry is already downloaded on this device';
+  static const String ledgerMissingTitle = 'Missing from this device';
+  static const String ledgerCopyList = 'Copy list';
+  static const String ledgerClose = 'Close';
+  static const String ledgerCopiedList = 'Missing tracks copied to clipboard';
+  static const String ledgerSearchHint =
+      'No direct link — tap to copy and search by title instead';
+
   // No-download-provider recovery.
   static const String noProvidersTitle = 'No download providers';
   static const String noProvidersMessage =

@@ -36,6 +36,7 @@ void downloadSingleTrack(
       artistName: track.artistName,
       coverUrl: track.coverUrl,
       recommendedService: recommendedService,
+      totalDurationSeconds: track.duration,
       onSelect: (quality, service) {
         ref
             .read(downloadQueueProvider.notifier)
@@ -219,6 +220,10 @@ Future<void> queueTracksSkippingDownloaded(
       trackName: '${tracksToQueue.length} tracks',
       artistName: artistNameForPicker,
       recommendedService: recommendedService,
+      totalDurationSeconds: tracksToQueue.fold<int>(
+        0,
+        (int sum, Track track) => sum + track.duration,
+      ),
       onSelect: (quality, service) {
         ref
             .read(downloadQueueProvider.notifier)
