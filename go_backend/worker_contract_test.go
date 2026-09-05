@@ -60,7 +60,10 @@ func TestBackgroundWorkersRecoverPanics(t *testing.T) {
 			}
 			if !strings.Contains(string(src[start:end]), "recover(") {
 				line := fset.Position(goStmt.Pos()).Line
-				unguarded = append(unguarded, sprintfGoStmt(path, line))
+				unguarded = append(
+					unguarded,
+					fmt.Sprintf("%s:%d", path, line),
+				)
 			}
 			return true
 		})
@@ -76,21 +79,4 @@ func TestBackgroundWorkersRecoverPanics(t *testing.T) {
 			strings.Join(unguarded, "\n  "),
 		)
 	}
-}
-
-func sprintfGoStmt(path string, line int) string {
-	return path + ":" + itoa(line)
-}
-
-// itoa avoids importing strconv for a single test helper.
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var digits []byte
-	for n > 0 {
-		digits = append([]byte{byte('0' + n%10)}, digits...)
-		n /= 10
-	}
-	return string(digits)
 }
