@@ -5,9 +5,10 @@
   "apps": [
     {
       "name": "SpotiFLAC Mobile",
-      "bundleIdentifier": "com.zarzet.spotiflac",
+      "bundleIdentifier": "com.zarz.spotimusic",
       "developerName": "zarzet",
       "version": "4.9.5",
+      "date": "2026-09-01T00:00:00Z",
       "versionDate": "2026-09-01",
       "downloadURL": "https://github.com/spotiflacapp/SpotiFLAC-Mobile/releases/download/v4.9.5/SpotiFLAC-v4.9.5-ios-unsigned.ipa",
       "localizedDescription": "SpotiFLAC Mobile is written in Flutter and uses installable extensions for metadata and audio downloads.",
