@@ -8,7 +8,6 @@
 /// When the chain is disabled the previous 10-band state is restored.
 library;
 
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
