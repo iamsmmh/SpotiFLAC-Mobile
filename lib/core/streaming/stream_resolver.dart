@@ -183,9 +183,8 @@ class HlsMasterPlaylist {
 
   static String? _attribute(String line, String name) {
     // #EXT-X-STREAM-INF:BANDWIDTH=1280000,CODECS="mp4a.40.2",…
-    final body = line.split(':', 2).length > 1
-        ? line.split(':', 2)[1]
-        : '';
+    final colon = line.indexOf(':');
+    final body = colon >= 0 ? line.substring(colon + 1) : '';
     for (var part in body.split(',')) {
       part = part.trim();
       if (!part.toUpperCase().startsWith('$name=')) continue;
@@ -339,7 +338,7 @@ class DashManifest {
     return lower.contains('video/') && !lower.contains('audio/');
   }
 
-  /// Best-effort: the opening <AdaptationSet …> tag containing [offset].
+  /// Best-effort: the opening `<AdaptationSet …>` tag containing [offset].
   static String _parentAdaptationMime(String text, int offset) {
     final setStart = text.lastIndexOf('<AdaptationSet', offset);
     if (setStart < 0) return '';
