@@ -87,14 +87,25 @@ jobs:
       - name: Analyze
         run: |
           set -o pipefail
-          if ! flutter analyze 2>&1 | tee analyze.log; then
+          status=0
+          flutter analyze 2>&1 | tee analyze.log || status=$?
+          if [ "$status" -ne 0 ]; then
             # Surface analyzer findings as annotations so failures are
             # diagnosable from the Checks API (not just the raw log).
             findings=$(grep -E "^[[:space:]]*(error|warning|info) " analyze.log | head -40)
-            [ -n "$findings" ] || findings=$(tail -n 20 analyze.log)
+            [ -n "$findings" ] || findings=$(tail -n 40 analyze.log)
             printf '%s\n' "$findings" | while IFS= read -r line; do
               echo "::error::${line}"
             done
+            # The raw job log lives on a storage backend that is not always
+            # reachable; mirror the findings into the step summary (exposed
+            # through the Checks API output) so they are always diagnosable.
+            {
+              echo '## flutter analyze findings (exit '"$status"')'
+              echo '```'
+              printf '%s\n' "$findings"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
 
