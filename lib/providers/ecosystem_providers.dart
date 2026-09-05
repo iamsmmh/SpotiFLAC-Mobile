@@ -350,8 +350,24 @@ final podcastEpisodesProvider =
 // Feature Group 10 — music recognition
 // ---------------------------------------------------------------------------
 
+/// Holds the user-supplied AcoustID key.
+///
+/// `StateProvider` was removed in Riverpod 3, so this follows the repository's
+/// `NotifierProvider` convention.
+class AcoustIdApiKeyNotifier extends Notifier<String> {
+  @override
+  String build() => '';
+
+  /// Stores a new key; whitespace-only input clears it, which switches the
+  /// provider back to "unavailable" instead of issuing doomed requests.
+  void set(String apiKey) => state = apiKey.trim();
+}
+
 /// User-supplied AcoustID key (empty ⇒ recognition reports "unavailable").
-final acoustIdApiKeyProvider = StateProvider<String>((ref) => '');
+final acoustIdApiKeyProvider =
+    NotifierProvider<AcoustIdApiKeyNotifier, String>(
+      AcoustIdApiKeyNotifier.new,
+    );
 
 /// On-device Chromaprint fingerprinting via the bundled FFmpeg.
 final fingerprintEngineProvider = Provider<FingerprintEngine>((ref) {
