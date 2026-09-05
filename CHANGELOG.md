@@ -4,6 +4,31 @@
 
 ### Added
 
+- **Podcast platform (Feature Group 9)**: full RSS/Atom ingestion
+  (`lib/ecosystem/podcasts/`) — a pure `RssFeedParser` handling RSS 2.0, Atom,
+  the `itunes:`/`media:` namespaces, RFC 822 + ISO-8601 dates and
+  `HH:MM:SS`/bare-seconds durations; `PodcastRepository` (subscriptions,
+  episodes, idempotent refresh that preserves listening/download state);
+  `PodcastLibrary` (atomic `.part` downloads, per-feed retention that never
+  deletes a part-heard episode, orphan/missing-file repair sweep);
+  `PodcastPlayer`, which **reuses the existing `audio_service` handler** so
+  lockscreen/notification/headset/Bluetooth controls work for podcasts with no
+  second audio pipeline, adding speed presets (0.5x–3.0x), 15s/30s skip
+  intervals, throttled resume-point persistence and a `SilenceSkipPolicy`;
+  and keyless directory search via the iTunes API. No schema migration needed —
+  schema v4 already declared the podcast tables.
+- **Music recognition (Feature Group 10)**: `lib/ecosystem/recognition/` with a
+  `RecognitionProvider` port, an on-device `ChromaprintFingerprintEngine` that
+  reuses the bundled FFmpeg (`-f chromaprint`, so raw audio never leaves the
+  device — only the fingerprint is sent), an **AcoustID** adapter that stays
+  inert until the user supplies their own API key, provider chaining with
+  honest `unavailable` vs `noMatch` outcomes, and recognition history.
+- **Optional social layer (Feature Group 11)**: `lib/ecosystem/social/` —
+  profiles, playlist sharing (deterministic `spotimusic://playlist/shared/<id>`
+  links), collaborative playlists, follow graph and activity feed, all gated
+  behind `SocialFeatureFlags` that are **disabled by default**; every sub-flag
+  is inert unless the master switch is on, and services degrade to local-only
+  behaviour with no backend configured.
 - **Favorite albums (favorites parity)**: albums can now be hearted from the
   album page (bookmark action next to love-all), live in a new Library →
   Favorite Albums folder (grid + list), ride backup/restore and the SQLite

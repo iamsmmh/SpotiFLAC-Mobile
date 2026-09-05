@@ -40,3 +40,18 @@ export 'package:spotimusic/ecosystem/history/listening_history.dart';
 export 'package:spotimusic/ecosystem/history/listening_insights.dart';
 
 export 'package:spotimusic/ecosystem/recommendations/recommendation_providers.dart';
+
+export 'package:spotimusic/ecosystem/podcasts/podcast_library.dart';
+export 'package:spotimusic/ecosystem/podcasts/podcast_models.dart';
+export 'package:spotimusic/ecosystem/podcasts/podcast_player.dart';
+export 'package:spotimusic/ecosystem/podcasts/podcast_repository.dart';
+export 'package:spotimusic/ecosystem/podcasts/podcast_search.dart';
+export 'package:spotimusic/ecosystem/podcasts/rss_provider.dart';
+
+export 'package:spotimusic/ecosystem/recognition/fingerprint_engine.dart';
+export 'package:spotimusic/ecosystem/recognition/recognition_models.dart';
+export 'package:spotimusic/ecosystem/recognition/recognition_provider.dart';
+export 'package:spotimusic/ecosystem/recognition/recognition_service.dart';
+
+export 'package:spotimusic/ecosystem/social/social_models.dart';
+export 'package:spotimusic/ecosystem/social/social_service.dart';
