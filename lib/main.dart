@@ -13,8 +13,22 @@ import 'package:spotimusic/core/data/network_switch_policy.dart';
 import 'package:spotimusic/core/data/release_artifact_policy.dart';
 import 'package:spotimusic/core/data/secure_store.dart';
 import 'package:spotimusic/ecosystem/ecosystem.dart';
+import 'package:spotimusic/core/streaming/hybrid_playback.dart';
+import 'package:spotimusic/core/streaming/stream_provider.dart';
+import 'package:spotimusic/core/streaming/stream_resolver.dart';
+import 'package:spotimusic/core/streaming/stream_session.dart';
+import 'package:spotimusic/core/streaming/streaming_service.dart';
+import 'package:spotimusic/providers/advanced_audio_provider.dart';
 import 'package:spotimusic/providers/ecosystem_providers.dart';
+import 'package:spotimusic/providers/hybrid_playback_provider.dart';
+import 'package:spotimusic/providers/music_servers_providers.dart';
+import 'package:spotimusic/providers/smart_playlists_provider.dart';
+import 'package:spotimusic/providers/streaming_cache_providers.dart';
+import 'package:spotimusic/screens/ecosystem/advanced_audio_page.dart';
 import 'package:spotimusic/screens/ecosystem/ecosystem_hub_page.dart';
+import 'package:spotimusic/screens/ecosystem/servers_page.dart';
+import 'package:spotimusic/screens/ecosystem/smart_playlists_page.dart';
+import 'package:spotimusic/screens/ecosystem/unified_search_page.dart';
 import 'package:spotimusic/core/data/session_resource_budget.dart';
 import 'package:spotimusic/core/presentation/core_queue_providers.dart';
 import 'package:spotimusic/models/settings.dart';
@@ -40,6 +54,7 @@ import 'package:spotimusic/services/cache_auto_cleaner.dart';
 import 'package:spotimusic/services/app_state_database.dart';
 import 'package:spotimusic/utils/local_library_scan_prefs.dart';
 import 'package:spotimusic/utils/logger.dart';
+import 'package:spotimusic/utils/md5.dart';
 
 final _log = AppLogger('Main');
 
@@ -385,6 +400,69 @@ void _bindEcosystemSurface() {
     const DailyMixProvider(),
     RecommendationRegistry.new,
 
+    // ---- smart playlists (Group 6) ----------------------------------------
+    SmartPlaylistKind.values,
+    const SmartPlaylistDefinition(kind: SmartPlaylistKind.dailyMix),
+    defaultSmartPlaylistDefinitions,
+    SmartPlaylistTrack.new,
+    SmartPlaylist.new,
+    SmartPlaylistState.new,
+    const SmartPlaylistEngine(),
+    const SmartPlaylistRefreshPolicy(),
+    SmartPlaylistStore.new,
+    SmartPlaylistKind.fromName,
+
+    // ---- streaming cache (Group 7) ----------------------------------------
+    CachedAudioFormat.values,
+    CacheFetchStatus.values,
+    CacheFetchProgress.new,
+    CacheEntry.new,
+    CacheHit.new,
+    CacheFetchRequest.new,
+    CacheRepository.new,
+    CacheIndex.empty,
+    const CacheCleanupPlanner(),
+    CacheCleanupWorker.new,
+    CacheStorage.new,
+    StreamingCacheManager.new,
+    CacheCleanupPlan.new,
+    chacha20Block,
+    ChaCha20.new,
+    bytesToHex,
+    hexToBytes,
+    generateCacheKey,
+    generateCacheNonce,
+    StreamCacheStats.new,
+    streamCacheBudgetBytes,
+    cacheRepositoryProvider,
+    streamingCacheManagerProvider,
+    cacheCleanupWorkerProvider,
+    streamCacheIndexProvider,
+    streamCacheStatsProvider,
+
+    // ---- self-hosted servers ----------------------------------------------
+    MusicServerKind.values,
+    const MusicServerConfig(id: 'pin', kind: MusicServerKind.subsonic, baseUrl: 'https://pin'),
+    MusicServerException.new,
+    ServerTrack.new,
+    SecureMusicServerSecretStore.new,
+    MusicServerRegistry.new,
+    newMusicServerId,
+    SubsonicProvider.new,
+    NavidromeProvider.new,
+    AirsonicProvider.new,
+    JellyfinProvider.new,
+    PlexProvider.new,
+    type<MusicServerProvider>(),
+    type<MusicServerSecretStore>(),
+    musicServerRegistryProvider,
+    musicServerSecretStoreProvider,
+    musicServersProvider,
+
+    // ---- history: artist/album views (Group 4/12) -------------------------
+    ArtistHistory.new,
+    AlbumHistory.new,
+
     // ---- Riverpod surface + UI ------------------------------------------
     ecosystemDatabaseProvider,
     ecosystemPreferencesProvider,
@@ -407,6 +485,63 @@ void _bindEcosystemSurface() {
     cloudRecommendationConfigProvider,
     recommendationRegistryProvider,
     EcosystemHubPage.new,
+    ServersPage.new,
+    SmartPlaylistsPage.new,
+    UnifiedSearchPage.new,
+    AdvancedAudioPage.new,
+    saveDspPreset,
+    deleteDspPreset,
+
+    // ---- native streaming engine layer (Feature 1) -----------------------
+    StreamProtocol.values,
+    const StreamSource(url: 'pin://', format: 'PIN', bitrate: 0),
+    type<StreamProvider>(),
+    const StreamingServiceOptions(),
+    StreamingAttempt.new,
+    StreamingResolution.new,
+    StreamValidationOutcome.new,
+    type<StreamSourceValidator>(),
+    const StreamProtocolResolver(),
+    const StreamResolverRequest(candidates: <StreamSource>[]),
+    StreamProtocolDetector.detect,
+    StreamProtocolDetector.fromUrl,
+    StreamProtocolDetector.fromContentType,
+    HlsVariant.new,
+    HlsMasterPlaylist.parse,
+    DashRepresentation.new,
+    DashManifest.parse,
+    StreamSession.new,
+    StreamSessionEvent.new,
+    StreamSessionPhase.values,
+    const StreamHandoffPlan(mediaId: '', localPath: '', sourceUrl: ''),
+    type<StreamSessionListener>(),
+
+    // ---- hybrid playback (Feature 3) -------------------------------------
+    HybridPlaybackAction.values,
+    const HybridPlaybackFacts(
+      hasLocalFile: false,
+      hasVerifiedCache: false,
+      streamResolved: false,
+      cachePermitted: false,
+      cacheEnabled: false,
+      offline: false,
+    ),
+    HybridPlaybackPlan.new,
+    const HybridPlaybackPlanner(),
+    HybridPlaybackOutcome.new,
+    hybridPlaybackManagerProvider,
+    streamSourceOfDescriptor,
+
+    // ---- advanced audio extras --------------------------------------------
+    ImpulseResponse.new,
+    builtInDspPresets,
+    DspPreset.new,
+
+    // ---- md5 (Subsonic auth) ----------------------------------------------
+    md5Hex,
+    md5Bytes,
+    subsonicAuthToken,
+    utf8BytesOf,
   ];
 
   assert(pinned.isNotEmpty);
@@ -618,13 +753,25 @@ class _EagerInitializationState extends ConsumerState<_EagerInitialization>
 
     // Privacy-first listening statistics: restore stored stats and install
     // the player observer so play/completion events are recorded locally.
+    // The same observer feeds the ecosystem listening history (Feature
+    // Group 7) so History/Analytics/Smart playlists reflect real listens.
     final statsNotifier = ref.read(playbackStatisticsProvider.notifier);
     unawaited(statsNotifier.load());
-    installPlaybackStatisticsRecording(ref);
+    installPlaybackStatisticsRecording(
+      ref,
+      historyRepository: ListeningHistoryRepository(
+        database: EcosystemDatabase.instance,
+      ),
+    );
 
     // Search history (Phase 9): restore the on-device query log that powers
     // recent searches and local suggestions on the Home tab.
     unawaited(ref.read(searchHistoryProvider.notifier).load());
+
+    // Advanced audio (Feature Group: advanced audio): restore the persisted
+    // DSP chain (parametric EQ, boosts, profiles) so the last configuration
+    // survives restarts. Applying is idempotent through the equalizer path.
+    unawaited(ref.read(advancedAudioProvider.notifier).load());
 
     // Ecosystem (Feature Groups 1–5, 12): restore any persisted account
     // session and start the background sync engine. Both are no-ops when no

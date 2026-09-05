@@ -33,6 +33,58 @@ class ListeningRanking {
   String toString() => '$title ($playCount plays)';
 }
 
+/// Aggregated history for one artist (Feature 7 view over the events).
+class ArtistHistory {
+  const ArtistHistory({
+    required this.artist,
+    required this.playCount,
+    required this.skipCount,
+    required this.listenedMs,
+    required this.firstPlayedAt,
+    required this.lastPlayedAt,
+    this.trackCount = 0,
+  });
+
+  final String artist;
+  final int playCount;
+  final int skipCount;
+  final int listenedMs;
+  final DateTime firstPlayedAt;
+  final DateTime lastPlayedAt;
+
+  /// Distinct tracks of this artist in the window.
+  final int trackCount;
+
+  Duration get listened => Duration(milliseconds: listenedMs);
+
+  double get skipRate => playCount == 0 ? 0 : skipCount / playCount;
+}
+
+/// Aggregated history for one album (Feature 7 view over the events).
+class AlbumHistory {
+  const AlbumHistory({
+    required this.album,
+    required this.artist,
+    required this.playCount,
+    required this.skipCount,
+    required this.listenedMs,
+    required this.lastPlayedAt,
+    this.coverUrl,
+  });
+
+  final String album;
+  final String artist;
+  final int playCount;
+  final int skipCount;
+  final int listenedMs;
+  final DateTime lastPlayedAt;
+  final String? coverUrl;
+
+  Duration get listened => Duration(milliseconds: listenedMs);
+
+  double get skipRate => playCount == 0 ? 0 : skipCount / playCount;
+}
+
 /// Everything the insights/analytics surfaces need.
 class ListeningInsights {
   const ListeningInsights({
@@ -377,6 +429,106 @@ class InsightsCalculator {
       '${day.day.toString().padLeft(2, '0')}';
 
   static String _dayKey(DateTime instant) => _key(instant.toLocal());
+}
+
+extension ArtistAlbumHistory on InsightsCalculator {
+  /// Aggregates events per artist (play/skip counts, listening time).
+  List<ArtistHistory> artistHistory(List<PlayEvent> events, {int limit = 50}) {
+    final stats = <String, _ArtistAlbumAccumulator>{};
+    for (final event in events) {
+      final key = event.artist.trim().isEmpty ? 'Unknown artist' : event.artist.trim();
+      final accumulator = stats.putIfAbsent(
+        key,
+        () => _ArtistAlbumAccumulator(title: key),
+      );
+      accumulator.add(event);
+    }
+    final ranked = stats.values.toList(growable: false)
+      ..sort((a, b) {
+        final byListened = b.listenedMs.compareTo(a.listenedMs);
+        return byListened != 0
+            ? byListened
+            : b.playCount.compareTo(a.playCount);
+      });
+    return <ArtistHistory>[
+      for (final accumulator in ranked.take(limit))
+        ArtistHistory(
+          artist: accumulator.title,
+          playCount: accumulator.playCount,
+          skipCount: accumulator.skipCount,
+          listenedMs: accumulator.listenedMs,
+          firstPlayedAt: accumulator.firstAt,
+          lastPlayedAt: accumulator.lastAt,
+          trackCount: accumulator.titles.length,
+        ),
+    ];
+  }
+
+  /// Aggregates events per album.
+  List<AlbumHistory> albumHistory(List<PlayEvent> events, {int limit = 50}) {
+    final stats = <String, _ArtistAlbumAccumulator>{};
+    for (final event in events) {
+      final album = event.album.trim();
+      if (album.isEmpty) continue;
+      final key = '$album|${event.artist.trim()}';
+      final accumulator = stats.putIfAbsent(
+        key,
+        () => _ArtistAlbumAccumulator(
+          title: album,
+          subtitle: event.artist.trim(),
+          coverUrl: event.coverUrl,
+        ),
+      );
+      accumulator.add(event);
+    }
+    final ranked = stats.values.toList(growable: false)
+      ..sort((a, b) {
+        final byListened = b.listenedMs.compareTo(a.listenedMs);
+        return byListened != 0
+            ? byListened
+            : b.playCount.compareTo(a.playCount);
+      });
+    return <AlbumHistory>[
+      for (final accumulator in ranked.take(limit))
+        AlbumHistory(
+          album: accumulator.title,
+          artist: accumulator.subtitle,
+          playCount: accumulator.playCount,
+          skipCount: accumulator.skipCount,
+          listenedMs: accumulator.listenedMs,
+          lastPlayedAt: accumulator.lastAt,
+          coverUrl: accumulator.coverUrl,
+        ),
+    ];
+  }
+}
+
+class _ArtistAlbumAccumulator {
+  _ArtistAlbumAccumulator({
+    required this.title,
+    this.subtitle = '',
+    this.coverUrl,
+  });
+
+  final String title;
+  final String subtitle;
+  String? coverUrl;
+  int playCount = 0;
+  int skipCount = 0;
+  int listenedMs = 0;
+  DateTime firstAt = DateTime.now();
+  DateTime lastAt = DateTime.now();
+  final Set<String> titles = <String>{};
+
+  void add(PlayEvent event) {
+    playCount++;
+    if (event.skipped) skipCount++;
+    listenedMs += event.playedMs;
+    titles.add(event.title);
+    coverUrl ??= event.coverUrl;
+    if (event.startedAt.isBefore(firstAt)) firstAt = event.startedAt;
+    if (event.endedAt.isAfter(lastAt)) lastAt = event.endedAt;
+  }
 }
 
 class _Accumulator {

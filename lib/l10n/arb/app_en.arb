@@ -6543,6 +6543,7 @@
   "@forYouSectionDiscoveryMix": {
     "description": "Recommendations section: rotating discovery mix"
   },
+  "forYouSectionBecauseYouListened": "Because you listened",
   "syncTitle": "Cloud sync",
   "@syncTitle": {
     "description": "Settings entry title for optional cloud synchronization"

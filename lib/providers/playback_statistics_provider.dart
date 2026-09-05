@@ -3,7 +3,9 @@ import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:spotimusic/ecosystem/history/listening_history.dart';
 import 'package:spotimusic/engine/playback_session.dart';
+import 'package:spotimusic/engine/track_identity.dart';
 import 'package:spotimusic/providers/engine_settings_provider.dart';
 import 'package:spotimusic/services/music_player_service.dart';
 
@@ -78,7 +80,16 @@ class PlaybackStatisticsNotifier extends Notifier<ListeningStats> {
 
 /// Installs the player observer (idempotent). Called from app bootstrap after
 /// the engine settings are available; reading the notifier warms the provider.
-void installPlaybackStatisticsRecording(WidgetRef ref) {
+///
+/// [historyRepository] — when provided, the same observer also feeds the
+/// ecosystem listening history (`ec_listening_events` + aggregates): one
+/// `PlayEvent` per completed listen or skip, keyed by the canonical track
+/// identity. Feature Group 7 (history) becomes live end-to-end without the
+/// audio handler learning about SQLite.
+void installPlaybackStatisticsRecording(
+  WidgetRef ref, {
+  ListeningHistoryRepository? historyRepository,
+}) {
   final notifier = ref.read(playbackStatisticsProvider.notifier);
   setPlaybackStatsObserver(
     PlaybackStatsObserver(
@@ -93,6 +104,7 @@ void installPlaybackStatisticsRecording(WidgetRef ref) {
             ),
           ),
         );
+        _historyStartTimes[media.id] = DateTime.now();
       },
       onCompleted: (media, listened) {
         if (listened == null || listened <= Duration.zero) return;
@@ -107,13 +119,68 @@ void installPlaybackStatisticsRecording(WidgetRef ref) {
             listened,
           ),
         );
+        final repository = historyRepository;
+        if (repository != null) {
+          final startedAt = _historyStartTimes.remove(media.id) ?? DateTime.now();
+          unawaited(
+            repository.record(
+              PlayEvent(
+                trackKey: _historyKeyFor(media),
+                title: media.title,
+                artist: media.artist,
+                album: media.album,
+                coverUrl: media.artUri,
+                durationMs: media.duration?.inMilliseconds ?? 0,
+                playedMs: listened.inMilliseconds,
+                startedAt: startedAt,
+                endedAt: DateTime.now(),
+                skipped: false,
+                source: media.source.startsWith('http') ? 'stream' : 'local',
+              ),
+            ),
+          );
+        }
       },
       onSkip: (media) {
         unawaited(notifier.recordSkip());
+        final repository = historyRepository;
+        if (repository != null) {
+          final startedAt = _historyStartTimes.remove(media.id) ?? DateTime.now();
+          unawaited(
+            repository.record(
+              PlayEvent(
+                trackKey: _historyKeyFor(media),
+                title: media.title,
+                artist: media.artist,
+                album: media.album,
+                coverUrl: media.artUri,
+                durationMs: media.duration?.inMilliseconds ?? 0,
+                playedMs: 0,
+                startedAt: startedAt,
+                endedAt: DateTime.now(),
+                skipped: true,
+                source: media.source.startsWith('http') ? 'stream' : 'local',
+              ),
+            ),
+          );
+        }
       },
     ),
   );
 }
+
+/// Start timestamps for the in-flight listen of each media id.
+final Map<String, DateTime> _historyStartTimes = <String, DateTime>{};
+
+/// Canonical history key: the same ISRC-first identity the engine and the
+/// cache use, so history rows, cache entries and library lookups line up.
+String _historyKeyFor(PlayableMedia media) => CanonicalTrackKey.fromInput(
+      TrackIdentityInput(
+        title: media.title,
+        artist: media.artist,
+        album: media.album,
+      ),
+    ).stableId;
 
 /// Clears the observer (used in tests/disposal).
 void uninstallPlaybackStatisticsRecording() {

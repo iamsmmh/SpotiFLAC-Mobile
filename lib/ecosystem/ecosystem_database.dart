@@ -24,7 +24,7 @@ final _log = AppLogger('EcosystemDb');
 const String ecosystemDbFileName = 'ecosystem.db';
 
 /// Current schema version. Bump together with a new [EcosystemMigration].
-const int ecosystemDatabaseVersion = 4;
+const int ecosystemDatabaseVersion = 5;
 
 // ---------------------------------------------------------------------------
 // Table names
@@ -64,7 +64,19 @@ class EcosystemMigration {
 
   Future<void> apply(DatabaseExecutor db) async {
     for (final statement in statements) {
-      await db.execute(statement);
+      try {
+        await db.execute(statement);
+      } on DatabaseException catch (error) {
+        // Additive migrations must tolerate re-application: schema v1
+        // already ships every "later" column to fresh installs, so the
+        // 1→2/2→3/… `ALTER TABLE … ADD COLUMN` steps are no-ops there and
+        // SQLite answers "duplicate column name". Skipping exactly that
+        // case keeps a partially applied migration resumable (the stated
+        // contract) without masking unrelated DDL failures.
+        if (!error.isDuplicateColumnError(error.toString())) {
+          rethrow;
+        }
+      }
     }
   }
 
@@ -337,6 +349,21 @@ const List<EcosystemMigration> ecosystemMigrations = <EcosystemMigration>[
           'INTEGER NOT NULL DEFAULT 1',
       'ALTER TABLE $tableSmartPlaylistState ADD COLUMN last_track_count '
           'INTEGER NOT NULL DEFAULT 0',
+    ],
+  ),
+  EcosystemMigration(
+    fromVersion: 4,
+    toVersion: 5,
+    description: 'Stream cache gains integrity + at-rest encryption '
+        'bookkeeping: SHA-256 digest, encryption marker and cipher IV '
+        '(Feature Group 7 activation).',
+    statements: <String>[
+      'ALTER TABLE $tableStreamCache ADD COLUMN sha256 TEXT '
+          "NOT NULL DEFAULT ''",
+      'ALTER TABLE $tableStreamCache ADD COLUMN encrypted INTEGER '
+          'NOT NULL DEFAULT 0',
+      'ALTER TABLE $tableStreamCache ADD COLUMN iv_hex TEXT '
+          "NOT NULL DEFAULT ''",
     ],
   ),
 ];

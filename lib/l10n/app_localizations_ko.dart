@@ -4915,6 +4915,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get forYouSectionDiscoveryMix => 'Discovery mix';
+  String get forYouSectionBecauseYouListened => 'Because you listened';
 
   @override
   String get syncTitle => 'Cloud sync';

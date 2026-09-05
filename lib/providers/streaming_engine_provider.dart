@@ -10,14 +10,20 @@ import 'package:spotimusic/engine/audio_characteristics.dart';
 import 'package:spotimusic/engine/playback_session.dart';
 import 'package:spotimusic/engine/smart_play.dart';
 import 'package:spotimusic/engine/streaming_engine.dart';
+import 'package:spotimusic/engine/track_identity.dart';
 import 'package:spotimusic/models/track.dart';
 import 'package:spotimusic/models/download_item.dart';
 import 'package:spotimusic/providers/download_queue_provider.dart';
 import 'package:spotimusic/providers/engine_settings_provider.dart';
 import 'package:spotimusic/providers/multi_provider_stream_provider.dart';
 import 'package:spotimusic/providers/music_player_provider.dart';
+import 'package:spotimusic/providers/music_servers_providers.dart';
 import 'package:spotimusic/providers/playback_provider.dart';
+import 'package:spotimusic/providers/server_stream_adapter.dart';
 import 'package:spotimusic/providers/settings_provider.dart';
+import 'package:spotimusic/providers/streaming_cache_providers.dart';
+import 'package:spotimusic/ecosystem/cache/cache_cleanup_worker.dart';
+import 'package:spotimusic/ecosystem/cache/cache_models.dart';
 import 'package:spotimusic/services/library_database.dart';
 import 'package:spotimusic/services/multi_provider_stream_service.dart';
 import 'package:spotimusic/services/music_player_service.dart';
@@ -161,6 +167,10 @@ final streamSourceAdaptersProvider = Provider<List<StreamSourceAdapter>>((
   return [
     const PreviewStreamAdapter(),
     MultiProviderStreamAdapter(service: service, preferredProvider: preferred),
+    // Self-hosted servers (Feature Group: servers) join the ranked chain
+    // behind the first-party providers; an unreachable server contributes
+    // no candidates and never blocks the rest.
+    ServerStreamAdapter(registry: ref.watch(musicServerRegistryProvider)),
   ];
 });
 
@@ -704,7 +714,24 @@ class StreamingEngineController {
   }) async {
     final settings = _ref.read(engineSettingsProvider);
     final network = await currentNetworkProfile();
-    final effectiveLocalPath = localPath ?? await downloadedPathFor(track);
+    var effectiveLocalPath = localPath ?? await downloadedPathFor(track);
+    // Cache-first (Feature 7): a verified cached copy plays like a local
+    // file — instant start, works offline, no network round-trip.
+    if (effectiveLocalPath == null || effectiveLocalPath.isEmpty) {
+      try {
+        final trackKey = CanonicalTrackKey.fromInput(
+          TrackIdentityInput.fromTrack(track),
+        ).stableId;
+        final hit = await _ref
+            .read(streamingCacheManagerProvider)
+            .lookupPlayable(trackKey);
+        if (hit != null) {
+          effectiveLocalPath = hit.filePath;
+        }
+      } catch (_) {
+        // Cache lookup must never block the decision ladder.
+      }
+    }
     final candidates = shouldAttemptStreamResolution(
           streamingEnabled: settings.streamingEnabled,
           network: network,
@@ -1211,6 +1238,11 @@ class StreamingEngineController {
           startedAt: DateTime.now(),
         ),
       );
+      // Cache-while-listening (Feature 7): when the provider's terms and
+      // the user's cache toggle allow it, the same bytes are fetched to
+      // the stream cache in the background — playback never waits for it,
+      // and the next play of this track starts from the verified copy.
+      unawaited(_maybeCacheWhileListening(track, source));
       return EnginePlayResult(
         started: true,
         decision: decision.copyWithSource(source),
@@ -1222,6 +1254,61 @@ class StreamingEngineController {
         failure: EnginePlayFailureKind.streamFailed,
         message: e.toString(),
       );
+    }
+  }
+
+  /// Background cache fetch for a playing stream. Never throws onto the
+  /// playback path; a failed/cancelled fetch only means "no offline copy
+  /// this time".
+  Future<void> _maybeCacheWhileListening(
+    Track track,
+    StreamDescriptor source,
+  ) async {
+    if (!source.cachePermitted) return;
+    if (!_ref.read(engineSettingsProvider).cacheStreams) return;
+    if (source.isLocal) return;
+    try {
+      final manager = _ref.read(streamingCacheManagerProvider);
+      final trackKey = CanonicalTrackKey.fromInput(
+        TrackIdentityInput.fromTrack(track),
+      ).stableId;
+      final result = await manager.startFetch(
+        CacheFetchRequest(
+          trackKey: trackKey,
+          title: track.name,
+          artist: track.artistName,
+          url: source.uri,
+          durationMs: track.duration * 1000,
+          sourceUrl: source.uri,
+        ),
+      );
+      if (result.status != CacheFetchStatus.completed ||
+          result.entry == null) {
+        return;
+      }
+      log.add(
+        EngineEvent.info(
+          'cache',
+          'Cached "${track.name}" '
+          '(${result.entry!.bytes} bytes, ${result.entry!.audioFormat.label})',
+        ),
+      );
+      // LRU budget enforcement follows the existing engine cache setting.
+      final settings = _ref.read(engineSettingsProvider);
+      if (settings.autoCleanCache && settings.maxCacheSizeMb > 0) {
+        await _ref
+            .read(cacheCleanupWorkerProvider)
+            .run(
+              planner: CacheCleanupPlanner(
+                budgetBytes: streamCacheBudgetBytes(settings.maxCacheSizeMb),
+              ),
+            );
+      }
+      // NOTE: the live local swap for single-track plays is owned by the
+      // hybrid playback manager (Feature 3); queue playback benefits on
+      // the next play of this track, which the cache-first lookup serves.
+    } catch (_) {
+      // Cache failures are invisible by design.
     }
   }
 

@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:spotimusic/providers/ecosystem_providers.dart';
 import 'package:spotimusic/screens/ecosystem/account_page.dart';
+import 'package:spotimusic/screens/ecosystem/advanced_audio_page.dart';
 import 'package:spotimusic/screens/ecosystem/analytics_page.dart';
 import 'package:spotimusic/screens/ecosystem/cloud_sync_console_page.dart';
 import 'package:spotimusic/screens/ecosystem/favorites_page.dart';
 import 'package:spotimusic/screens/ecosystem/history_page.dart';
+import 'package:spotimusic/screens/ecosystem/servers_page.dart';
+import 'package:spotimusic/screens/ecosystem/smart_playlists_page.dart';
+import 'package:spotimusic/screens/ecosystem/unified_search_page.dart';
 import 'package:spotimusic/widgets/app_sliver_header.dart';
 import 'package:spotimusic/widgets/settings_group.dart';
 
@@ -106,6 +110,30 @@ class EcosystemHubPage extends ConsumerWidget {
           title: 'Cloud sync',
           subtitle: 'Conflict resolution, outbox, background retries',
           pageBuilder: CloudSyncConsolePage.new,
+        ),
+        _EcosystemDestination(
+          icon: Icons.auto_awesome_motion,
+          title: 'Smart playlists',
+          subtitle: 'Recently played, most played, daily mix, discover',
+          pageBuilder: SmartPlaylistsPage.new,
+        ),
+        _EcosystemDestination(
+          icon: Icons.dns_outlined,
+          title: 'Music servers',
+          subtitle: 'Jellyfin, Navidrome, Subsonic, Airsonic, Plex',
+          pageBuilder: ServersPage.new,
+        ),
+        _EcosystemDestination(
+          icon: Icons.manage_search,
+          title: 'Search everywhere',
+          subtitle: 'One ranked list across every source',
+          pageBuilder: UnifiedSearchPage.new,
+        ),
+        _EcosystemDestination(
+          icon: Icons.tune_outlined,
+          title: 'Advanced audio',
+          subtitle: 'Parametric EQ, profiles, crossfeed, loudness',
+          pageBuilder: AdvancedAudioPage.new,
         ),
       ];
 
