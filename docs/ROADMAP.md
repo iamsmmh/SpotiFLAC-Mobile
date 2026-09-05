@@ -31,6 +31,8 @@ becoming-noisy, route changes (unchanged and verified)
 ## 6. Advanced download manager
 ✅ full existing queue (single/album/playlist/batch, concurrent, priority, retry, history, failed history)
 🚀 Smart-Play "download & play" integration hooks (watch queue completion)
+🚀 approximate result-size estimate per quality in the picker (#550)
+🚀 offline download registry: export/import + missing diff (#516)
 
 ## 7. Smart download
 ✅ Wi-Fi-only mode exists · ✅ time-window download scheduling (pause/resume) · 🧱 charging hooks · ⏳ provider failover download ranking (engine-side ranking reusable)
@@ -104,6 +106,7 @@ pre-buffer) · ✅ live bandwidth sampling (preflight + head-warmup estimates in
 
 ## 33–35. Extension manager & security
 ✅ store, install/remove, enable/disable, versioning, signed sessions, permissions (existing)
+🚀 permission-expansion confirmation on upgrades · 🚀 user-imported session cookies per extension
 
 ## 36–37. Queue management & smart queue
 ✅ existing queue tab + audio-service queue · 🚀 engine queue planner (shuffle seed, savepoint)
@@ -126,7 +129,7 @@ pre-buffer) · ✅ live bandwidth sampling (preflight + head-warmup estimates in
 ✅ backup/restore, M3U/M3U8/JSON/CSV (existing) · ✅ queue share/import (portable JSON)
 
 ## 46–47. Sharing & deep links
-✅ share_plus, receive_sharing_intent, SongLink (existing) · ⏳ `spotiflac://` deep-link routes
+✅ share_plus, receive_sharing_intent, SongLink (existing) · 🚀 `spotimusic://` deep-link routes (open / search / provider-entity forms)
 
 ## 48. UI/UX
 ✅ Material 3, dark/light/AMOLED/dynamic color, bottom nav, mini player, full player

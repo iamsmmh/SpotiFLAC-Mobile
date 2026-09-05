@@ -33,4 +33,4 @@ git push
   instead of failing the run.
 
 Until this patch is applied, the CI workflows on the default branch remain in their
-current (broken/unaligned) state — see `PRODUCTION_READINESS_AUDIT.md`.
+current (broken/unaligned) state — see `docs/history/PRODUCTION_READINESS_AUDIT.md`.
