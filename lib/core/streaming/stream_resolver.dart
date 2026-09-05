@@ -57,7 +57,7 @@ class StreamProtocolDetector {
     if (contentType == null) return null;
     final mime = contentType.split(';').first.trim().toLowerCase();
     if (_hlsContentTypes.contains(mime)) return StreamProtocol.hls;
-    if (mime == 'application/dash+xml') return StreamProtocol.dash;
+    if (_dashContentTypes.contains(mime)) return StreamProtocol.dash;
     return null;
   }
 
@@ -69,8 +69,9 @@ class StreamProtocolDetector {
   /// misreport. Used by the service to keep dash+xml authoritative.
   static bool isDashContentType(String? contentType) {
     if (contentType == null) return false;
-    return contentType.split(';').first.trim().toLowerCase() ==
-        'application/dash+xml';
+    return _dashContentTypes.contains(
+      contentType.split(';').first.trim().toLowerCase(),
+    );
   }
 }
 
