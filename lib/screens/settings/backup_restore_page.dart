@@ -141,6 +141,7 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
   }
 
   Future<void> _showLedgerMissingDialog(List<LedgerEntry> missing) async {
+    final messenger = ScaffoldMessenger.of(context);
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -177,10 +178,10 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
                     await Clipboard.setData(ClipboardData(text: entry.displayLabel));
                     if (dialogContext.mounted) {
                       Navigator.of(dialogContext).pop();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(StagedStrings.ledgerCopiedList)),
-                      );
                     }
+                    messenger.showSnackBar(
+                      const SnackBar(content: Text(StagedStrings.ledgerCopiedList)),
+                    );
                   },
                 ),
               );
@@ -193,6 +194,9 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
               final text = missing.map((e) => e.displayLabel).join('\n');
               await Clipboard.setData(ClipboardData(text: text));
               if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+              messenger.showSnackBar(
+                const SnackBar(content: Text(StagedStrings.ledgerCopiedList)),
+              );
             },
             child: const Text(StagedStrings.ledgerCopyList),
           ),

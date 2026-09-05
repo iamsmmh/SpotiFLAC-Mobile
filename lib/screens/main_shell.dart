@@ -302,7 +302,7 @@ class _MainShellState extends ConsumerState<MainShell>
       await ref.read(trackProvider.notifier).search(deepLink.payload);
       return;
     }
-    final targetUrl = deepLink?.kind == DeepLinkKind.openUrl
+    final targetUrl = (deepLink != null && deepLink.kind == DeepLinkKind.openUrl)
         ? deepLink.payload
         : url;
     await ref.read(trackProvider.notifier).fetchFromUrl(targetUrl);
