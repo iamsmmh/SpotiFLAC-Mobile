@@ -366,7 +366,7 @@ func fetchLyricsProviders(
 			// goroutines escape the entry point's recover.
 			defer func() {
 				_ = recoverWorkerPanic("lyrics provider", recover())
-				}()
+			}()
 			sem <- struct{}{}
 			defer func() { <-sem }()
 

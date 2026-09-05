@@ -325,7 +325,7 @@ func scanLibraryAudioTasksParallelWithSink(
 		defer close(taskCh)
 		defer func() {
 			_ = recoverWorkerPanic("library scan producer", recover())
-			}()
+		}()
 		for _, task := range tasks {
 			select {
 			case <-cancelCh:
