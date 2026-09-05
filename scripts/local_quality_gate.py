@@ -226,6 +226,37 @@ def check_source_hygiene() -> None:
     record("hygiene", f"no git conflict markers ({scanned} files scanned)", not bad, "; ".join(bad[:5]))
 
 
+def check_translations() -> None:
+    """Informational i18n coverage: missing keys fall back to English at
+    runtime, so this never fails — it keeps drift visible. Details via
+    scripts/translation_coverage.py."""
+    arb_dir = os.path.join(ROOT, "lib", "l10n", "arb")
+    template = os.path.join(arb_dir, "app_en.arb")
+    try:
+        with open(template, "r", encoding="utf-8") as fh:
+            en_keys = {k for k in json.load(fh) if not k.startswith("@")}
+    except Exception as exc:  # noqa: BLE001
+        record("i18n", "template app_en.arb readable", False, str(exc))
+        return
+    record("i18n", f"template app_en.arb readable ({len(en_keys)} keys)", True)
+    worst = ("", 0)
+    locales = 0
+    for name in sorted(os.listdir(arb_dir)):
+        if not name.endswith(".arb") or name == "app_en.arb":
+            continue
+        locales += 1
+        with open(os.path.join(arb_dir, name), "r", encoding="utf-8") as fh:
+            keys = {k for k in json.load(fh) if not k.startswith("@")}
+        missing = len(en_keys - keys)
+        if missing > worst[1]:
+            worst = (name, missing)
+    record(
+        "i18n",
+        f"{locales} locales vs template (worst: {worst[0]} -{worst[1]})",
+        True,
+    )
+
+
 # ------------------------------------------------------------------ main ----
 def main() -> int:
     os.chdir(ROOT)
@@ -235,6 +266,7 @@ def main() -> int:
     check_pins(workflows)
     check_versions()
     check_source_hygiene()
+    check_translations()
 
     print("\n================ LOCAL STATIC GATE MATRIX ================")
     width = max(len(c) for _g, c, _s in results)

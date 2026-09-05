@@ -13,6 +13,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:spotimusic/services/platform_bridge.dart';
 import 'package:spotimusic/l10n/l10n.dart';
+import 'package:spotimusic/l10n/staged_strings.dart';
+import 'package:spotimusic/utils/user_facing_error.dart';
 import 'package:spotimusic/utils/adaptive_layout.dart';
 import 'package:spotimusic/utils/audio_quality_badge_policy.dart';
 import 'package:spotimusic/utils/nav_bar_inset.dart';
@@ -1650,6 +1652,13 @@ class _QueueTabState extends ConsumerState<QueueTab> {
         final scheduleHoldReason = ref.watch(
           downloadQueueProvider.select((state) => state.scheduleHoldReason),
         );
+        final hasDownloadProviders = ref.watch(
+          extensionProvider.select(
+            (state) => state.extensions.any(
+              (e) => e.enabled && e.hasDownloadProvider,
+            ),
+          ),
+        );
         return SliverToBoxAdapter(
           child: AnimatedSwitcher(
             duration: const Duration(milliseconds: 260),
@@ -1668,8 +1677,12 @@ class _QueueTabState extends ConsumerState<QueueTab> {
                 : Padding(
                     key: const ValueKey('dl_header'),
                     padding: const EdgeInsets.fromLTRB(16, 4, 4, 4),
-                    child: Row(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        Row(
+                          children: [
                         Icon(
                           Icons.downloading_rounded,
                           size: 16,
@@ -1748,6 +1761,12 @@ class _QueueTabState extends ConsumerState<QueueTab> {
                           color: colorScheme.error,
                           visualDensity: VisualDensity.compact,
                         ),
+                          ],
+                        ),
+                        if (failedCount > 0 && !hasDownloadProviders)
+                          _NoDownloadProvidersBanner(
+                            colorScheme: colorScheme,
+                          ),
                       ],
                     ),
                   ),
@@ -1795,15 +1814,30 @@ class _QueueTabState extends ConsumerState<QueueTab> {
     final isFolderAccessLost =
         item.errorMessage == safPermissionLostErrorMessage ||
         item.errorMessage == downloadFolderAccessLostErrorMessage;
+    // A retry cannot succeed when there is no provider to retry with: offer
+    // the Store instead of a dead-end error.
+    final hasDownloadProviders = ref
+        .read(extensionProvider)
+        .extensions
+        .any((e) => e.enabled && e.hasDownloadProvider);
+    final needsProviders =
+        !isCancelled &&
+        !isFolderAccessLost &&
+        (!hasDownloadProviders ||
+            isMissingDownloadProviderError(item.errorMessage));
     final title = isCancelled
         ? context.l10n.queueCancelledTitle
         : isRateLimit
         ? context.l10n.queueRateLimitTitle
+        : needsProviders
+        ? StagedStrings.noProvidersTitle
         : context.l10n.updateDownloadFailed;
     final message = isCancelled
         ? context.l10n.queueCancelledMessage
         : isRateLimit
         ? context.l10n.queueRateLimitMessage
+        : needsProviders
+        ? StagedStrings.noProvidersDialogMessage
         : (item.errorMessage.trim().isNotEmpty
               ? _localizedDownloadError(context, item.errorMessage)
               : context.l10n.updateDownloadFailed);
@@ -1840,6 +1874,11 @@ class _QueueTabState extends ConsumerState<QueueTab> {
             onPressed: () => Navigator.of(ctx).pop(),
             child: Text(context.l10n.dialogCancel),
           ),
+          if (needsProviders)
+            FilledButton.tonal(
+              onPressed: () => Navigator.of(ctx).pop('store'),
+              child: const Text(StagedStrings.noProvidersAction),
+            ),
           if (isFolderAccessLost)
             FilledButton(
               onPressed: () => Navigator.of(ctx).pop('reselect'),
@@ -1856,6 +1895,8 @@ class _QueueTabState extends ConsumerState<QueueTab> {
     if (!mounted) return;
     if (action == 'retry') {
       ref.read(downloadQueueProvider.notifier).retryItem(item.id);
+    } else if (action == 'store') {
+      ShellNavigationService.requestTab(ShellTab.repository);
     } else if (action == 'remove') {
       ref.read(downloadQueueProvider.notifier).removeItem(item.id);
     } else if (action == 'reselect') {
@@ -1997,6 +2038,55 @@ class _AnimatedLibrarySliverGridState extends State<_AnimatedLibrarySliverGrid>
           delegate: widget.delegate,
         );
       },
+    );
+  }
+}
+
+/// Compact recovery banner shown above the queue when downloads failed and no
+/// download extension is installed/enabled. Retrying cannot succeed in that
+/// state, so the only action offered is opening the Store.
+class _NoDownloadProvidersBanner extends StatelessWidget {
+  const _NoDownloadProvidersBanner({required this.colorScheme});
+
+  final ColorScheme colorScheme;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(0, 4, 12, 4),
+      child: Material(
+        color: colorScheme.errorContainer,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+          child: Row(
+            children: [
+              Icon(
+                Icons.warning_amber_rounded,
+                size: 18,
+                color: colorScheme.onErrorContainer,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  StagedStrings.noProvidersMessage,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onErrorContainer,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: () => ShellNavigationService.requestTab(
+                  ShellTab.repository,
+                ),
+                child: const Text(StagedStrings.noProvidersAction),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

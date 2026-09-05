@@ -400,6 +400,11 @@ func (c *DeezerClient) fetchISRCsParallel(ctx context.Context, tracks []deezerTr
 		wg.Add(1)
 		go func(t deezerTrack) {
 			defer wg.Done()
+			// Not covered by the entry point's recover: a malformed API
+			// payload must fail this track, not abort the process.
+			defer func() {
+				_ = recoverWorkerPanic("deezer isrc fetch", recover())
+			}()
 
 			select {
 			case sem <- struct{}{}:

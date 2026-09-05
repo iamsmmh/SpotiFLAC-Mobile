@@ -10,6 +10,40 @@ final _log = AppLogger('StoreProvider');
 final RegExp _leadingVersionPrefix = RegExp(r'^v');
 const _registryUrlPrefKey = 'store_registry_url';
 
+/// Curated starter set from the official registry: search/metadata coverage
+/// (spotify-web), a lossless download provider (deezer), and an anonymous
+/// fallback download provider (ytmusic-spotiflac). Installed one-tap from
+/// first-run setup and from the Store tab.
+const List<String> recommendedExtensionIds = <String>[
+  'spotify-web',
+  'deezer',
+  'ytmusic-spotiflac',
+];
+
+/// Outcome of [RepoNotifier.installRecommended].
+class RecommendedInstallResult {
+  const RecommendedInstallResult({
+    this.installed = const <String>[],
+    this.alreadyPresent = const <String>[],
+    this.unavailable = const <String>[],
+    this.failed = const <String>[],
+  });
+
+  /// Installed by this call.
+  final List<String> installed;
+
+  /// Already installed before this call.
+  final List<String> alreadyPresent;
+
+  /// Not listed by the current registry (custom registry without them).
+  final List<String> unavailable;
+
+  /// Listed but the download/apply step failed.
+  final List<String> failed;
+
+  bool get allReady => unavailable.isEmpty && failed.isEmpty;
+}
+
 int compareVersions(String v1, String v2) {
   final parts1 = v1.replaceAll(_leadingVersionPrefix, '').split('.');
   final parts2 = v2.replaceAll(_leadingVersionPrefix, '').split('.');
@@ -146,6 +180,8 @@ class RepoState {
 
   bool get hasRegistryUrl => registryUrl.isNotEmpty;
 
+  bool get isDefaultRegistry => registryUrl == AppInfo.defaultRegistryUrl;
+
   RepoState copyWith({
     List<RepoExtension>? extensions,
     String? selectedCategory,
@@ -230,7 +266,12 @@ class RepoNotifier extends Notifier<RepoState> {
     if (state.isInitialized) return;
 
     final prefs = await SharedPreferences.getInstance();
-    final savedUrl = prefs.getString(_registryUrlPrefKey) ?? '';
+    // A missing key means "never configured" (fresh install or pre-default
+    // users): pre-configure the official registry so the Store works out of
+    // the box. An explicitly stored empty string means the user removed the
+    // registry and must be respected — see [removeRegistryUrl].
+    final stored = prefs.getString(_registryUrlPrefKey);
+    final savedUrl = stored ?? AppInfo.defaultRegistryUrl;
 
     state = state.copyWith(
       isLoading: true,
@@ -243,6 +284,10 @@ class RepoNotifier extends Notifier<RepoState> {
 
       if (savedUrl.isNotEmpty) {
         await PlatformBridge.setRepoRegistryUrl(savedUrl);
+        if (stored == null) {
+          await prefs.setString(_registryUrlPrefKey, savedUrl);
+          _log.i('Pre-configured default extension registry');
+        }
         await refresh();
       }
 
@@ -305,7 +350,10 @@ class RepoNotifier extends Notifier<RepoState> {
   Future<void> removeRegistryUrl() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.remove(_registryUrlPrefKey);
+      // Persist an explicit empty string (not a key removal) so a fresh
+      // [initialize] can tell "user removed the registry" apart from "never
+      // configured" and does not re-apply the default.
+      await prefs.setString(_registryUrlPrefKey, '');
 
       await PlatformBridge.clearRepoRegistryUrl();
 
@@ -370,6 +418,56 @@ class RepoNotifier extends Notifier<RepoState> {
         action: 'install',
         apply: (notifier, path) => notifier.installExtension(path),
       ),
+    );
+  }
+
+  /// Installs [recommendedExtensionIds] that are listed by the current
+  /// registry and not already installed. Each install runs through the same
+  /// serialized download/apply path as a manual Store install. Callers must
+  /// have initialized the store (registry listing loaded) first.
+  Future<RecommendedInstallResult> installRecommended({
+    required String tempDir,
+    required String extensionsDir,
+  }) async {
+    final available = <String>{for (final e in state.extensions) e.id};
+    final installedIds = ref
+        .read(extensionProvider)
+        .extensions
+        .map((e) => e.id.toLowerCase())
+        .toSet();
+
+    final installed = <String>[];
+    final alreadyPresent = <String>[];
+    final unavailable = <String>[];
+    final failed = <String>[];
+
+    for (final id in recommendedExtensionIds) {
+      if (!available.contains(id)) {
+        unavailable.add(id);
+        continue;
+      }
+      if (installedIds.contains(id.toLowerCase())) {
+        alreadyPresent.add(id);
+        continue;
+      }
+      try {
+        final ok = await installExtension(id, tempDir, extensionsDir);
+        if (ok) {
+          installed.add(id);
+        } else {
+          failed.add(id);
+        }
+      } catch (e) {
+        _log.w('Recommended install failed for $id: $e');
+        failed.add(id);
+      }
+    }
+
+    return RecommendedInstallResult(
+      installed: installed,
+      alreadyPresent: alreadyPresent,
+      unavailable: unavailable,
+      failed: failed,
     );
   }
 

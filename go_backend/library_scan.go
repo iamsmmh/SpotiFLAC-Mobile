@@ -289,6 +289,11 @@ func scanLibraryAudioTasksParallelWithSink(
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			// Outer guard around the per-task containment: channel
+			// operations here also escape the entry point's recover.
+			defer func() {
+				_ = recoverWorkerPanic("library scan", recover())
+			}()
 			for task := range taskCh {
 				select {
 				case <-cancelCh:
@@ -318,6 +323,9 @@ func scanLibraryAudioTasksParallelWithSink(
 
 	go func() {
 		defer close(taskCh)
+		defer func() {
+			_ = recoverWorkerPanic("library scan producer", recover())
+			}()
 		for _, task := range tasks {
 			select {
 			case <-cancelCh:
@@ -328,6 +336,9 @@ func scanLibraryAudioTasksParallelWithSink(
 	}()
 
 	go func() {
+		defer func() {
+			_ = recoverWorkerPanic("library scan closer", recover())
+		}()
 		wg.Wait()
 		close(resultCh)
 	}()

@@ -99,4 +99,8 @@ NUL
 *.log
 hs_err_*.log
 flutter_*.log
-pubspec.lock
+
+# NOTE: pubspec.lock is intentionally NOT ignored. This is an application, not
+# a library, so the lockfile must be committed for reproducible builds (the
+# Dart/Flutter recommendation). If it is missing, run `flutter pub get` once
+# and commit the generated file.

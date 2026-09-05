@@ -111,10 +111,16 @@ Python library for SpotiFLAC integration, maintained by [@ShuShuzinhuu](https://
 <summary><b>Why does the Store tab ask me to enter a URL?</b></summary>
 <br>
 
-Starting from version 3.8.0, SpotiFLAC Mobile uses a decentralized extension
-repository system. Extensions are hosted independently rather than on a
-built-in server, so anyone can create and host a compatible repository. Enter
-a repository URL in the Store tab to browse and install extensions.
+It shouldn't anymore: current versions ship with the official community
+registry pre-configured
+(`spotiflacapp/SpotiFLAC-Extension`), and first-run setup installs the
+recommended starter set automatically.
+
+The underlying system is still decentralized (since 3.8.0): extensions are
+hosted independently rather than on a built-in server, so anyone can create
+and host a compatible repository. To switch registries, tap the link icon in
+the Store tab and enter a repository URL. If you removed the registry URL
+entirely, the prompt returns — re-enter a URL (or reinstall) to restore it.
 
 </details>
 

@@ -186,3 +186,15 @@ bool _isMeaningful(String? value) {
       normalized != 'unknown' &&
       normalized != 'error';
 }
+
+/// True when a download failure is caused by having no usable download
+/// provider: extensions disabled, none installed/enabled, or the backend's
+/// retired built-in-provider error. Callers use this to offer the Store
+/// (install a provider) instead of a bare retry that cannot succeed.
+bool isMissingDownloadProviderError(String message) {
+  final lower = message.toLowerCase();
+  return lower.contains('extension providers are disabled') ||
+      lower.contains('built-in download providers have been retired') ||
+      lower.contains('no enabled download provider') ||
+      lower.contains('no download provider');
+}

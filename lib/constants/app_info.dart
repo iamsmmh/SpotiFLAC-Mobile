@@ -28,6 +28,14 @@ class AppInfo {
   static const String remoteConfigApiUrl =
       'https://api.zarz.moe/v1/spotiflac-mobile/config';
 
+  /// Official community extension registry, pre-configured on first launch so
+  /// a fresh install can reach the Store without pasting a URL. Users can
+  /// replace or remove it at any time (Store → link icon); the decentralized
+  /// model is unchanged, this is only the default.
+  static const String defaultRegistryUrl =
+      'https://raw.githubusercontent.com/spotiflacapp/SpotiFLAC-Extension/main/registry.json';
+  static const String defaultRegistryName = 'Official SpotiFLAC registry';
+
   static const String kofiUrl = 'https://ko-fi.com/zarzet';
   static const String githubSponsorsUrl = 'https://github.com/sponsors/zarzet/';
 }
