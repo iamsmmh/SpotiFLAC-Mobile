@@ -186,7 +186,11 @@ final favoritesResultsProvider = Provider<AsyncValue<List<FavoriteEntry>>>((
 ) {
   final query = ref.watch(favoritesQueryProvider);
   final indexAsync = ref.watch(favoritesIndexProvider);
-  final playCounts = ref.watch(trackPlayCountsProvider);
+  // trackPlayCountsProvider is a FutureProvider, so unwrap it: while the
+  // aggregates are still loading, sort with no counts rather than failing —
+  // "Most played" simply settles once the history query resolves.
+  final playCounts =
+      ref.watch(trackPlayCountsProvider).value ?? const <String, int>{};
   return indexAsync.when(
     data: (index) => AsyncValue<List<FavoriteEntry>>.data(
       const FavoritesCatalog().query(
@@ -273,11 +277,25 @@ final recapProvider = FutureProvider.family<RecapReport, int>((ref, year) async 
 // Feature Group 5 — recommendations
 // ---------------------------------------------------------------------------
 
+/// Holds the cloud recommender configuration.
+///
+/// `StateProvider` was removed in Riverpod 3, so this follows the repository's
+/// `NotifierProvider` convention.
+class CloudRecommendationConfigNotifier
+    extends Notifier<CloudRecommendationConfig> {
+  @override
+  CloudRecommendationConfig build() =>
+      const CloudRecommendationConfig(baseUrl: '');
+
+  void set(CloudRecommendationConfig config) => state = config;
+}
+
 /// Cloud recommender configuration (empty ⇒ only on-device providers run).
 final cloudRecommendationConfigProvider =
-    StateProvider<CloudRecommendationConfig>(
-      (ref) => const CloudRecommendationConfig(baseUrl: ''),
-    );
+    NotifierProvider<
+      CloudRecommendationConfigNotifier,
+      CloudRecommendationConfig
+    >(CloudRecommendationConfigNotifier.new);
 
 /// Assembles the provider chain: cloud → similarity → daily mix → local.
 final recommendationRegistryProvider = Provider<RecommendationRegistry>((ref) {
