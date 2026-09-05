@@ -75,6 +75,25 @@ abstract final class StagedStrings {
   static const String ledgerSearchHint =
       'No direct link — tap to copy and search by title instead';
 
+  // Extension session cookies (import for CF-protected / logged-in sources).
+  static const String cookiesSectionTitle = 'Session cookies';
+  static const String cookiesImportButton = 'Paste cookies.txt';
+  static const String cookiesImportDescription =
+      'Optional: paste an exported browser cookie file so this extension can '
+      'pass Cloudflare challenges or use your own account session. Stored only '
+      'in this extension\'s sandbox data dir (never synced or uploaded).';
+  static const String cookiesEmpty = 'No cookies imported yet';
+  static const String cookiesImportFailed =
+      'Could not read those cookies \u2014 use Netscape cookies.txt format or '
+      '\u0022host NAME=VALUE\u0022 lines';
+  static const String cookiesClear = 'Clear imported cookies';
+  static const String cookiesCleared = 'Imported cookies cleared';
+  static const String cookiesPasteHint =
+      '.example.com\tTRUE\t/\tTRUE\t0\tsid\tabc123';
+  static const String cookiesImportAction = 'Import';
+  static const String cookiesUnavailable =
+      'Cookie import is unavailable for this extension';
+
   // No-download-provider recovery.
   static const String noProvidersTitle = 'No download providers';
   static const String noProvidersMessage =

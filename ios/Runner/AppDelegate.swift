@@ -616,6 +616,25 @@ private func goCall<T>(_ body: (NSErrorPointer) -> T) throws -> T {
             GobackendInvalidateDuplicateIndex(outputDir)
             return nil
 
+        case "setExtensionImportedCookies":
+            let args = Self.argsDict(call.arguments)
+            let extensionId = try requireString(args, "extension_id", call.method)
+            let cookiesText = try requireString(args, "cookies_text", call.method)
+            let response: String? = try goCall { GobackendSetExtensionImportedCookies(extensionId, cookiesText, $0) }
+            return response
+
+        case "getExtensionImportedCookiesInfo":
+            let args = Self.argsDict(call.arguments)
+            let extensionId = try requireString(args, "extension_id", call.method)
+            let response: String? = try goCall { GobackendGetExtensionImportedCookiesInfo(extensionId, $0) }
+            return response
+
+        case "clearExtensionImportedCookies":
+            let args = Self.argsDict(call.arguments)
+            let extensionId = try requireString(args, "extension_id", call.method)
+            try goCall { GobackendClearExtensionImportedCookies(extensionId, $0) }
+            return nil
+
         case "buildFilename":
             let args = Self.argsDict(call.arguments)
             let template = try requireString(args, "template", call.method)

@@ -702,6 +702,48 @@ class PlatformBridge {
     return result as String;
   }
 
+  /// Parses + persists user-exported cookies (Netscape cookies.txt or
+  /// "host NAME=VALUE" lines) into an extension's sandbox cookie jar and
+  /// returns the Go-side JSON summary `{"count": n, "names": [...]}`.
+  static Future<Map<String, dynamic>> setExtensionImportedCookies(
+    String extensionId,
+    String cookiesText,
+  ) async {
+    final result = await _channel.invokeMethod('setExtensionImportedCookies', {
+      'extension_id': extensionId,
+      'cookies_text': cookiesText,
+    });
+    if (result is String && result.isNotEmpty) {
+      final decoded = jsonDecode(result);
+      if (decoded is Map) {
+        return Map<String, dynamic>.from(decoded);
+      }
+    }
+    return <String, dynamic>{'count': 0, 'names': <String>[]};
+  }
+
+  static Future<Map<String, dynamic>> getExtensionImportedCookiesInfo(
+    String extensionId,
+  ) async {
+    final result = await _channel.invokeMethod(
+      'getExtensionImportedCookiesInfo',
+      {'extension_id': extensionId},
+    );
+    if (result is String && result.isNotEmpty) {
+      final decoded = jsonDecode(result);
+      if (decoded is Map) {
+        return Map<String, dynamic>.from(decoded);
+      }
+    }
+    return <String, dynamic>{'count': 0, 'names': <String>[]};
+  }
+
+  static Future<void> clearExtensionImportedCookies(String extensionId) async {
+    await _channel.invokeMethod('clearExtensionImportedCookies', {
+      'extension_id': extensionId,
+    });
+  }
+
   static Future<String> sanitizeFilename(String filename) async {
     final result = await _channel.invokeMethod('sanitizeFilename', {
       'filename': filename,
