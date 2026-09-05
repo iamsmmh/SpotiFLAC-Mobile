@@ -197,7 +197,8 @@ class JellyfinProvider extends MusicServerProvider {
                 0
           : 0,
       codec: _audioCodecOf(item),
-      lossless: _audioCodecOf(item).contains('flac'),
+      // _audioCodecOf upper-cases the container; compare case-insensitively.
+      lossless: _audioCodecOf(item).toLowerCase().contains('flac'),
       year: (item['ProductionYear'] as num?)?.toInt(),
     );
   }

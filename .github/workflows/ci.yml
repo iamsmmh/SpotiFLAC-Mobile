@@ -139,6 +139,9 @@ jobs:
         # storage backend. On failure, re-emit each failing test as its own
         # small annotation (name + first ~60 detail lines) so the Checks API
         # names the culprit with enough context to debug without raw-log access.
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -o pipefail
           status=0

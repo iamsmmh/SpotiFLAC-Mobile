@@ -96,8 +96,10 @@ class ChaCha20 {
   final List<int> nonce;
 
   /// Processes [input] (any length) against the keystream starting at
-  /// [initialCounter]. Returns a new byte list; [input] is not modified.
-  List<int> processBytes(List<int> input, {int initialCounter = 0}) {
+  /// [initialCounter] (1 per RFC 8439 §2.4.2 — block counter 0 is reserved
+  /// for the AEAD key-masking block). Returns a new byte list; [input] is
+  /// not modified.
+  List<int> processBytes(List<int> input, {int initialCounter = 1}) {
     final output = List<int>.filled(input.length, 0);
     var counter = initialCounter;
     for (var offset = 0; offset < input.length; offset += 64) {
