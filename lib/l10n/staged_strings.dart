@@ -75,6 +75,15 @@ abstract final class StagedStrings {
   static const String ledgerSearchHint =
       'No direct link — tap to copy and search by title instead';
 
+  // Extension upgrade permission-diff gate.
+  static const String permDiffTitle = 'This update asks for more permissions';
+  static const String permDiffBody =
+      'The new version requests access that the installed version does not '
+      'have:';
+  static const String permDiffProceed = 'Install anyway';
+  static const String permDiffCancel = 'Cancel';
+  static const String permDiffCancelled = 'Update cancelled \u2014 new permissions were declined';
+
   // Extension session cookies (import for CF-protected / logged-in sources).
   static const String cookiesSectionTitle = 'Session cookies';
   static const String cookiesImportButton = 'Paste cookies.txt';

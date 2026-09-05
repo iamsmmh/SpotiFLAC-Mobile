@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:spotimusic/l10n/l10n.dart';
+import 'package:spotimusic/utils/extension_permission_gate.dart';
 import 'package:spotimusic/providers/repo_provider.dart';
 import 'package:spotimusic/providers/extension_provider.dart';
 import 'package:spotimusic/utils/adaptive_layout.dart';
@@ -536,7 +537,12 @@ class _ExtensionDetailsScreenState
 
     final success = await ref
         .read(repoProvider.notifier)
-        .installExtension(ext.id, tempDir.path, extensionsDir);
+        .installExtension(
+          ext.id,
+          tempDir.path,
+          extensionsDir,
+          permissionConfirmer: buildPermissionConfirmer(context),
+        );
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -557,7 +563,11 @@ class _ExtensionDetailsScreenState
 
     final success = await ref
         .read(repoProvider.notifier)
-        .updateExtension(ext.id, tempDir.path);
+        .updateExtension(
+          ext.id,
+          tempDir.path,
+          permissionConfirmer: buildPermissionConfirmer(context),
+        );
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
