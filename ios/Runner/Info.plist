@@ -103,6 +103,14 @@
 		<string>youtube-music</string>
 	</array>
 	
+	<!-- Local network (opt-in LAN web player over the downloaded library) -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>SpotiFLAC Mobile can serve your own downloaded files to other devices on your Wi-Fi network. This only starts when you enable the LAN web player in Settings.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_http._tcp</string>
+	</array>
+
 	<!-- Background audio playback -->
 	<key>UIBackgroundModes</key>
 	<array>

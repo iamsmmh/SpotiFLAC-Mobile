@@ -6,6 +6,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:spotimusic/l10n/l10n.dart';
+import 'package:spotimusic/l10n/staged_strings.dart';
+import 'package:flutter/services.dart' show Clipboard;
 import 'package:spotimusic/models/settings.dart';
 import 'package:spotimusic/providers/settings_provider.dart';
 import 'package:spotimusic/screens/settings/storage_breakdown_page.dart';
@@ -125,6 +127,8 @@ class _FilesSettingsPageState extends ConsumerState<FilesSettingsPage> {
         body: CustomScrollView(
           slivers: [
             AppSliverHeader.page(title: context.l10n.settingsFiles),
+
+            const SliverToBoxAdapter(child: _LanWebPlayerCard()),
 
             SliverToBoxAdapter(
               child: SettingsSectionHeader(
@@ -1150,6 +1154,141 @@ class _FilenameFormatEditorSheetState
           ),
         ),
       ),
+    );
+  }
+}
+
+class _LanWebPlayerCard extends ConsumerStatefulWidget {
+  const _LanWebPlayerCard();
+
+  @override
+  ConsumerState<_LanWebPlayerCard> createState() => _LanWebPlayerCardState();
+}
+
+class _LanWebPlayerCardState extends ConsumerState<_LanWebPlayerCard> {
+  bool _running = false;
+  bool _busy = false;
+  List<String> _urls = const [];
+  int _trackCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _syncStatus());
+  }
+
+  Future<void> _syncStatus() async {
+    try {
+      final status = await PlatformBridge.getLanWebPlayerStatus();
+      if (!mounted) return;
+      setState(() {
+        _running = status['running'] == true;
+        _urls = (status['urls'] as List? ?? const [])
+            .map((e) => '$e')
+            .toList(growable: false);
+        _trackCount = (status['tracks'] as num?)?.toInt() ?? 0;
+      });
+    } catch (_) {
+      // Bridge not available (tests, unsupported host) — card stays idle.
+    }
+  }
+
+  Future<void> _toggle(bool enable) async {
+    if (_busy) return;
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _busy = true);
+    try {
+      if (enable) {
+        final root = ref.read(settingsProvider).downloadDirectory;
+        if (root.isEmpty) {
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text(StagedStrings.lanPlayerNeedsFolder),
+            ),
+          );
+          return;
+        }
+        final status = await PlatformBridge.startLanWebPlayer(root: root);
+        if (!mounted) return;
+        setState(() {
+          _running = status['running'] == true;
+          _urls = (status['urls'] as List? ?? const [])
+              .map((e) => '$e')
+              .toList(growable: false);
+          _trackCount = (status['tracks'] as num?)?.toInt() ?? 0;
+        });
+        messenger.showSnackBar(
+          const SnackBar(content: Text(StagedStrings.lanPlayerStarted)),
+        );
+      } else {
+        await PlatformBridge.stopLanWebPlayer();
+        if (!mounted) return;
+        setState(() {
+          _running = false;
+          _urls = const [];
+        });
+        messenger.showSnackBar(
+          const SnackBar(content: Text(StagedStrings.lanPlayerStopped)),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('${StagedStrings.lanPlayerFailed}: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final root = ref.watch(settingsProvider).downloadDirectory;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SettingsSectionHeader(title: StagedStrings.lanPlayerSectionTitle),
+        SettingsGroup(
+          children: [
+            SettingsSwitchItem(
+              icon: Icons.cast_for_education_outlined,
+              title: StagedStrings.lanPlayerTitle,
+              subtitle: root.isEmpty
+                  ? StagedStrings.lanPlayerNeedsFolder
+                  : StagedStrings.lanPlayerDescription,
+              value: _running,
+              onChanged: _busy || root.isEmpty ? null : _toggle,
+            ),
+            if (_running) ...[
+              for (final url in _urls)
+                ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.qr_code_2, size: 20),
+                  title: SelectableText(
+                    url,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  subtitle: Text('$_trackCount ${StagedStrings.lanPlayerTracks}'),
+                  trailing: IconButton(
+                    tooltip: StagedStrings.lanPlayerCopy,
+                    icon: const Icon(Icons.copy_rounded, size: 18),
+                    onPressed: () async {
+                      await Clipboard.setData(ClipboardData(text: url));
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(StagedStrings.lanPlayerCopied),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ),
+            ],
+          ],
+        ),
+      ],
     );
   }
 }

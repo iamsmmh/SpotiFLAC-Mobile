@@ -702,6 +702,24 @@ class PlatformBridge {
     return result as String;
   }
 
+  /// Opt-in read-only LAN web player over the downloaded-music folder.
+  /// Returns Go-side JSON: {running, port, root, urls[], tracks}.
+  static Future<Map<String, dynamic>> startLanWebPlayer({
+    required String root,
+    int port = 0,
+  }) async {
+    final config = jsonEncode(<String, dynamic>{'root': root, 'port': port});
+    return _invokeMap('startLanWebPlayer', {'config': config});
+  }
+
+  static Future<void> stopLanWebPlayer() async {
+    await _channel.invokeMethod('stopLanWebPlayer');
+  }
+
+  static Future<Map<String, dynamic>> getLanWebPlayerStatus() async {
+    return _invokeMap('getLanWebPlayerStatus');
+  }
+
   /// Parses + persists user-exported cookies (Netscape cookies.txt or
   /// "host NAME=VALUE" lines) into an extension's sandbox cookie jar and
   /// returns the Go-side JSON summary `{"count": n, "names": [...]}`.

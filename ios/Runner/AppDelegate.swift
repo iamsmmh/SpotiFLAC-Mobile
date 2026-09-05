@@ -616,6 +616,20 @@ private func goCall<T>(_ body: (NSErrorPointer) -> T) throws -> T {
             GobackendInvalidateDuplicateIndex(outputDir)
             return nil
 
+        case "startLanWebPlayer":
+            let args = Self.argsDict(call.arguments)
+            let config = optionalString(args, "config", "{}")
+            let response: String? = try goCall { GobackendStartLanWebPlayer(config, $0) }
+            return response
+
+        case "stopLanWebPlayer":
+            try goCall { GobackendStopLanWebPlayer($0) }
+            return nil
+
+        case "getLanWebPlayerStatus":
+            let response = GobackendGetLanWebPlayerStatus()
+            return response
+
         case "setExtensionImportedCookies":
             let args = Self.argsDict(call.arguments)
             let extensionId = try requireString(args, "extension_id", call.method)

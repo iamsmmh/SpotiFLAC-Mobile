@@ -1039,6 +1039,25 @@ class MainActivity: FlutterFragmentActivity() {
                             }
                             result.success(null)
                         }
+                        "startLanWebPlayer" -> {
+                            val config = call.argument<String>("config") ?: "{}"
+                            val response = withContext(Dispatchers.IO) {
+                                Gobackend.startLanWebPlayer(config)
+                            }
+                            result.success(response)
+                        }
+                        "stopLanWebPlayer" -> {
+                            withContext(Dispatchers.IO) {
+                                Gobackend.stopLanWebPlayer()
+                            }
+                            result.success(null)
+                        }
+                        "getLanWebPlayerStatus" -> {
+                            val response = withContext(Dispatchers.IO) {
+                                Gobackend.getLanWebPlayerStatus()
+                            }
+                            result.success(response)
+                        }
                         "setExtensionImportedCookies" -> {
                             val extensionId = call.argument<String>("extension_id") ?: ""
                             val cookiesText = call.argument<String>("cookies_text") ?: ""

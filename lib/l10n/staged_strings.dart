@@ -75,6 +75,23 @@ abstract final class StagedStrings {
   static const String ledgerSearchHint =
       'No direct link — tap to copy and search by title instead';
 
+  // LAN web player (settings → files).
+  static const String lanPlayerSectionTitle = 'LAN web player';
+  static const String lanPlayerTitle = 'Serve downloads to this network';
+  static const String lanPlayerDescription =
+      'Opens a read-only web page on your local network that streams the '
+      'download folder to browsers on the same Wi-Fi. Nothing is exposed to '
+      'the internet, but anyone on the network can listen while it is on. '
+      'Turn it off when you are done.';
+  static const String lanPlayerNeedsFolder =
+      'Set a download folder first — the player only serves that folder';
+  static const String lanPlayerStarted = 'LAN player running';
+  static const String lanPlayerStopped = 'LAN player stopped';
+  static const String lanPlayerFailed = 'Could not start the LAN player';
+  static const String lanPlayerCopy = 'Copy URL';
+  static const String lanPlayerCopied = 'Player URL copied';
+  static const String lanPlayerTracks = 'tracks';
+
   // Extension upgrade permission-diff gate.
   static const String permDiffTitle = 'This update asks for more permissions';
   static const String permDiffBody =
