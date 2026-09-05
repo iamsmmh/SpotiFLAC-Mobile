@@ -250,6 +250,7 @@ func StartLanWebPlayer(configJSON string) (bridgeOut string, bridgeErr error) {
 	lanWebPlayer.mu.Unlock()
 
 	go func() {
+		defer func() { _ = recoverBridgePanic(recover()) }()
 		_ = srv.Serve(ln)
 	}()
 

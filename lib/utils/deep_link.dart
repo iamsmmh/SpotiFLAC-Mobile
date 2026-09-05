@@ -6,7 +6,7 @@
 ///   spotimusic://search?q=artist%20title
 ///   spotimusic://search/artist%20title
 ///   spotimusic://track?spotify=ID  /  album?spotify=ID  /  playlist?spotify=ID
-///   spotimusic://<raw https-or-spotify-URI>          (passthrough)
+///   spotimusic://…raw https or spotify URI…         (passthrough)
 ///
 /// Anything that cannot be parsed is simply *not* a deep link (null) so the
 /// caller can fall back to the normal shared-URL pipeline.

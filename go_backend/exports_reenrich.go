@@ -262,7 +262,7 @@ func looksLikeFilesystemArtifact(value string) bool {
 	if i := strings.Index(v, ":"); i >= 0 && i+1 < len(v) && v[i+1] == '/' {
 		return true
 	}
-	if strings.HasPrefix(v, "com.android.") {
+	if strings.HasPrefix(v, "com.android.") || strings.HasPrefix(v, "primary:") {
 		return true
 	}
 	// Generic directory names that show up as the "title" of a spill copy.

@@ -165,9 +165,7 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
                     ? null
                     : Text(entry.album, maxLines: 1, overflow: TextOverflow.ellipsis),
                 trailing: IconButton(
-                  tooltip: url == null
-                      ? StagedStrings.ledgerSearchHint
-                      : url,
+                  tooltip: url ?? StagedStrings.ledgerSearchHint,
                   icon: Icon(
                     url == null ? Icons.copy_all_outlined : Icons.open_in_new,
                   ),

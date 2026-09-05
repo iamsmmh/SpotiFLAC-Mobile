@@ -15,6 +15,7 @@ func TestLooksLikeFilesystemArtifact(t *testing.T) {
 		"raw:/storage/emulated/0/Music",
 		"Music/Album",
 		"primary:Download/Music",
+		"primary:Music",
 	}
 	no := []string{
 		"",

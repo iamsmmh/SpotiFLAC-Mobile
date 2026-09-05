@@ -7,7 +7,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:spotimusic/l10n/l10n.dart';
 import 'package:spotimusic/l10n/staged_strings.dart';
-import 'package:flutter/services.dart' show Clipboard;
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:spotimusic/models/settings.dart';
 import 'package:spotimusic/providers/settings_provider.dart';
 import 'package:spotimusic/screens/settings/storage_breakdown_page.dart';
