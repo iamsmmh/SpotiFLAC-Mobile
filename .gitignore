@@ -91,6 +91,9 @@ DerivedData/
 !/docs/SCHEMA.md
 !/docs/API_CONTRACTS.md
 !/docs/MIGRATIONS.md
+# Maps the 13-part music-platform brief onto what the repo actually contains,
+# and records the pre-existing breakage inherited from main.
+!/docs/PLATFORM_PLAN_AUDIT.md
 
 # Temporary files and logs
 /.tmp/

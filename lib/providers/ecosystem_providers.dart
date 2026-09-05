@@ -186,7 +186,11 @@ final favoritesResultsProvider = Provider<AsyncValue<List<FavoriteEntry>>>((
 ) {
   final query = ref.watch(favoritesQueryProvider);
   final indexAsync = ref.watch(favoritesIndexProvider);
-  final playCounts = ref.watch(trackPlayCountsProvider);
+  // trackPlayCountsProvider is a FutureProvider, so unwrap it: while the
+  // aggregates are still loading, sort with no counts rather than failing —
+  // "Most played" simply settles once the history query resolves.
+  final playCounts =
+      ref.watch(trackPlayCountsProvider).value ?? const <String, int>{};
   return indexAsync.when(
     data: (index) => AsyncValue<List<FavoriteEntry>>.data(
       const FavoritesCatalog().query(
@@ -273,16 +277,193 @@ final recapProvider = FutureProvider.family<RecapReport, int>((ref, year) async 
 // Feature Group 5 — recommendations
 // ---------------------------------------------------------------------------
 
+/// Holds the cloud recommender configuration.
+///
+/// `StateProvider` was removed in Riverpod 3, so this follows the repository's
+/// `NotifierProvider` convention.
+class CloudRecommendationConfigNotifier
+    extends Notifier<CloudRecommendationConfig> {
+  @override
+  CloudRecommendationConfig build() =>
+      const CloudRecommendationConfig(baseUrl: '');
+
+  void set(CloudRecommendationConfig config) => state = config;
+}
+
 /// Cloud recommender configuration (empty ⇒ only on-device providers run).
 final cloudRecommendationConfigProvider =
-    StateProvider<CloudRecommendationConfig>(
-      (ref) => const CloudRecommendationConfig(baseUrl: ''),
-    );
+    NotifierProvider<
+      CloudRecommendationConfigNotifier,
+      CloudRecommendationConfig
+    >(CloudRecommendationConfigNotifier.new);
 
 /// Assembles the provider chain: cloud → similarity → daily mix → local.
 final recommendationRegistryProvider = Provider<RecommendationRegistry>((ref) {
   final config = ref.watch(cloudRecommendationConfigProvider);
   return RecommendationRegistry(
     cloud: CloudRecommendationProvider(config: config),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Feature Group 9 — podcasts
+// ---------------------------------------------------------------------------
+
+/// Subscriptions + episodes store, with live RSS fetching.
+final podcastRepositoryProvider = Provider<PodcastRepository>((ref) {
+  return PodcastRepository(database: ref.watch(ecosystemDatabaseProvider));
+});
+
+/// Filesystem side of podcasts: downloads, retention, repair.
+final podcastLibraryProvider = Provider<PodcastLibrary>((ref) {
+  final library = PodcastLibrary(
+    repository: ref.watch(podcastRepositoryProvider),
+  );
+  ref.onDispose(library.dispose);
+  return library;
+});
+
+/// Directory search (iTunes; no key required).
+final podcastSearchProvider = Provider<PodcastSearchProvider>((ref) {
+  final provider = ITunesPodcastSearchProvider();
+  ref.onDispose(provider.dispose);
+  return provider;
+});
+
+/// Episode playback through the shared audio_service handler.
+final podcastPlayerProvider = Provider<PodcastPlayer>((ref) {
+  final player = PodcastPlayer(
+    repository: ref.watch(podcastRepositoryProvider),
+    store: ref.watch(ecosystemPreferencesProvider),
+  );
+  unawaited(player.load());
+  return player;
+});
+
+/// All subscribed feeds, alphabetical.
+final podcastSubscriptionsProvider =
+    FutureProvider<List<PodcastSubscription>>((ref) async {
+      return ref.watch(podcastRepositoryProvider).subscriptions();
+    });
+
+/// Newest episodes across every subscription.
+final podcastLatestEpisodesProvider =
+    FutureProvider<List<PodcastEpisode>>((ref) async {
+      return ref.watch(podcastRepositoryProvider).latestEpisodes();
+    });
+
+/// Episodes started but not finished — "continue listening".
+final podcastInProgressProvider =
+    FutureProvider<List<PodcastEpisode>>((ref) async {
+      return ref.watch(podcastRepositoryProvider).inProgressEpisodes();
+    });
+
+/// Episodes of one feed, newest first.
+final podcastEpisodesProvider =
+    FutureProvider.family<List<PodcastEpisode>, String>((ref, feedUrl) async {
+      return ref.watch(podcastRepositoryProvider).episodes(feedUrl);
+    });
+
+// ---------------------------------------------------------------------------
+// Feature Group 10 — music recognition
+// ---------------------------------------------------------------------------
+
+/// Holds the user-supplied AcoustID key.
+///
+/// `StateProvider` was removed in Riverpod 3, so this follows the repository's
+/// `NotifierProvider` convention.
+class AcoustIdApiKeyNotifier extends Notifier<String> {
+  @override
+  String build() => '';
+
+  /// Stores a new key; whitespace-only input clears it, which switches the
+  /// provider back to "unavailable" instead of issuing doomed requests.
+  void set(String apiKey) => state = apiKey.trim();
+}
+
+/// User-supplied AcoustID key (empty ⇒ recognition reports "unavailable").
+final acoustIdApiKeyProvider =
+    NotifierProvider<AcoustIdApiKeyNotifier, String>(
+      AcoustIdApiKeyNotifier.new,
+    );
+
+/// On-device Chromaprint fingerprinting via the bundled FFmpeg.
+final fingerprintEngineProvider = Provider<FingerprintEngine>((ref) {
+  return const ChromaprintFingerprintEngine();
+});
+
+/// Recognition backends, in priority order.
+final recognitionProvidersProvider =
+    Provider<List<RecognitionProvider>>((ref) {
+      final apiKey = ref.watch(acoustIdApiKeyProvider);
+      final provider = AcoustIdRecognitionProvider(apiKey: apiKey);
+      ref.onDispose(provider.dispose);
+      return <RecognitionProvider>[provider];
+    });
+
+/// Past identifications.
+final recognitionHistoryRepositoryProvider =
+    Provider<RecognitionHistoryRepository>((ref) {
+      return RecognitionHistoryRepository(
+        database: ref.watch(ecosystemDatabaseProvider),
+      );
+    });
+
+/// Recent recognition hits, newest first.
+final recognitionHistoryProvider =
+    FutureProvider<List<RecognitionResult>>((ref) async {
+      return ref.watch(recognitionHistoryRepositoryProvider).recent();
+    });
+
+// ---------------------------------------------------------------------------
+// Feature Group 11 — optional social layer
+// ---------------------------------------------------------------------------
+
+/// Social flag storage. Everything is off until the user opts in.
+final socialSettingsProvider = Provider<SocialSettings>((ref) {
+  return SocialSettings(ref.watch(ecosystemPreferencesProvider));
+});
+
+/// Current social flags; defaults to fully disabled.
+final socialFlagsProvider = FutureProvider<SocialFeatureFlags>((ref) async {
+  return ref.watch(socialSettingsProvider).read();
+});
+
+/// Backend for the social layer. Null until a provider is configured, which
+/// keeps the module local-only by default.
+final socialBackendProvider = Provider<SocialBackend?>((ref) => null);
+
+final socialCacheProvider = Provider<SocialCache>((ref) {
+  return SocialCache(database: ref.watch(ecosystemDatabaseProvider));
+});
+
+final profileSystemProvider = Provider<ProfileSystem>((ref) {
+  return ProfileSystem(
+    settings: ref.watch(socialSettingsProvider),
+    backend: ref.watch(socialBackendProvider),
+    cache: ref.watch(socialCacheProvider),
+  );
+});
+
+final playlistSharingProvider = Provider<PlaylistSharing>((ref) {
+  return PlaylistSharing(
+    settings: ref.watch(socialSettingsProvider),
+    backend: ref.watch(socialBackendProvider),
+    cache: ref.watch(socialCacheProvider),
+  );
+});
+
+final followSystemProvider = Provider<FollowSystem>((ref) {
+  return FollowSystem(
+    settings: ref.watch(socialSettingsProvider),
+    backend: ref.watch(socialBackendProvider),
+  );
+});
+
+final activityFeedProvider = Provider<ActivityFeed>((ref) {
+  return ActivityFeed(
+    settings: ref.watch(socialSettingsProvider),
+    backend: ref.watch(socialBackendProvider),
+    cache: ref.watch(socialCacheProvider),
   );
 });
