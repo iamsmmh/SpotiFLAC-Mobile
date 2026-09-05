@@ -41,6 +41,9 @@ class FakeSecureStore implements SecureStore {
   }
 
   @override
+  Future<void> deleteRetiredSecrets() async {}
+
+  @override
   Future<void> writeSecret(String name, String value) async {
     values[SecureStoreKeys.secret(name)] = value;
   }

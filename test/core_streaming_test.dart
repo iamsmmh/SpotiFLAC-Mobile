@@ -425,6 +425,7 @@ class _FakeProvider implements StreamProvider {
   @override
   final String id;
 
+  @override
   final bool enabled;
   final StreamSource? source;
   int calls = 0;

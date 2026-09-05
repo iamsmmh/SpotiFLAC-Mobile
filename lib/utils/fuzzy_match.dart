@@ -155,7 +155,7 @@ List<FuzzyHit<T>> fuzzyRank<T>(
   int limit = 20,
 }) {
   if (normalizeFuzzyText(query).isEmpty || limit <= 0) {
-    return const <FuzzyHit<T>>[];
+    return <FuzzyHit<T>>[];
   }
   final hits = <FuzzyHit<T>>[];
   for (final item in items) {

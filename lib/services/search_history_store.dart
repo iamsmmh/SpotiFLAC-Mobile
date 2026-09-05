@@ -52,7 +52,7 @@ class SearchHistoryStore {
   final SharedPreferences? _preferencesOverride;
 
   Future<SharedPreferences> get _prefs =>
-      Future<SharedPreferences>.value(
+      Future<SharedPreferences?>.value(
         _preferencesOverride,
       ).then((override) => override ?? SharedPreferences.getInstance());
 

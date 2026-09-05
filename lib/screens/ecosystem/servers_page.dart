@@ -146,7 +146,7 @@ class _ServersPageState extends ConsumerState<ServersPage> {
       error = exception.message;
     }
 
-    if (!mounted) return;
+    if (!mounted || !context.mounted) return;
     setState(() => _testing = false);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -175,7 +175,7 @@ class _ServersPageState extends ConsumerState<ServersPage> {
                 if (edited != null) {
                   await ref
                       .read(musicServerRegistryProvider)
-                      .update(edited);
+                      .update(edited.$1);
                   ref.invalidate(musicServersProvider);
                 }
                 if (sheetContext.mounted) Navigator.of(sheetContext).pop();

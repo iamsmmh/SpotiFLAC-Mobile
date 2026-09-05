@@ -22,7 +22,6 @@ import 'package:spotimusic/providers/advanced_audio_provider.dart';
 import 'package:spotimusic/providers/ecosystem_providers.dart';
 import 'package:spotimusic/providers/hybrid_playback_provider.dart';
 import 'package:spotimusic/providers/music_servers_providers.dart';
-import 'package:spotimusic/providers/smart_playlists_provider.dart';
 import 'package:spotimusic/providers/streaming_cache_providers.dart';
 import 'package:spotimusic/screens/ecosystem/advanced_audio_page.dart';
 import 'package:spotimusic/screens/ecosystem/ecosystem_hub_page.dart';
