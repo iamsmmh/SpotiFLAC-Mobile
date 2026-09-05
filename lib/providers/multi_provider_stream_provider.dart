@@ -2,12 +2,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:spotimusic/services/multi_provider_stream_service.dart';
+import 'package:spotimusic/services/provider_credentials.dart';
 
 /// App-wide [MultiProviderStreamService] instance (YouTube Explode + HTTP are
 /// kept for the app lifetime and disposed only with the provider container).
+///
+/// Credentialed providers (Tidal, Qobuz, Apple, Deezer, Amazon) resolve
+/// user-supplied tokens from secure storage at request time — see
+/// Settings → Provider accounts.
 final multiProviderStreamServiceProvider =
     Provider<MultiProviderStreamService>((ref) {
-      final service = MultiProviderStreamService();
+      final service = MultiProviderStreamService(
+        credentials: SecureStoreStreamCredentials(),
+      );
       ref.onDispose(service.dispose);
       return service;
     });

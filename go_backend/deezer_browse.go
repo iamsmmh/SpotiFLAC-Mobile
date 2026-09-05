@@ -266,6 +266,11 @@ func (c *DeezerClient) fetchAlbumTrackCounts(ctx context.Context, albums []Artis
 		wg.Add(1)
 		go func(it indexedID) {
 			defer wg.Done()
+			// Not covered by the entry point's recover: a malformed API
+			// payload must fail this album, not abort the process.
+			defer func() {
+				_ = recoverWorkerPanic("deezer browse", recover())
+			}()
 
 			select {
 			case sem <- struct{}{}:

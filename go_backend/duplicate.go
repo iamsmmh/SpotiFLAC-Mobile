@@ -140,6 +140,11 @@ func buildISRCIndex(outputDir string) *ISRCIndex {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
+				// Belt-and-braces around the per-item guarded reader:
+				// worker goroutines escape the entry point's recover.
+				defer func() {
+					_ = recoverWorkerPanic("isrc parse", recover())
+				}()
 				for i := range tasks {
 					isrcs[i] = readISRCGuarded(toParse[i].path)
 				}

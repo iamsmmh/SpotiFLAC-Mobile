@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:spotimusic/constants/app_info.dart';
 import 'package:spotimusic/l10n/l10n.dart';
+import 'package:spotimusic/l10n/staged_strings.dart';
 import 'package:spotimusic/screens/settings/about_page.dart';
 import 'package:spotimusic/screens/settings/app_settings_page.dart';
 import 'package:spotimusic/screens/settings/appearance_settings_page.dart';
@@ -12,6 +13,7 @@ import 'package:spotimusic/screens/settings/download_settings_page.dart';
 import 'package:spotimusic/screens/settings/equalizer_page.dart';
 import 'package:spotimusic/screens/settings/extensions_page.dart';
 import 'package:spotimusic/screens/settings/files_settings_page.dart';
+import 'package:spotimusic/screens/settings/provider_accounts_page.dart';
 import 'package:spotimusic/screens/settings/library_settings_page.dart';
 import 'package:spotimusic/screens/settings/log_screen.dart';
 import 'package:spotimusic/screens/settings/lyrics_settings_page.dart';
@@ -128,6 +130,24 @@ class _SettingsTabState extends ConsumerState<SettingsTab> {
               'adaptive',
             ],
             pageBuilder: () => const StreamingSettingsPage(),
+          ),
+          _Destination(
+            icon: Icons.key_outlined,
+            title: StagedStrings.providerAccountsTitle,
+            subtitle: 'Tidal, Qobuz, Apple, Deezer, Amazon tokens',
+            keywords: const [
+              'token',
+              'account',
+              'tidal',
+              'qobuz',
+              'apple',
+              'deezer',
+              'amazon',
+              'arl',
+              'lossless',
+              'credentials',
+            ],
+            pageBuilder: () => const ProviderAccountsPage(),
           ),
           _Destination(
             icon: Icons.graphic_eq_rounded,

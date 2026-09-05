@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:spotimusic/l10n/l10n.dart';
 import 'package:spotimusic/providers/repo_provider.dart';
+import 'package:spotimusic/providers/extension_provider.dart';
+import 'package:spotimusic/l10n/staged_strings.dart';
 import 'package:spotimusic/widgets/settings_group.dart';
 import 'package:spotimusic/widgets/animation_utils.dart';
 import 'package:spotimusic/screens/repo/extension_details_screen.dart';
@@ -62,6 +64,16 @@ class _RepoTabState extends ConsumerState<RepoTab> {
     final error = ref.watch(repoProvider.select((s) => s.error));
     final downloadingId = ref.watch(
       repoProvider.select((s) => s.downloadingId),
+    );
+    final isDownloading = ref.watch(
+      repoProvider.select((s) => s.isDownloading),
+    );
+    final recommendedMissing = ref.watch(
+      extensionProvider.select(
+        (s) => recommendedExtensionIds.any(
+          (id) => !s.extensions.any((e) => e.id.toLowerCase() == id),
+        ),
+      ),
     );
     final hasRegistryUrl = ref.watch(
       repoProvider.select((s) => s.hasRegistryUrl),
@@ -186,6 +198,18 @@ class _RepoTabState extends ConsumerState<RepoTab> {
                   ),
                 ),
               ),
+
+              if (hasRegistryUrl &&
+                  extensions.isNotEmpty &&
+                  recommendedMissing &&
+                  searchQuery.isEmpty &&
+                  selectedCategory == null)
+                SliverToBoxAdapter(
+                  child: _RecommendedCard(
+                    isBusy: isDownloading,
+                    onInstall: _installRecommended,
+                  ),
+                ),
 
               if (isLoading && extensions.isEmpty)
                 const SliverToBoxAdapter(
@@ -553,6 +577,31 @@ class _RepoTabState extends ConsumerState<RepoTab> {
     }
   }
 
+  Future<void> _installRecommended() async {
+    final tempDir = await getTemporaryDirectory();
+    if (!mounted) return;
+    final appDir = await getApplicationDocumentsDirectory();
+    if (!mounted) return;
+
+    final result = await ref.read(repoProvider.notifier).installRecommended(
+      tempDir: tempDir.path,
+      extensionsDir: '${appDir.path}/extensions',
+    );
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result.allReady
+                ? StagedStrings.storeRecommendedDone
+                : StagedStrings.storeRecommendedFailed,
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   Future<void> _updateExtension(RepoExtension ext) async {
     final tempDir = await getTemporaryDirectory();
 
@@ -759,6 +808,83 @@ class _ExtensionItem extends StatelessWidget {
                 ),
                 child: Text(context.l10n.storeInstall),
               ),
+      ),
+    );
+  }
+}
+
+/// One-tap starter pack card: shown at the top of the Store when the official
+/// registry is in use but at least one recommended extension is missing.
+class _RecommendedCard extends StatelessWidget {
+  const _RecommendedCard({
+    required this.isBusy,
+    required this.onInstall,
+  });
+
+  final bool isBusy;
+  final Future<void> Function() onInstall;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Material(
+        color: colorScheme.primaryContainer,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.auto_awesome_rounded,
+                    size: 20,
+                    color: colorScheme.onPrimaryContainer,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      StagedStrings.recommendedPackTitle,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: colorScheme.onPrimaryContainer,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                StagedStrings.recommendedPackMessage,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton.icon(
+                  onPressed: isBusy ? null : onInstall,
+                  icon: isBusy
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.download_rounded),
+                  label: Text(
+                    isBusy
+                        ? StagedStrings.recommendedPackBusy
+                        : StagedStrings.recommendedPackAction,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

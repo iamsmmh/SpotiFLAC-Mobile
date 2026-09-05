@@ -362,6 +362,11 @@ func fetchLyricsProviders(
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			// Outer guard around the per-provider guarded fetch: worker
+			// goroutines escape the entry point's recover.
+			defer func() {
+				_ = recoverWorkerPanic("lyrics provider", recover())
+			}()
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
@@ -387,6 +392,9 @@ func fetchLyricsProviders(
 	}
 
 	go func() {
+		defer func() {
+			_ = recoverWorkerPanic("lyrics closer", recover())
+		}()
 		wg.Wait()
 		close(results)
 	}()

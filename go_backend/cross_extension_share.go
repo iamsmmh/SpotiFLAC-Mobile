@@ -76,6 +76,12 @@ func FindCollectionAcrossExtensionsJSON(requestJSON string) (string, error) {
 		wg.Add(1)
 		go func(index int, p *extensionProviderWrapper) {
 			defer wg.Done()
+			// Worker goroutines are not covered by the entry point's
+			// recover: contain the panic so one bad extension result
+			// fails its own slot instead of aborting the process.
+			defer func() {
+				_ = recoverWorkerPanic("cross-extension share", recover())
+			}()
 			results[index] = findCollectionForExtension(
 				p,
 				req.Type,

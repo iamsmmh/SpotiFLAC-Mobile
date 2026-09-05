@@ -112,6 +112,12 @@ extension _HomeTabSearchResultsUI on _HomeTabState {
   }
 
   Widget _buildEmptySearchResultWidget(ColorScheme colorScheme) {
+    // Search is served by metadata extensions: with none installed/enabled
+    // every query lands here, so offer the Store instead of a dead end.
+    final hasSearchProviders = ref
+        .read(extensionProvider)
+        .extensions
+        .any((e) => e.enabled && (e.hasCustomSearch || e.hasMetadataProvider));
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 340),
       child: Column(
@@ -147,6 +153,15 @@ extension _HomeTabSearchResultsUI on _HomeTabState {
               color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
             ),
           ),
+          if (!hasSearchProviders) ...[
+            const SizedBox(height: 16),
+            FilledButton.tonalIcon(
+              onPressed: () =>
+                  ShellNavigationService.requestTab(ShellTab.repository),
+              icon: const Icon(Icons.extension_outlined),
+              label: const Text(StagedStrings.noProvidersAction),
+            ),
+          ],
         ],
       ),
     );

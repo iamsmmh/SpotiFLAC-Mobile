@@ -474,3 +474,64 @@ jobs:
           prerelease: ${{ needs.meta.outputs.prerelease == 'true' }}
           draft: false
           fail_on_unmatched_files: true
+
+  update-altstore:
+    name: Update AltStore source
+    runs-on: ubuntu-latest
+    needs: [meta, ios, release]
+    # The AltStore/SideStore feed tracks stable published releases only:
+    # pre-releases and build-only dispatch runs must not move it.
+    if: needs.meta.outputs.publish == 'true' && needs.meta.outputs.prerelease != 'true'
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Download iOS IPA
+        uses: actions/download-artifact@v7
+        with:
+          name: ios-ipa
+          path: ./release
+
+      - name: Update apps.json
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          VERSION_NUM="${VERSION#v}"
+          DATE=$(date -u +%Y-%m-%d)
+          IPA_FILE=$(find ./release -name "*ios*.ipa" | head -1)
+
+          if [ -z "$IPA_FILE" ]; then
+            echo "WARNING: IPA file not found, skipping apps.json update"
+            exit 0
+          fi
+
+          IPA_SIZE=$(stat -c%s "$IPA_FILE")
+
+          if [ ! -f apps.json ]; then
+            echo "WARNING: apps.json not found on main, skipping"
+            exit 0
+          fi
+
+          jq --arg ver "$VERSION_NUM" \
+             --arg date "$DATE" \
+             --arg url "https://github.com/${{ github.repository }}/releases/download/${VERSION}/${APP_NAME}-${VERSION}-ios-unsigned.ipa" \
+             --argjson size "$IPA_SIZE" \
+             '.apps[0].version = $ver | .apps[0].versionDate = $date | .apps[0].downloadURL = $url | .apps[0].size = $size' \
+             apps.json > apps.json.tmp && mv apps.json.tmp apps.json
+          cat apps.json
+
+      - name: Commit and push
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add apps.json
+          git diff --cached --quiet && echo "No changes to commit" || \
+            (git commit -m "chore: update AltStore source to ${VERSION}" && git push)

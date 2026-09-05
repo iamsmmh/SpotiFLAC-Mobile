@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:spotimusic/core/data/android_storage_permission_policy.dart';
 import 'package:spotimusic/providers/settings_provider.dart';
+import 'package:spotimusic/screens/setup_extensions_step.dart';
 import 'package:spotimusic/l10n/l10n.dart';
 import 'package:spotimusic/l10n/supported_locales.dart';
 import 'package:spotimusic/services/platform_bridge.dart';
@@ -46,8 +47,8 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
       AndroidStoragePermissionPolicy.requiresNotificationRuntimeGrant(
         _androidSdkVersion,
       )
-      ? 5
-      : 4;
+      ? 6
+      : 5;
 
   AndroidPermissionSet get _androidPermissions =>
       AndroidStoragePermissionPolicy.forSdk(_androidSdkVersion);
@@ -543,6 +544,10 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
           return _notificationPermissionGranted;
         case 2:
           return _selectedDirectory != null;
+        case 3:
+          // Extensions step is informational: it can always be completed
+          // later from the Store tab, so it never blocks setup.
+          return true;
       }
     } else {
       switch (logicStep) {
@@ -550,6 +555,10 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
           return _storagePermissionGranted;
         case 1:
           return _selectedDirectory != null;
+        case 2:
+          // Extensions step is informational: it can always be completed
+          // later from the Store tab, so it never blocks setup.
+          return true;
       }
     }
     return false;
@@ -628,6 +637,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                   ))
                     _buildNotificationStep(colorScheme),
                   _buildDirectoryStep(colorScheme),
+                  const SetupExtensionsStep(),
                 ],
               ),
             ),

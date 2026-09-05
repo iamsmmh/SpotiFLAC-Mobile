@@ -65,6 +65,19 @@
   item back to the streaming engine two minutes before a signed URL dies so
   the engine re-resolves the same provider and swaps the source at the live
   position — no health penalty, no audible failure.
+- **Default extension registry + first-run starter pack**: fresh installs
+  ship with the official community registry pre-configured, and a new final
+  setup step one-tap installs the recommended set (search/metadata, a
+  lossless download provider, an anonymous fallback). The Store tab shows the
+  same one-tap card while any recommended extension is missing; removing the
+  registry URL still fully opts out.
+- **Provider accounts**: Settings → Provider accounts collects
+  user-supplied streaming tokens (Tidal, Qobuz, Apple, Deezer, Amazon) into
+  encrypted storage; the multi-provider engine resolves them per request, so
+  saving a token applies to the next stream with no restart.
+- **No-provider failures route to the Store**: queue header banner, download
+  error dialog and empty-search state offer to open the Store (instead of a
+  dead-end retry) when no usable extension is installed/enabled.
 
 ### Fixed
 

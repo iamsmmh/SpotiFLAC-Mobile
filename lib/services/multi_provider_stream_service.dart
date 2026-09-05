@@ -10,9 +10,26 @@ import 'package:youtube_explode_dart/youtube_explode_dart.dart' as yt;
 import 'package:spotimusic/engine/streaming_engine.dart'
     show AdaptiveBitrateSelector, StreamVariant;
 import 'package:spotimusic/models/track.dart';
+import 'package:spotimusic/services/provider_credentials.dart';
 import 'package:spotimusic/utils/logger.dart';
 
 final _log = AppLogger('MultiProviderStream');
+
+/// Returns the explicit constructor credential when set, otherwise consults
+/// [resolver] (secure storage in production). Blank values count as missing,
+/// so a whitespace-only token never reaches a provider gateway.
+Future<String?> resolveStreamCredential(
+  String? direct,
+  Future<String?> Function()? resolver,
+) async {
+  final trimmedDirect = direct?.trim();
+  if (trimmedDirect != null && trimmedDirect.isNotEmpty) {
+    return trimmedDirect;
+  }
+  final viaResolver = await resolver?.call();
+  final trimmed = viaResolver?.trim();
+  return (trimmed != null && trimmed.isNotEmpty) ? trimmed : null;
+}
 
 /// The eight ecosystem sources supported by SpotiMusic's streaming engine.
 enum StreamProviderId {
@@ -644,9 +661,16 @@ class YouTubeStreamHandler extends StreamProviderHandler {
 // get a structured "requires token" miss and fall through to YouTube.
 // ---------------------------------------------------------------------------
 class AppleMusicStreamHandler extends StreamProviderHandler {
-  AppleMusicStreamHandler({this.bearerToken});
+  AppleMusicStreamHandler({this.bearerToken, this.bearerTokenResolver});
 
   final String? bearerToken;
+  final Future<String?> Function()? bearerTokenResolver;
+
+  /// Explicit credential wins; otherwise the credential store (secure
+  /// storage) is consulted. Separate method so tests can verify the
+  /// precedence without touching the network.
+  Future<String?> resolveBearerToken() =>
+      resolveStreamCredential(bearerToken, bearerTokenResolver);
 
   @override
   StreamProviderInfo get info =>
@@ -654,7 +678,7 @@ class AppleMusicStreamHandler extends StreamProviderHandler {
 
   @override
   Future<ResolvedStream?> resolve(StreamTrackRequest request) async {
-    final token = bearerToken;
+    final token = await resolveBearerToken();
     if (token == null || token.isEmpty) {
       _log.i('Apple Music: no developer token; using fallback');
       return null;
@@ -720,17 +744,28 @@ class AppleMusicStreamHandler extends StreamProviderHandler {
 // receive FLAC manifest URLs. Anonymous callers fall through to the fallback.
 // ---------------------------------------------------------------------------
 class TidalStreamHandler extends StreamProviderHandler {
-  TidalStreamHandler({this.accessToken, this.countryCode = 'US'});
+  TidalStreamHandler({
+    this.accessToken,
+    this.accessTokenResolver,
+    this.countryCode = 'US',
+  });
 
   final String? accessToken;
+  final Future<String?> Function()? accessTokenResolver;
   final String countryCode;
+
+  /// Explicit credential wins; otherwise the credential store (secure
+  /// storage) is consulted. Separate method so tests can verify the
+  /// precedence without touching the network.
+  Future<String?> resolveAccessToken() =>
+      resolveStreamCredential(accessToken, accessTokenResolver);
 
   @override
   StreamProviderInfo get info => StreamProviderInfo.of(StreamProviderId.tidal);
 
   @override
   Future<ResolvedStream?> resolve(StreamTrackRequest request) async {
-    final token = accessToken;
+    final token = await resolveAccessToken();
     if (token == null || token.isEmpty) {
       _log.i('Tidal: no access token; using fallback');
       return null;
@@ -791,7 +826,12 @@ class TidalStreamHandler extends StreamProviderHandler {
 // limited FLAC URLs (format_id 27 = 24-bit/up to 192kHz).
 // ---------------------------------------------------------------------------
 class QobuzStreamHandler extends QobuzStreamHandlerBase {
-  QobuzStreamHandler({super.appId, super.authToken});
+  QobuzStreamHandler({
+    super.appId,
+    super.authToken,
+    super.appIdResolver,
+    super.authTokenResolver,
+  });
 
   @override
   StreamProviderInfo get info => StreamProviderInfo.of(StreamProviderId.qobuz);
@@ -800,13 +840,29 @@ class QobuzStreamHandler extends QobuzStreamHandlerBase {
 abstract class QobuzStreamHandlerBase extends StreamProviderHandler {
   final String? appId;
   final String? authToken;
+  final Future<String?> Function()? appIdResolver;
+  final Future<String?> Function()? authTokenResolver;
 
-  QobuzStreamHandlerBase({this.appId, this.authToken});
+  QobuzStreamHandlerBase({
+    this.appId,
+    this.authToken,
+    this.appIdResolver,
+    this.authTokenResolver,
+  });
+
+  /// Explicit credentials win; otherwise the credential store (secure
+  /// storage) is consulted. Separate methods so tests can verify the
+  /// precedence without touching the network.
+  Future<String?> resolveAppId() =>
+      resolveStreamCredential(appId, appIdResolver);
+
+  Future<String?> resolveAuthToken() =>
+      resolveStreamCredential(authToken, authTokenResolver);
 
   @override
   Future<ResolvedStream?> resolve(StreamTrackRequest request) async {
-    final app = appId;
-    final token = authToken;
+    final app = await resolveAppId();
+    final token = await resolveAuthToken();
     if (app == null || app.isEmpty || token == null || token.isEmpty) {
       _log.i('Qobuz: no app credentials; using fallback');
       return null;
@@ -866,9 +922,16 @@ abstract class QobuzStreamHandlerBase extends StreamProviderHandler {
 // instantly playable; full tracks fall through to the fallback engine.
 // ---------------------------------------------------------------------------
 class DeezerStreamHandler extends StreamProviderHandler {
-  DeezerStreamHandler({this.arlToken});
+  DeezerStreamHandler({this.arlToken, this.arlTokenResolver});
 
   final String? arlToken;
+  final Future<String?> Function()? arlTokenResolver;
+
+  /// Explicit credential wins; otherwise the credential store (secure
+  /// storage) is consulted. Separate method so tests can verify the
+  /// precedence without touching the network.
+  Future<String?> resolveArlToken() =>
+      resolveStreamCredential(arlToken, arlTokenResolver);
 
   @override
   StreamProviderInfo get info => StreamProviderInfo.of(StreamProviderId.deezer);
@@ -889,7 +952,7 @@ class DeezerStreamHandler extends StreamProviderHandler {
       return null;
     }
     final preview = track['preview'] as String?;
-    final arl = arlToken;
+    final arl = await resolveArlToken();
     if (arl != null && arl.isNotEmpty) {
       final authenticated = await _resolveAuthenticated(track, arl, request);
       if (authenticated != null) return authenticated;
@@ -1020,11 +1083,24 @@ class AmazonMusicStreamHandler extends StreamProviderHandler {
   AmazonMusicStreamHandler({
     this.bearerToken,
     this.deviceToken,
+    this.bearerTokenResolver,
+    this.deviceTokenResolver,
     this.marketplace = 'ATVPDKIKX0DER',
   });
 
   final String? bearerToken;
   final String? deviceToken;
+  final Future<String?> Function()? bearerTokenResolver;
+  final Future<String?> Function()? deviceTokenResolver;
+
+  /// Explicit credentials win; otherwise the credential store (secure
+  /// storage) is consulted. Separate methods so tests can verify the
+  /// precedence without touching the network.
+  Future<String?> resolveBearerToken() =>
+      resolveStreamCredential(bearerToken, bearerTokenResolver);
+
+  Future<String?> resolveDeviceToken() =>
+      resolveStreamCredential(deviceToken, deviceTokenResolver);
 
   /// AMAPI marketplace id (`ATVPDKIKX0DER` = amazon.com).
   final String marketplace;
@@ -1039,8 +1115,8 @@ class AmazonMusicStreamHandler extends StreamProviderHandler {
 
   @override
   Future<ResolvedStream?> resolve(StreamTrackRequest request) async {
-    final token = bearerToken;
-    final device = deviceToken;
+    final token = await resolveBearerToken();
+    final device = await resolveDeviceToken();
     if (token == null ||
         token.isEmpty ||
         device == null ||
@@ -1750,6 +1826,7 @@ class MultiProviderStreamService {
     StreamResolutionCache? cache,
     StreamProviderHealthRegistry? health,
     StreamValidator? validator,
+    StreamCredentialResolver? credentials,
     this.validateResolutions = true,
   }) : _youtube = youtube ?? yt.YoutubeExplode(),
        cache = cache ?? StreamResolutionCache(),
@@ -1760,14 +1837,40 @@ class MultiProviderStreamService {
     _httpClient = client;
     this.validator = validator ?? HttpStreamValidator(client: client);
     _youTubeHandler = YouTubeStreamHandler(_youtube);
+    // Credentialed handlers resolve user-supplied tokens from [credentials]
+    // (secure storage in production) at request time, so saving a token in
+    // Settings → Provider accounts applies to the next stream with no
+    // restart. Null keeps the historical constructor-only behavior for tests.
+    Future<String?> Function()? resolverFor(String name) =>
+        credentials == null ? null : () => credentials.read(name);
     _handlers = <StreamProviderId, StreamProviderHandler>{
       StreamProviderId.spotify: SpotifyStreamHandler(),
       StreamProviderId.youtube: _youTubeHandler,
-      StreamProviderId.appleMusic: AppleMusicStreamHandler(),
-      StreamProviderId.tidal: TidalStreamHandler(),
-      StreamProviderId.qobuz: QobuzStreamHandler(),
-      StreamProviderId.deezer: DeezerStreamHandler(),
-      StreamProviderId.amazonMusic: AmazonMusicStreamHandler(),
+      StreamProviderId.appleMusic: AppleMusicStreamHandler(
+        bearerTokenResolver: resolverFor(
+          StreamCredentialNames.appleDeveloperToken,
+        ),
+      ),
+      StreamProviderId.tidal: TidalStreamHandler(
+        accessTokenResolver: resolverFor(
+          StreamCredentialNames.tidalAccessToken,
+        ),
+      ),
+      StreamProviderId.qobuz: QobuzStreamHandler(
+        appIdResolver: resolverFor(StreamCredentialNames.qobuzAppId),
+        authTokenResolver: resolverFor(StreamCredentialNames.qobuzAuthToken),
+      ),
+      StreamProviderId.deezer: DeezerStreamHandler(
+        arlTokenResolver: resolverFor(StreamCredentialNames.deezerArl),
+      ),
+      StreamProviderId.amazonMusic: AmazonMusicStreamHandler(
+        bearerTokenResolver: resolverFor(
+          StreamCredentialNames.amazonBearerToken,
+        ),
+        deviceTokenResolver: resolverFor(
+          StreamCredentialNames.amazonDeviceToken,
+        ),
+      ),
       StreamProviderId.soundCloud:
           SoundCloudStreamHandler(client: _httpClient),
       ...?overrides,

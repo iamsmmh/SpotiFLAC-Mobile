@@ -8,6 +8,8 @@ import 'package:spotimusic/widgets/app_sliver_header.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:spotimusic/l10n/l10n.dart';
+import 'package:spotimusic/l10n/staged_strings.dart';
+import 'package:spotimusic/services/shell_navigation_service.dart';
 import 'package:spotimusic/models/settings.dart';
 import 'package:spotimusic/models/track.dart';
 import 'package:spotimusic/providers/track_provider.dart';
