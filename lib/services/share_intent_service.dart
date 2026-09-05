@@ -17,6 +17,10 @@ class ShareIntentService {
     "https?://[^\\s<>\\\"']+",
     caseSensitive: false,
   );
+  static final RegExp _appDeepLinkPattern = RegExp(
+    "spotimusic://[^\\s<>\\\"']+",
+    caseSensitive: false,
+  );
 
   final _sharedUrlController = StreamController<String>.broadcast();
   StreamSubscription<List<SharedMediaFile>>? _mediaSubscription;
@@ -85,6 +89,11 @@ class ShareIntentService {
     final uriMatch = _spotifyUriPattern.firstMatch(text);
     if (uriMatch != null) {
       return uriMatch.group(0);
+    }
+
+    final deepLinkMatch = _appDeepLinkPattern.firstMatch(text);
+    if (deepLinkMatch != null && text.trim().toLowerCase().startsWith('spotimusic')) {
+      return deepLinkMatch.group(0);
     }
 
     // Keep share parsing generic and let manifest-based URL handlers decide

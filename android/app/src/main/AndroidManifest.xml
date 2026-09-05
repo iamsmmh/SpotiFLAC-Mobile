@@ -88,6 +88,14 @@
                 <data android:scheme="https" android:host="listen.tidal.com" />
             </intent-filter>
 
+            <!-- App deep links: spotimusic://open?url=… / spotimusic://search?q=… -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="spotimusic" />
+            </intent-filter>
+
             <!-- Handle YouTube Music deep links -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
