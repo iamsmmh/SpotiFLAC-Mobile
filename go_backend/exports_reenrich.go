@@ -230,12 +230,47 @@ func applyReEnrichTrackMetadata(req *reEnrichRequest, track ExtTrackMetadata) {
 }
 
 func isPlaceholderReEnrichValue(value string) bool {
+	if looksLikeFilesystemArtifact(value) {
+		return true
+	}
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "", "unknown", "unknown artist", "unknown title", "unknown album":
 		return true
 	default:
 		return false
 	}
+}
+
+// looksLikeFilesystemArtifact detects path/URI fragments that leak into
+// metadata when the library scan indexes bridge spill copies or SAF document
+// URIs (issue #562: an album tag of "cache" and swapped title/artist after
+// batch re-enrich — the garbage was never real metadata to begin with, and
+// re-enrich faithfully re-embedded it).
+func looksLikeFilesystemArtifact(value string) bool {
+	v := strings.ToLower(strings.TrimSpace(value))
+	if v == "" {
+		return false
+	}
+	if strings.ContainsAny(v, "/\\") {
+		return true
+	}
+	// A colon immediately followed by a slash is URI-shaped (content://...,
+	// file://..., raw:/...); a lone colon is legitimate ("Album: Pt. 2").
+	if strings.Contains(v, "://") {
+		return true
+	}
+	if i := strings.Index(v, ":"); i >= 0 && i+1 < len(v) && v[i+1] == '/' {
+		return true
+	}
+	if strings.HasPrefix(v, "com.android.") {
+		return true
+	}
+	// Generic directory names that show up as the "title" of a spill copy.
+	switch v {
+	case "cache", "code_cache", "emulated", "external", "internal", "primary", "sdcard", "storage", "downloads", "0", "1":
+		return true
+	}
+	return false
 }
 
 func buildReEnrichSearchQuery(req reEnrichRequest) string {
@@ -716,6 +751,23 @@ func ReEnrichFile(requestJSON string) (resp string, err error) {
 		req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist)
 	GoLog("[ReEnrich] track=%d, disc=%d, date=%s, isrc=%s, genre=%s, label=%s\n",
 		req.TrackNumber, req.DiscNumber, req.ReleaseDate, req.ISRC, req.Genre, req.Label)
+
+	// Sanitize: never write a filesystem artifact back into the tags. The
+	// provider/placeholder guards above refuse to *search* with these, but
+	// when no online match is found the request falls through with its
+	// current values — that is how the #562 corruption re-embedded "cache".
+	if looksLikeFilesystemArtifact(req.TrackName) {
+		GoLog("[ReEnrich] Dropped artifact track_name %q before embed\n", req.TrackName)
+		req.TrackName = ""
+	}
+	if looksLikeFilesystemArtifact(req.ArtistName) {
+		GoLog("[ReEnrich] Dropped artifact artist_name %q before embed\n", req.ArtistName)
+		req.ArtistName = ""
+	}
+	if looksLikeFilesystemArtifact(req.AlbumName) {
+		GoLog("[ReEnrich] Dropped artifact album_name %q before embed\n", req.AlbumName)
+		req.AlbumName = ""
+	}
 
 	enrichedMeta := buildReEnrichResultMetadata(&req)
 	if req.PreviewOnly {
