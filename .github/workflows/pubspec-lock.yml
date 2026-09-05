@@ -1,0 +1,58 @@
+name: Refresh pubspec.lock
+
+# pubspec.lock is intentionally committed (see .gitignore note) so every CI
+# build — and every contributor build — resolves the exact same package
+# versions. This workflow regenerates it with the pinned Flutter SDK whenever
+# pubspec.yaml changes, and commits the result directly to main. The commit is
+# marked [skip ci] to avoid re-triggering itself; the lockfile change is still
+# covered by the next PR (the paths-filter watches pubspec.lock).
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - pubspec.yaml
+  workflow_dispatch:
+
+concurrency:
+  group: pubspec-lock-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    name: Resolve and commit lockfile
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+          flutter-version-file: .fvmrc
+          cache: true
+
+      - name: Get Flutter dependencies
+        run: flutter pub get
+
+      - name: Commit updated lockfile
+        run: |
+          set -euo pipefail
+          if [ ! -f pubspec.lock ]; then
+            echo "::error::flutter pub get did not produce pubspec.lock"
+            exit 1
+          fi
+          git add pubspec.lock
+          if git diff --cached --quiet; then
+            echo "pubspec.lock already up to date — nothing to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(deps): refresh pubspec.lock [skip ci]"
+          git push

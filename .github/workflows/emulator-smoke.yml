@@ -1,0 +1,116 @@
+name: Emulator smoke test
+
+# Device-level smoke test for the paths unit tests cannot reach: app boot,
+# permission grants, the Flutter↔Kotlin↔gomobile bridge initializing, and a
+# foreground-service notification being available. Informational by design —
+# not a required check — so a flaky emulator never blocks a merge.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "25 4 * * 1"
+
+concurrency:
+  group: emulator-smoke
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Boot + bridge smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      APP_ID: com.zarz.spotimusic
+      ANDROID_NDK_VERSION: "29.0.14206865"
+      ANDROID_PLATFORM: "platforms;android-37"
+      ANDROID_BUILD_TOOLS: "build-tools;35.0.0"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go_backend/go.mod
+          cache-dependency-path: go_backend/go.sum
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version-file: .fvmrc
+          cache: true
+
+      - name: Install Android SDK & NDK
+        run: bash .github/scripts/setup-android-sdk.sh
+
+      - name: Build Go backend (gomobile AAR)
+        working-directory: go_backend
+        env:
+          CGO_ENABLED: 1
+        run: |
+          set -euo pipefail
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          go install golang.org/x/mobile/cmd/gomobile
+          gomobile init
+          mkdir -p ../android/app/libs
+          gomobile bind -target=android/x86_64 -androidapi 24 \
+            -o ../android/app/libs/gobackend.aar .
+
+      - name: Get Flutter dependencies
+        run: flutter pub get
+
+      - name: Build debug APK (x86_64)
+        run: flutter build apk --debug --target-platform android-x64
+
+      - name: Emulator smoke
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            set -euo pipefail
+            adb wait-for-device
+            timeout 300 bash -c 'until adb shell getprop sys.boot_completed 2>/dev/null | grep -q 1; do sleep 3; done'
+            adb install -r build/app/outputs/flutter-apk/app-debug.apk
+            adb logcat -c
+            adb shell pm grant "$APP_ID" android.permission.POST_NOTIFICATIONS || true
+            adb shell pm grant "$APP_ID" android.permission.READ_MEDIA_AUDIO || true
+            adb shell pm grant "$APP_ID" android.permission.WRITE_EXTERNAL_STORAGE || true
+            adb shell am start -n "$APP_ID/.MainActivity"
+            sleep 45
+            PID=$(adb shell pidof "$APP_ID" | tr -d '\r')
+            if [ -z "$PID" ]; then
+              echo "::error::app process not alive after launch"
+              adb logcat -d -b crash || true
+              exit 1
+            fi
+            echo "app alive (pid $PID)"
+            adb logcat -d > logcat.txt
+            grep -qiE "flutter|SpotiFLAC" logcat.txt \
+              || { echo "::error::no app log output captured"; exit 1; }
+            adb shell screencap -p /sdcard/smoke.png
+            adb pull /sdcard/smoke.png smoke.png
+
+      - name: Upload smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: emulator-smoke
+          path: |
+            smoke.png
+            logcat.txt
+          if-no-files-found: ignore
+          retention-days: 7

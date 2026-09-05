@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:spotimusic/l10n/l10n.dart';
+import 'package:spotimusic/l10n/staged_strings.dart';
 import 'package:spotimusic/providers/extension_provider.dart';
 import 'package:spotimusic/providers/repo_provider.dart';
 import 'package:spotimusic/services/platform_bridge.dart';
@@ -361,6 +362,9 @@ class _ExtensionDetailPageState extends ConsumerState<ExtensionDetailPage> {
             ],
 
             SliverToBoxAdapter(
+              child: _ImportedCookiesCard(extensionId: extension.id),
+            ),
+            SliverToBoxAdapter(
               child: SettingsSectionHeader(
                 title: context.l10n.extensionCapabilities,
               ),
@@ -524,6 +528,151 @@ class _ExtensionDetailPageState extends ConsumerState<ExtensionDetailPage> {
 }
 
 /// Long OAuth URLs: selectable text so users can copy without relying on snackbars.
+
+/// Opt-in cookie import for a single extension (issues #479/#499). The card
+/// only shows the *names* and count of imported cookies — values never leave
+/// the Go sandbox except transiently through the paste dialog.
+class _ImportedCookiesCard extends StatefulWidget {
+  const _ImportedCookiesCard({required this.extensionId});
+
+  final String extensionId;
+
+  @override
+  State<_ImportedCookiesCard> createState() => _ImportedCookiesCardState();
+}
+
+class _ImportedCookiesCardState extends State<_ImportedCookiesCard> {
+  int _count = 0;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    int count = 0;
+    try {
+      final info = await PlatformBridge.getExtensionImportedCookiesInfo(
+        widget.extensionId,
+      );
+      count = (info['count'] as num?)?.toInt() ?? 0;
+    } catch (_) {
+      // Bridge/extension unavailable — the card degrades to an empty state.
+    }
+    if (mounted) {
+      setState(() {
+        _count = count;
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _pasteCookies() async {
+    final controller = TextEditingController();
+    final text = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text(StagedStrings.cookiesImportButton),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              StagedStrings.cookiesImportDescription,
+              style: Theme.of(dialogContext).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              maxLines: 8,
+              minLines: 4,
+              decoration: const InputDecoration(
+                hintText: StagedStrings.cookiesPasteHint,
+              ),
+              style: Theme.of(dialogContext).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text(MaterialLocalizations.of(dialogContext).closeButtonLabel),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: const Text(StagedStrings.cookiesImportAction),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (text == null || text.isEmpty) return;
+
+    try {
+      final result = await PlatformBridge.setExtensionImportedCookies(
+        widget.extensionId,
+        text,
+      );
+      final count = (result['count'] as num?)?.toInt() ?? 0;
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Imported $count cookie(s)')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${StagedStrings.cookiesImportFailed}: $e')),
+      );
+    }
+    await _load();
+  }
+
+  Future<void> _clearCookies() async {
+    try {
+      await PlatformBridge.clearExtensionImportedCookies(widget.extensionId);
+    } catch (_) {}
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text(StagedStrings.cookiesCleared)),
+    );
+    await _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SettingsSectionHeader(title: StagedStrings.cookiesSectionTitle),
+        SettingsGroup(
+          children: [
+            SettingsItem(
+              icon: Icons.cookie_outlined,
+              title: StagedStrings.cookiesImportButton,
+              subtitle: _count == 0
+                  ? StagedStrings.cookiesEmpty
+                  : '$_count imported — sessions refresh on next request',
+              onTap: _pasteCookies,
+              showDivider: _count > 0,
+            ),
+            if (_count > 0)
+              SettingsItem(
+                icon: Icons.delete_outline,
+                title: StagedStrings.cookiesClear,
+                onTap: _clearCookies,
+                showDivider: false,
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
 class _OauthLoginLinkPreview extends StatelessWidget {
   final String? value;
   final ColorScheme colorScheme;

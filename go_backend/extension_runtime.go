@@ -191,6 +191,7 @@ func clearPrivateIPCache() {
 
 func newExtensionRuntime(ext *loadedExtension) *extensionRuntime {
 	jar, _ := newSimpleCookieJar()
+	seedImportedCookies(jar, ext.DataDir, ext.ID)
 
 	runtime := &extensionRuntime{
 		extensionID: ext.ID,

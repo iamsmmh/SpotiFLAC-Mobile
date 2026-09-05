@@ -76,6 +76,14 @@ jobs:
             echo "publish=${PUBLISH}"
           } | tee -a "$GITHUB_OUTPUT"
 
+      - name: Release gate
+        # Same gate as the signed pipeline: AltStore feed integrity, tag vs
+        # pubspec version, CHANGELOG coverage, staged-strings budget. A failed
+        # gate here stops hours of builds before they start.
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: python3 scripts/release_gate.py --version "$VERSION"
+
   android:
     name: Android APK
     runs-on: ubuntu-latest
@@ -503,6 +511,7 @@ jobs:
           set -euo pipefail
           VERSION_NUM="${VERSION#v}"
           DATE=$(date -u +%Y-%m-%d)
+          DATE_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           IPA_FILE=$(find ./release -name "*ios*.ipa" | head -1)
 
           if [ -z "$IPA_FILE" ]; then
@@ -512,6 +521,27 @@ jobs:
 
           IPA_SIZE=$(stat -c%s "$IPA_FILE")
 
+          # Read the real CFBundleIdentifier straight out of the shipped IPA
+          # instead of trusting the committed feed — a stale bundle ID silently
+          # breaks AltStore/SideStore update matching (issue #554).
+          INFO_PLIST="$RUNNER_TEMP/ipa-info-plist"
+          rm -rf "$INFO_PLIST"
+          unzip -p "$IPA_FILE" "Payload/Runner.app/Info.plist" > "$INFO_PLIST" || {
+            echo "::error::IPA is missing Payload/Runner.app/Info.plist"
+            exit 1
+          }
+          IPA_BUNDLE=$(python3 - "$INFO_PLIST" <<'PY'
+          import plistlib, sys
+          with open(sys.argv[1], 'rb') as f:
+              print(plistlib.load(f)['CFBundleIdentifier'])
+          PY
+          )
+          if [ -z "$IPA_BUNDLE" ]; then
+            echo "::error::could not read CFBundleIdentifier from the IPA"
+            exit 1
+          fi
+          echo "IPA bundle identifier: $IPA_BUNDLE"
+
           if [ ! -f apps.json ]; then
             echo "WARNING: apps.json not found on main, skipping"
             exit 0
@@ -519,9 +549,11 @@ jobs:
 
           jq --arg ver "$VERSION_NUM" \
              --arg date "$DATE" \
+             --arg dateiso "$DATE_ISO" \
+             --arg bundle "$IPA_BUNDLE" \
              --arg url "https://github.com/${{ github.repository }}/releases/download/${VERSION}/${APP_NAME}-${VERSION}-ios-unsigned.ipa" \
              --argjson size "$IPA_SIZE" \
-             '.apps[0].version = $ver | .apps[0].versionDate = $date | .apps[0].downloadURL = $url | .apps[0].size = $size' \
+             '.apps[0].version = $ver | .apps[0].date = $dateiso | .apps[0].versionDate = $date | .apps[0].bundleIdentifier = $bundle | .apps[0].downloadURL = $url | .apps[0].size = $size' \
              apps.json > apps.json.tmp && mv apps.json.tmp apps.json
           cat apps.json
 

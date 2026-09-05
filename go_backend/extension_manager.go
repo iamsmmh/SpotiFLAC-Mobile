@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -662,6 +663,36 @@ type ExtensionUpgradeInfo struct {
 	NewVersion     string `json:"new_version"`
 	CanUpgrade     bool   `json:"can_upgrade"`
 	IsInstalled    bool   `json:"is_installed"`
+
+	// Flattened permission sets for both sides of an update so the UI can
+	// show a "what is this new version asking for?" diff before replacing a
+	// trusted install (scope-creep guard for a decentralized store).
+	CurrentPermissions []string `json:"current_permissions"`
+	NewPermissions     []string `json:"new_permissions"`
+}
+
+// manifestPermissionList flattens a manifest's declared permissions into
+// comparable, human-readable tokens (stable order).
+func manifestPermissionList(m *ExtensionManifest) []string {
+	if m == nil {
+		return []string{}
+	}
+	var out []string
+	network := append([]string(nil), m.Permissions.Network...)
+	sort.Strings(network)
+	for _, host := range network {
+		out = append(out, "network:"+host)
+	}
+	if m.Permissions.Storage {
+		out = append(out, "storage")
+	}
+	if m.Permissions.File {
+		out = append(out, "file")
+	}
+	if m.Permissions.AllowHTTP {
+		out = append(out, "allowHttp")
+	}
+	return out
 }
 
 func (m *extensionManager) checkExtensionUpgradeInternal(filePath string) (*ExtensionUpgradeInfo, error) {
@@ -691,12 +722,16 @@ func (m *extensionManager) checkExtensionUpgradeInternal(filePath string) (*Exte
 		IsInstalled: exists,
 	}
 
+	info.NewPermissions = manifestPermissionList(newManifest)
+
 	if !exists {
 		info.CurrentVersion = ""
 		info.CanUpgrade = false
+		info.CurrentPermissions = []string{}
 	} else {
 		info.CurrentVersion = existing.Manifest.Version
 		info.CanUpgrade = compareVersions(newManifest.Version, existing.Manifest.Version) > 0
+		info.CurrentPermissions = manifestPermissionList(existing.Manifest)
 	}
 
 	return info, nil

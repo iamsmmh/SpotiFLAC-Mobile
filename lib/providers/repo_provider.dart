@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:spotimusic/constants/app_info.dart';
 import 'package:spotimusic/services/platform_bridge.dart';
+import 'package:spotimusic/utils/extension_permission_gate.dart';
 import 'package:spotimusic/utils/logger.dart';
 import 'package:spotimusic/providers/extension_provider.dart';
 
@@ -409,13 +410,15 @@ class RepoNotifier extends Notifier<RepoState> {
   Future<bool> installExtension(
     String extensionId,
     String tempDir,
-    String extensionsDir,
-  ) {
+    String extensionsDir, {
+    Future<bool> Function(List<String> addedPermissions)? permissionConfirmer,
+  }) {
     return _runSerialized(
       () => _downloadAndApplyExtension(
         extensionId,
         tempDir,
         action: 'install',
+        permissionConfirmer: permissionConfirmer,
         apply: (notifier, path) => notifier.installExtension(path),
       ),
     );
@@ -471,12 +474,17 @@ class RepoNotifier extends Notifier<RepoState> {
     );
   }
 
-  Future<bool> updateExtension(String extensionId, String tempDir) {
+  Future<bool> updateExtension(
+    String extensionId,
+    String tempDir, {
+    Future<bool> Function(List<String> addedPermissions)? permissionConfirmer,
+  }) {
     return _runSerialized(
       () => _downloadAndApplyExtension(
         extensionId,
         tempDir,
         action: 'update',
+        permissionConfirmer: permissionConfirmer,
         apply: (notifier, path) => notifier.upgradeExtension(path),
       ),
     );
@@ -488,6 +496,7 @@ class RepoNotifier extends Notifier<RepoState> {
     required String action,
     required Future<bool> Function(ExtensionNotifier notifier, String path)
     apply,
+    Future<bool> Function(List<String> addedPermissions)? permissionConfirmer,
   }) async {
     state = state.copyWith(
       isDownloading: true,
@@ -501,6 +510,18 @@ class RepoNotifier extends Notifier<RepoState> {
         extensionId,
         tempDir,
       );
+
+      // Gate upgrades that request more permissions than the installed
+      // version (see extension_permission_gate.dart). Fresh installs skip
+      // this: nothing is being swapped out from under a trusted install.
+      if (permissionConfirmer != null) {
+        final added = await addedPermissionsForPackage(downloadPath);
+        if (added.isNotEmpty && !await permissionConfirmer(added)) {
+          _log.i('Extension $action declined by user: $extensionId');
+          state = state.copyWith(isDownloading: false, clearDownloadingId: true);
+          return false;
+        }
+      }
 
       _log.i('Applying $action from: $downloadPath');
       final success = await apply(

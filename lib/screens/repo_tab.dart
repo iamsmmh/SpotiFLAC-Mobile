@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:spotimusic/widgets/extension_row.dart';
+import 'package:spotimusic/utils/extension_permission_gate.dart';
 import 'package:spotimusic/theme/app_tokens.dart';
 import 'package:spotimusic/widgets/app_search_field.dart';
 import 'package:spotimusic/widgets/app_sliver_header.dart';
@@ -555,13 +556,19 @@ class _RepoTabState extends ConsumerState<RepoTab> {
   }
 
   Future<void> _installExtension(RepoExtension ext) async {
+    final permissionConfirmer = buildPermissionConfirmer(context);
     final tempDir = await getTemporaryDirectory();
     final appDir = await getApplicationDocumentsDirectory();
     final extensionsDir = '${appDir.path}/extensions';
 
     final success = await ref
         .read(repoProvider.notifier)
-        .installExtension(ext.id, tempDir.path, extensionsDir);
+        .installExtension(
+          ext.id,
+          tempDir.path,
+          extensionsDir,
+          permissionConfirmer: permissionConfirmer,
+        );
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -603,11 +610,16 @@ class _RepoTabState extends ConsumerState<RepoTab> {
   }
 
   Future<void> _updateExtension(RepoExtension ext) async {
+    final permissionConfirmer = buildPermissionConfirmer(context);
     final tempDir = await getTemporaryDirectory();
 
     final success = await ref
         .read(repoProvider.notifier)
-        .updateExtension(ext.id, tempDir.path);
+        .updateExtension(
+          ext.id,
+          tempDir.path,
+          permissionConfirmer: permissionConfirmer,
+        );
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

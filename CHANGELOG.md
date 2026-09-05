@@ -79,6 +79,43 @@
   error dialog and empty-search state offer to open the Store (instead of a
   dead-end retry) when no usable extension is installed/enabled.
 
+- **Approximate file size in the download quality picker**: each quality row
+  now shows a rough `≈ NN MB` result size derived from track duration and
+  typical per-codec bitrates (parsed from ids like `MP3_320`/`OPUS_128`);
+  batch downloads show the summed estimate (issue #550).
+- **Offline download registry** (Settings → Backup & Restore): export a
+  metadata-only JSON ledger (ISRC/provider-id keyed) of everything this
+  device has downloaded, import another device's ledger, and get the list of
+  tracks missing here with per-item link/copy actions (issue #516).
+- **Imported session cookies per extension** (extension detail page): users
+  can paste a Netscape `cookies.txt` export (or `host NAME=VALUE` lines) so
+  an extension can pass Cloudflare challenges or use their own account
+  session. Stored only inside the extension's sandbox data dir (0600), seeded
+  into its cookie jar at load, clearable with one tap (#479/#499).
+- **Upgrade permission-diff gate**: when a Store update or a sideloaded
+  `.spotiflac-ext` would expand an already-installed extension's permissions
+  (new network hosts, storage, file, plain-http), the swap is now confirmed
+  against the visible diff instead of applied silently.
+- **Opt-in LAN web player** (Settings → Files): a read-only single-page HTTP
+  player streamed from the download folder to any browser on the local
+  network (range-aware media streaming, index-addressed playback, no
+  traversal surface, off by default, dies with the app).
+- **`spotimusic://` deep links** (`open?url=`, `search?q=`,
+  `track|album|playlist?spotify=` and passthrough forms) on Android and iOS,
+  routed through the existing shared-link pipeline.
+- **AltStore feed integrity**: `apps.json` now carries the real bundle
+  identifier (fixes iOS update matching, issue #554) and a full RFC3339
+  `date`; the release pipeline rewrites both from the built IPA's
+  `Info.plist` instead of trusting the committed file.
+- **Tooling**: CI now runs the Go suite with `-race -shuffle=on`, both suites
+  publish coverage to the job summary; `pubspec.lock` is regenerated and
+  committed automatically (new workflow, lockfile un-ignored); a toolchain-free
+  `scripts/release_gate.py` blocks releases on tag/CHANGELOG/feed/i18n
+  inconsistencies in both release pipelines; nightly fuzzing (filename /
+  template / manifest / CUE parsers), an optional emulator smoke test, an
+  opt-in Crowdin sync workflow, and stale audit reports moved to
+  `docs/history/` round it out.
+
 ### Fixed
 
 - **Mid-stream failures reached nobody**: the audio pipeline reports runtime
@@ -139,6 +176,12 @@
 
 ---
 
+- **Re-enrichment can no longer (re-)embed filesystem artifacts** (issue
+  #562): library-scan placeholder values that leaked in from SAF spill paths
+  (album literally named `cache`, swapped title/artist from path fragments)
+  are now treated as missing everywhere — search queries, same-release
+  guards, and the final embed step — instead of being faithfully rewritten
+  onto the file by batch re-enrich.
 ### Removed
 
 - **Dead `just_audio` player**: `MultiProviderPlayer` / `StreamResumePoint`

@@ -35,6 +35,7 @@ import 'package:spotimusic/widgets/settings_group.dart';
 import 'package:spotimusic/widgets/mini_player.dart';
 import 'package:spotimusic/widgets/selection_bottom_bar.dart';
 import 'package:spotimusic/utils/logger.dart';
+import 'package:spotimusic/utils/deep_link.dart';
 
 final _log = AppLogger('MainShell');
 
@@ -296,7 +297,15 @@ class _MainShellState extends ConsumerState<MainShell>
         context,
       ).showSnackBar(SnackBar(content: Text(context.l10n.loadingSharedLink)));
     }
-    await ref.read(trackProvider.notifier).fetchFromUrl(url);
+    final deepLink = parseSpotiFlacDeepLink(url);
+    if (deepLink != null && deepLink.kind == DeepLinkKind.search) {
+      await ref.read(trackProvider.notifier).search(deepLink.payload);
+      return;
+    }
+    final targetUrl = (deepLink != null && deepLink.kind == DeepLinkKind.openUrl)
+        ? deepLink.payload
+        : url;
+    await ref.read(trackProvider.notifier).fetchFromUrl(targetUrl);
     final trackState = ref.read(trackProvider);
     if (trackState.error != null && mounted) {
       final l10n = context.l10n;

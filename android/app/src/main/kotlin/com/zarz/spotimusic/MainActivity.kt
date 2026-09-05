@@ -1039,6 +1039,47 @@ class MainActivity: FlutterFragmentActivity() {
                             }
                             result.success(null)
                         }
+                        "startLanWebPlayer" -> {
+                            val config = call.argument<String>("config") ?: "{}"
+                            val response = withContext(Dispatchers.IO) {
+                                Gobackend.startLanWebPlayer(config)
+                            }
+                            result.success(response)
+                        }
+                        "stopLanWebPlayer" -> {
+                            withContext(Dispatchers.IO) {
+                                Gobackend.stopLanWebPlayer()
+                            }
+                            result.success(null)
+                        }
+                        "getLanWebPlayerStatus" -> {
+                            val response = withContext(Dispatchers.IO) {
+                                Gobackend.getLanWebPlayerStatus()
+                            }
+                            result.success(response)
+                        }
+                        "setExtensionImportedCookies" -> {
+                            val extensionId = call.argument<String>("extension_id") ?: ""
+                            val cookiesText = call.argument<String>("cookies_text") ?: ""
+                            val response = withContext(Dispatchers.IO) {
+                                Gobackend.setExtensionImportedCookies(extensionId, cookiesText)
+                            }
+                            result.success(response)
+                        }
+                        "getExtensionImportedCookiesInfo" -> {
+                            val extensionId = call.argument<String>("extension_id") ?: ""
+                            val response = withContext(Dispatchers.IO) {
+                                Gobackend.getExtensionImportedCookiesInfo(extensionId)
+                            }
+                            result.success(response)
+                        }
+                        "clearExtensionImportedCookies" -> {
+                            val extensionId = call.argument<String>("extension_id") ?: ""
+                            withContext(Dispatchers.IO) {
+                                Gobackend.clearExtensionImportedCookies(extensionId)
+                            }
+                            result.success(null)
+                        }
                         "checkDuplicatesBatch" -> {
                             val outputDir = call.argument<String>("output_dir") ?: ""
                             val tracksJson = call.argument<String>("tracks") ?: "[]"

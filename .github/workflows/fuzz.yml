@@ -1,0 +1,78 @@
+name: Nightly fuzz
+
+# Short bounded fuzzing runs against the untrusted-input surface in the Go
+# backend (see go_backend/fuzz_targets_test.go). Failures open no PR by
+# themselves: the failed input is uploaded as an artifact and must be
+# committed under testdata/fuzz/ alongside the fix so it becomes a permanent
+# regression test.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: "Seconds per target"
+        required: false
+        default: "120"
+        type: string
+
+concurrency:
+  group: nightly-fuzz
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - FuzzSanitizeFilename
+          - FuzzBuildFilenameTemplate
+          - FuzzExtensionManifest
+          - FuzzCueParsing
+    env:
+      FUZZ_DURATION: ${{ github.event.inputs.duration || '120' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go_backend/go.mod
+          cache-dependency-path: go_backend/go.sum
+
+      - name: Fuzz
+        working-directory: go_backend
+        run: |
+          set -euo pipefail
+          if ! go test -run='^$' -fuzz="^${{ matrix.target }}$" -fuzztime="${FUZZ_DURATION}s" .; then
+            echo "::error::${{ matrix.target }} found a failing input — see fuzz-failures artifact"
+            exit 1
+          fi
+
+      - name: Archive failed inputs
+        if: failure()
+        run: |
+          set -uo pipefail
+          mkdir -p fuzz-failures
+          # go test records reproducers in the build cache; surface them.
+          find "$(go env GOCACHE)/fuzz" -path '*${{ matrix.target }}*' -type f \
+            -exec cp -v {} fuzz-failures/ \; 2>/dev/null || true
+          ls -la fuzz-failures || true
+
+      - name: Upload fuzz failures
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: fuzz-${{ matrix.target }}
+          path: fuzz-failures/
+          if-no-files-found: ignore
+          retention-days: 30

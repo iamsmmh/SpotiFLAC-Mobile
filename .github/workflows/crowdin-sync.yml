@@ -1,0 +1,73 @@
+name: Crowdin sync
+
+# Pushes the English template to Crowdin whenever it changes on main so
+# translators always work against shipped strings, and can pull finished
+# translations into a PR on demand. Opt-in: requires the `CROWDIN_ENABLED`
+# repo variable and the CROWDIN_PROJECT_ID / CROWDIN_TOKEN secrets — on
+# forks and unconfigured mirrors every job skips cleanly.
+#
+# Backflow of staged strings: run this workflow with `download_translations`
+# after moving entries out of lib/l10n/staged_strings.dart into app_en.arb;
+# the release gate (scripts/release_gate.py) keeps that debt bounded.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - lib/l10n/arb/app_en.arb
+  workflow_dispatch:
+    inputs:
+      download_translations:
+        description: "Also pull translations and open a PR with them"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: crowdin-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    name: Sync strings with Crowdin
+    runs-on: ubuntu-latest
+    if: vars.CROWDIN_ENABLED == 'true'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Upload latest source strings
+        uses: crowdin/github-action@v2
+        with:
+          config: crowdin.yml
+          upload_sources: true
+          upload_translations: false
+          download_translations: false
+        env:
+          CROWDIN_PROJECT_ID: ${{ secrets.CROWDIN_PROJECT_ID }}
+          CROWDIN_TOKEN: ${{ secrets.CROWDIN_TOKEN }}
+
+      - name: Download translations into a PR
+        if: ${{ github.event.inputs.download_translations == 'true' }}
+        uses: crowdin/github-action@v2
+        with:
+          config: crowdin.yml
+          upload_sources: false
+          download_translations: true
+          localization_branch_name: l10n_crowdin_translations
+          create_pull_request: true
+          pull_request_title: "chore(l10n): update translations from Crowdin"
+          pull_request_body: >-
+            Automated Crowdin backflow. After merge, `flutter gen-l10n` is
+            handled by the CI's Get Flutter dependencies step; translation
+            completeness is checked by `scripts/translation_coverage.py`.
+          commit_message: "chore(l10n): update translations"
+        env:
+          CROWDIN_PROJECT_ID: ${{ secrets.CROWDIN_PROJECT_ID }}
+          CROWDIN_TOKEN: ${{ secrets.CROWDIN_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

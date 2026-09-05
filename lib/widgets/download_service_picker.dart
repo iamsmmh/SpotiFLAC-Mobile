@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:spotimusic/providers/extension_provider.dart';
 import 'package:spotimusic/providers/settings_provider.dart';
 import 'package:spotimusic/l10n/l10n.dart';
+import 'package:spotimusic/utils/download_size_estimate.dart';
 
 class DownloadServicePicker extends ConsumerStatefulWidget {
   final String? trackName;
@@ -15,6 +16,10 @@ class DownloadServicePicker extends ConsumerStatefulWidget {
   final String? recommendedService;
   final ScrollController? scrollController;
 
+  /// Summed duration (seconds) of everything this download will produce.
+  /// When set, each quality row shows a rough resulting file size (#550).
+  final int? totalDurationSeconds;
+
   const DownloadServicePicker({
     super.key,
     this.trackName,
@@ -23,6 +28,7 @@ class DownloadServicePicker extends ConsumerStatefulWidget {
     required this.onSelect,
     this.recommendedService,
     this.scrollController,
+    this.totalDurationSeconds,
   });
 
   @override
@@ -35,6 +41,7 @@ class DownloadServicePicker extends ConsumerStatefulWidget {
     String? artistName,
     String? coverUrl,
     String? recommendedService,
+    int? totalDurationSeconds,
     required void Function(String quality, String service) onSelect,
   }) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -53,6 +60,7 @@ class DownloadServicePicker extends ConsumerStatefulWidget {
           onSelect: onSelect,
           recommendedService: recommendedService,
           scrollController: scrollController,
+          totalDurationSeconds: totalDurationSeconds,
         ),
       ),
     );
@@ -194,7 +202,7 @@ class _DownloadServicePickerState extends ConsumerState<DownloadServicePicker> {
               for (final quality in qualityOptions)
                 _QualityOption(
                   title: _localizedQualityLabel(context, quality),
-                  subtitle: _localizedQualityDescription(context, quality),
+                  subtitle: _qualitySubtitle(context, quality),
                   icon: _getQualityIcon(quality.id),
                   onTap: () {
                     Navigator.pop(context);
@@ -208,6 +216,18 @@ class _DownloadServicePickerState extends ConsumerState<DownloadServicePicker> {
         ),
       ),
     );
+  }
+
+  /// Description plus a rough result-size hint (issue #550). The estimate is
+  /// intentionally approximate — typical bitrates, encoder-dependent truth.
+  String _qualitySubtitle(BuildContext context, QualityOption quality) {
+    final description = _localizedQualityDescription(context, quality);
+    final size = approxSizeLabel(
+      durationSeconds: widget.totalDurationSeconds,
+      qualityId: quality.id,
+    );
+    if (size == null) return description;
+    return description.isEmpty ? size : '$description · $size';
   }
 
   IconData _getQualityIcon(String qualityId) {

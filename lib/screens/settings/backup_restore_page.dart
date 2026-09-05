@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart' show ShareParams, SharePlus, XFile;
 import 'package:spotimusic/l10n/l10n.dart';
@@ -9,8 +10,11 @@ import 'package:spotimusic/providers/download_queue_provider.dart';
 import 'package:spotimusic/providers/extension_provider.dart';
 import 'package:spotimusic/providers/library_collections_provider.dart';
 import 'package:spotimusic/providers/settings_provider.dart';
+import 'package:spotimusic/l10n/staged_strings.dart';
 import 'package:spotimusic/services/backup_service.dart';
 import 'package:spotimusic/services/history_database.dart';
+import 'package:spotimusic/services/library_ledger_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:spotimusic/utils/logger.dart';
 import 'package:spotimusic/widgets/settings_group.dart';
 import 'package:spotimusic/widgets/app_sliver_header.dart';
@@ -27,9 +31,10 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
 
   bool _isExporting = false;
   bool _isImporting = false;
+  bool _isLedgerBusy = false;
   bool _includeSecrets = false;
 
-  bool get _isBusy => _isExporting || _isImporting;
+  bool get _isBusy => _isExporting || _isImporting || _isLedgerBusy;
 
   Future<void> _createBackup() async {
     if (_isBusy) return;
@@ -67,6 +72,140 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
     } finally {
       if (mounted) setState(() => _isExporting = false);
     }
+  }
+
+  Future<void> _exportLedger() async {
+    if (_isBusy) return;
+    setState(() => _isLedgerBusy = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final rows = await HistoryDatabase.instance.getAll();
+      final entries = LibraryLedgerService.entriesFromHistoryRows(rows);
+      final file = await LibraryLedgerService.writeLedgerFile(
+        LibraryLedgerService.encodeLedger(entries),
+      );
+      await SharePlus.instance.share(
+        ShareParams(files: [XFile(file.path)], text: StagedStrings.ledgerSectionTitle),
+      );
+      messenger.showSnackBar(
+        SnackBar(content: Text(StagedStrings.ledgerExported)),
+      );
+    } catch (e, stack) {
+      _log.e('Failed to export ledger: $e', e, stack);
+      messenger.showSnackBar(
+        SnackBar(content: Text(StagedStrings.ledgerExportFailed)),
+      );
+    } finally {
+      if (mounted) setState(() => _isLedgerBusy = false);
+    }
+  }
+
+  Future<void> _importLedger() async {
+    if (_isBusy) return;
+    final messenger = ScaffoldMessenger.of(context);
+    List<LedgerEntry>? imported;
+    try {
+      final picked = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: const ['json']);
+      if (picked == null) return;
+      imported = LibraryLedgerService.decodeLedger(
+        utf8.decode(await picked.readAsBytes()),
+      );
+    } catch (e) {
+      _log.e('Failed to read ledger file: $e');
+      messenger.showSnackBar(
+        SnackBar(content: Text(StagedStrings.ledgerInvalidFile)),
+      );
+      return;
+    }
+
+    if (imported == null) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(StagedStrings.ledgerInvalidFile)),
+      );
+      return;
+    }
+
+    final localRows = await HistoryDatabase.instance.getAll();
+    final missing = LibraryLedgerService.missingEntries(
+      imported: imported,
+      local: LibraryLedgerService.entriesFromHistoryRows(localRows),
+    );
+
+    if (!mounted) return;
+    if (missing.isEmpty) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(StagedStrings.ledgerAllPresent)),
+      );
+      return;
+    }
+    await _showLedgerMissingDialog(missing);
+  }
+
+  Future<void> _showLedgerMissingDialog(List<LedgerEntry> missing) async {
+    final messenger = ScaffoldMessenger.of(context);
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(
+          '${StagedStrings.ledgerMissingTitle} (${missing.length})',
+        ),
+        contentPadding: const EdgeInsets.only(top: 8),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: missing.length,
+            itemBuilder: (context, index) {
+              final entry = missing[index];
+              final url = entry.openableUrl;
+              return ListTile(
+                dense: true,
+                title: Text(entry.displayLabel),
+                subtitle: entry.album.isEmpty
+                    ? null
+                    : Text(entry.album, maxLines: 1, overflow: TextOverflow.ellipsis),
+                trailing: IconButton(
+                  tooltip: url ?? StagedStrings.ledgerSearchHint,
+                  icon: Icon(
+                    url == null ? Icons.copy_all_outlined : Icons.open_in_new,
+                  ),
+                  onPressed: () async {
+                    if (url != null) {
+                      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                      return;
+                    }
+                    await Clipboard.setData(ClipboardData(text: entry.displayLabel));
+                    if (dialogContext.mounted) {
+                      Navigator.of(dialogContext).pop();
+                    }
+                    messenger.showSnackBar(
+                      const SnackBar(content: Text(StagedStrings.ledgerCopiedList)),
+                    );
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              final text = missing.map((e) => e.displayLabel).join('\n');
+              await Clipboard.setData(ClipboardData(text: text));
+              if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+              messenger.showSnackBar(
+                const SnackBar(content: Text(StagedStrings.ledgerCopiedList)),
+              );
+            },
+            child: const Text(StagedStrings.ledgerCopyList),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text(StagedStrings.ledgerClose),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _restoreBackup() async {
@@ -272,6 +411,30 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : null,
+                  showDivider: false,
+                ),
+              ],
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: SettingsSectionHeader(
+              title: StagedStrings.ledgerSectionTitle,
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: SettingsGroup(
+              children: [
+                SettingsItem(
+                  icon: Icons.inventory_2_outlined,
+                  title: StagedStrings.ledgerExportButton,
+                  subtitle: StagedStrings.ledgerExportDescription,
+                  onTap: _isBusy ? null : _exportLedger,
+                ),
+                SettingsItem(
+                  icon: Icons.fact_check_outlined,
+                  title: StagedStrings.ledgerImportButton,
+                  subtitle: StagedStrings.ledgerImportDescription,
+                  onTap: _isBusy ? null : _importLedger,
                   showDivider: false,
                 ),
               ],

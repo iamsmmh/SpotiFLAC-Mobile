@@ -702,6 +702,66 @@ class PlatformBridge {
     return result as String;
   }
 
+  /// Opt-in read-only LAN web player over the downloaded-music folder.
+  /// Returns Go-side JSON: {running, port, root, urls[], tracks}.
+  static Future<Map<String, dynamic>> startLanWebPlayer({
+    required String root,
+    int port = 0,
+  }) async {
+    final config = jsonEncode(<String, dynamic>{'root': root, 'port': port});
+    return _invokeMap('startLanWebPlayer', {'config': config});
+  }
+
+  static Future<void> stopLanWebPlayer() async {
+    await _channel.invokeMethod('stopLanWebPlayer');
+  }
+
+  static Future<Map<String, dynamic>> getLanWebPlayerStatus() async {
+    return _invokeMap('getLanWebPlayerStatus');
+  }
+
+  /// Parses + persists user-exported cookies (Netscape cookies.txt or
+  /// "host NAME=VALUE" lines) into an extension's sandbox cookie jar and
+  /// returns the Go-side JSON summary `{"count": n, "names": [...]}`.
+  static Future<Map<String, dynamic>> setExtensionImportedCookies(
+    String extensionId,
+    String cookiesText,
+  ) async {
+    final result = await _channel.invokeMethod('setExtensionImportedCookies', {
+      'extension_id': extensionId,
+      'cookies_text': cookiesText,
+    });
+    if (result is String && result.isNotEmpty) {
+      final decoded = jsonDecode(result);
+      if (decoded is Map) {
+        return Map<String, dynamic>.from(decoded);
+      }
+    }
+    return <String, dynamic>{'count': 0, 'names': <String>[]};
+  }
+
+  static Future<Map<String, dynamic>> getExtensionImportedCookiesInfo(
+    String extensionId,
+  ) async {
+    final result = await _channel.invokeMethod(
+      'getExtensionImportedCookiesInfo',
+      {'extension_id': extensionId},
+    );
+    if (result is String && result.isNotEmpty) {
+      final decoded = jsonDecode(result);
+      if (decoded is Map) {
+        return Map<String, dynamic>.from(decoded);
+      }
+    }
+    return <String, dynamic>{'count': 0, 'names': <String>[]};
+  }
+
+  static Future<void> clearExtensionImportedCookies(String extensionId) async {
+    await _channel.invokeMethod('clearExtensionImportedCookies', {
+      'extension_id': extensionId,
+    });
+  }
+
   static Future<String> sanitizeFilename(String filename) async {
     final result = await _channel.invokeMethod('sanitizeFilename', {
       'filename': filename,

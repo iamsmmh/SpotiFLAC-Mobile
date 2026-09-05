@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:spotimusic/widgets/extension_row.dart';
+import 'package:spotimusic/utils/extension_permission_gate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
@@ -257,6 +258,23 @@ class _ExtensionsPageState extends ConsumerState<ExtensionsPage> {
           flush: true,
         );
         extensionPaths.add(materializedFile.path);
+      }
+
+      // Same permission-diff gate the Store uses for self-updating
+      // extensions, applied to sideloaded packages over existing installs.
+      final addedPermissions = <String>[];
+      for (final path in extensionPaths) {
+        for (final permission in await addedPermissionsForPackage(path)) {
+          if (!addedPermissions.contains(permission)) {
+            addedPermissions.add(permission);
+          }
+        }
+      }
+      if (addedPermissions.isNotEmpty) {
+        if (!mounted) return;
+        final confirmer = buildPermissionConfirmer(context);
+        final proceed = await confirmer(addedPermissions);
+        if (!proceed || !mounted) return;
       }
 
       final installResult = await ref

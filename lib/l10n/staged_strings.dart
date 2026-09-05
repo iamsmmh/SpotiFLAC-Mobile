@@ -54,6 +54,72 @@ abstract final class StagedStrings {
   static const String providerAccountsTestHint =
       'Saved tokens apply to the next stream immediately — no restart needed.';
 
+  // Offline download registry (issue #516).
+  static const String ledgerSectionTitle = 'Offline registry';
+  static const String ledgerExportButton = 'Export downloaded registry';
+  static const String ledgerExportDescription =
+      'Share a JSON list of what this device has downloaded — no audio files.';
+  static const String ledgerImportButton = 'Import registry & find missing';
+  static const String ledgerImportDescription =
+      'Compare another device\'s registry with this one and list the tracks this '
+      'device is missing.';
+  static const String ledgerExported = 'Registry exported';
+  static const String ledgerExportFailed = 'Could not export the registry';
+  static const String ledgerInvalidFile = 'This is not a SpotiFLAC registry file';
+  static const String ledgerAllPresent =
+      'Everything in this registry is already downloaded on this device';
+  static const String ledgerMissingTitle = 'Missing from this device';
+  static const String ledgerCopyList = 'Copy list';
+  static const String ledgerClose = 'Close';
+  static const String ledgerCopiedList = 'Missing tracks copied to clipboard';
+  static const String ledgerSearchHint =
+      'No direct link — tap to copy and search by title instead';
+
+  // LAN web player (settings → files).
+  static const String lanPlayerSectionTitle = 'LAN web player';
+  static const String lanPlayerTitle = 'Serve downloads to this network';
+  static const String lanPlayerDescription =
+      'Opens a read-only web page on your local network that streams the '
+      'download folder to browsers on the same Wi-Fi. Nothing is exposed to '
+      'the internet, but anyone on the network can listen while it is on. '
+      'Turn it off when you are done.';
+  static const String lanPlayerNeedsFolder =
+      'Set a download folder first — the player only serves that folder';
+  static const String lanPlayerStarted = 'LAN player running';
+  static const String lanPlayerStopped = 'LAN player stopped';
+  static const String lanPlayerFailed = 'Could not start the LAN player';
+  static const String lanPlayerCopy = 'Copy URL';
+  static const String lanPlayerCopied = 'Player URL copied';
+  static const String lanPlayerTracks = 'tracks';
+
+  // Extension upgrade permission-diff gate.
+  static const String permDiffTitle = 'This update asks for more permissions';
+  static const String permDiffBody =
+      'The new version requests access that the installed version does not '
+      'have:';
+  static const String permDiffProceed = 'Install anyway';
+  static const String permDiffCancel = 'Cancel';
+  static const String permDiffCancelled = 'Update cancelled \u2014 new permissions were declined';
+
+  // Extension session cookies (import for CF-protected / logged-in sources).
+  static const String cookiesSectionTitle = 'Session cookies';
+  static const String cookiesImportButton = 'Paste cookies.txt';
+  static const String cookiesImportDescription =
+      'Optional: paste an exported browser cookie file so this extension can '
+      'pass Cloudflare challenges or use your own account session. Stored only '
+      'in this extension\'s sandbox data dir (never synced or uploaded).';
+  static const String cookiesEmpty = 'No cookies imported yet';
+  static const String cookiesImportFailed =
+      'Could not read those cookies \u2014 use Netscape cookies.txt format or '
+      '\u0022host NAME=VALUE\u0022 lines';
+  static const String cookiesClear = 'Clear imported cookies';
+  static const String cookiesCleared = 'Imported cookies cleared';
+  static const String cookiesPasteHint =
+      '.example.com\tTRUE\t/\tTRUE\t0\tsid\tabc123';
+  static const String cookiesImportAction = 'Import';
+  static const String cookiesUnavailable =
+      'Cookie import is unavailable for this extension';
+
   // No-download-provider recovery.
   static const String noProvidersTitle = 'No download providers';
   static const String noProvidersMessage =

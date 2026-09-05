@@ -22,6 +22,9 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       is_prerelease: ${{ steps.version.outputs.is_prerelease }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
       - name: Get version
         id: version
         run: |
@@ -38,6 +41,14 @@ jobs:
           else
             echo "is_prerelease=false" >> $GITHUB_OUTPUT
           fi
+
+      - name: Release gate
+        # Refuses the release when repo-level metadata is inconsistent:
+        # tag vs pubspec version, CHANGELOG coverage, AltStore feed integrity
+        # (bundle id / date fields), and unbounded staged-strings debt.
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: python3 scripts/release_gate.py --version "$VERSION"
 
   build-android:
     runs-on: ubuntu-latest
