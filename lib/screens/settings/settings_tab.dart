@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:spotimusic/constants/app_info.dart';
 import 'package:spotimusic/l10n/l10n.dart';
 import 'package:spotimusic/l10n/staged_strings.dart';
+import 'package:spotimusic/screens/ecosystem/ecosystem_hub_page.dart';
 import 'package:spotimusic/screens/settings/about_page.dart';
 import 'package:spotimusic/screens/settings/app_settings_page.dart';
 import 'package:spotimusic/screens/settings/appearance_settings_page.dart';
@@ -107,6 +108,29 @@ class _SettingsTabState extends ConsumerState<SettingsTab> {
             subtitle: l10n.settingsDonateSubtitle,
             keywords: const ['support', 'ko-fi', 'sponsor'],
             pageBuilder: () => const DonatePage(),
+          ),
+        ],
+      ),
+      _Group(
+        destinations: [
+          _Destination(
+            icon: Icons.hub_outlined,
+            title: 'Ecosystem',
+            subtitle:
+                'Account, favorites, history, analytics, cloud sync',
+            keywords: const [
+              'ecosystem',
+              'account',
+              'login',
+              'guest',
+              'favorites',
+              'history',
+              'analytics',
+              'recap',
+              'sync',
+              'cloud',
+            ],
+            pageBuilder: () => const EcosystemHubPage(),
           ),
         ],
       ),
