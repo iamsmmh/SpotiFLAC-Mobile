@@ -276,6 +276,9 @@ void main() {
 
       await service.continueAsGuest();
       await service.signOut();
+      // Broadcast delivery to the async* changes stream is scheduled as a
+      // microtask after signOut completes; pump once before asserting.
+      await Future<void>.delayed(Duration.zero);
       expect(seen, contains(AccountStatus.guest));
       expect(seen.last, AccountStatus.signedOut);
     });

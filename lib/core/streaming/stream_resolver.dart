@@ -156,6 +156,9 @@ class HlsMasterPlaylist {
       }
     }
 
+    // Stable, useful order: best (highest-bandwidth) variant first, so
+    // consumers can take variants.first as "top quality" without sorting.
+    variants.sort((a, b) => b.bandwidthBps.compareTo(a.bandwidthBps));
     return HlsMasterPlaylist(variants: variants);
   }
 

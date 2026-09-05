@@ -43,6 +43,10 @@ List<int> chacha20Block(
         (nonce[5] << 8) |
         (nonce[6] << 16) |
         (nonce[7] << 24),
+    nonce[8] |
+        (nonce[9] << 8) |
+        (nonce[10] << 16) |
+        (nonce[11] << 24),
   ];
 
   final working = List<int>.of(state);

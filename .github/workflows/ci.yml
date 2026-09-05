@@ -186,6 +186,25 @@ jobs:
           if m:
               print('::error::' + m.group(0).replace('%', '%25').replace('\n', '%0A'))
           PY
+          # PR comment with every failing test title — the Checks API caps
+          # annotations at 10, which hides failures when more tests fail.
+          if [ -n "$PR_NUMBER" ] && [ -n "$GITHUB_TOKEN" ]; then
+            {
+              echo '## flutter test failed'
+              echo '```'
+              grep -oE '::group::❌.*' test.log | sed 's/^::group::❌ //' | sort -u
+              grep -E '(Some tests failed|[0-9]+ tests? passed)' test.log | tail -1
+              echo '```'
+            } > failing_tests.md
+            body=$(cat failing_tests.md)
+            payload=$(jq -n --arg b "$body" '{body: $b}')
+            curl -fsS -X POST \
+              -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -d "$payload" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+              > /dev/null || true
+          fi
           fi
           exit "$status"
   go:
