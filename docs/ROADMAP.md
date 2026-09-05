@@ -77,7 +77,9 @@ provider-id map, duplicate merging — the "ONE TRACK" backbone
 
 ## 21–23. Radio, recommendations, Discover
 ✅ explore/home feed, genre browsing, recently played (existing)
-🧱 recommendation engine (stats now tracked locally, privacy-first)
+🚀 recommendation engine: provider port + on-device engine (recently/frequently
+played, artist affinity, daily discovery mix) + For You screen (stats privacy-first, fully local)
+🧱 remote/extension-backed recommendation providers (port is ready, none bundled)
 
 ## 24. Listening statistics
 🚀 `ListeningStats` (plays, skips, listened time, per-day buckets, streak) persisted locally

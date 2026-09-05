@@ -5,7 +5,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:spotimusic/core/sync/sync_entities.dart';
 import 'package:spotimusic/models/track.dart';
+import 'package:spotimusic/providers/sync_provider.dart';
 import 'package:spotimusic/services/ffmpeg_service.dart';
 import 'package:spotimusic/services/library_collections_database.dart';
 
@@ -43,6 +45,24 @@ String artistCollectionKey({
             ? trimmedArtistId.split(':').first.toLowerCase()
             : 'builtin');
   return '$source:${_stripCollectionResourcePrefix(trimmedArtistId)}';
+}
+
+/// Stable identity for a favorited album, mirroring [artistCollectionKey]:
+/// the provider namespace owns the prefix so the same album browsed through
+/// two extensions stays two entries, while re-visits through one extension
+/// dedupe exactly.
+String albumCollectionKey({
+  required String albumId,
+  required String? providerId,
+}) {
+  final trimmedAlbumId = albumId.trim();
+  final trimmedProviderId = providerId?.trim();
+  final source = trimmedProviderId != null && trimmedProviderId.isNotEmpty
+      ? trimmedProviderId.toLowerCase()
+      : (trimmedAlbumId.contains(':')
+            ? trimmedAlbumId.split(':').first.toLowerCase()
+            : 'builtin');
+  return '$source:${_stripCollectionResourcePrefix(trimmedAlbumId)}';
 }
 
 class CollectionTrackEntry {
@@ -109,6 +129,57 @@ class CollectionArtistEntry {
       artistId: artistId,
       providerId: providerId,
       name: json['name'] as String? ?? '',
+      imageUrl: json['imageUrl'] as String?,
+      addedAt: DateTime.tryParse(addedAtRaw ?? '') ?? DateTime.now(),
+    );
+  }
+}
+
+class CollectionAlbumEntry {
+  final String key;
+  final String albumId;
+  final String? providerId;
+  final String name;
+  final String? artistName;
+  final String? artistId;
+  final String? imageUrl;
+  final DateTime addedAt;
+
+  const CollectionAlbumEntry({
+    required this.key,
+    required this.albumId,
+    required this.providerId,
+    required this.name,
+    this.artistName,
+    this.artistId,
+    this.imageUrl,
+    required this.addedAt,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'key': key,
+    'albumId': albumId,
+    'providerId': providerId,
+    'name': name,
+    if (artistName != null) 'artistName': artistName,
+    if (artistId != null) 'artistId': artistId,
+    'imageUrl': imageUrl,
+    'addedAt': addedAt.toIso8601String(),
+  };
+
+  factory CollectionAlbumEntry.fromJson(Map<String, dynamic> json) {
+    final albumId = json['albumId'] as String;
+    final providerId = json['providerId'] as String?;
+    final addedAtRaw = json['addedAt'] as String?;
+    return CollectionAlbumEntry(
+      key:
+          json['key'] as String? ??
+          albumCollectionKey(albumId: albumId, providerId: providerId),
+      albumId: albumId,
+      providerId: providerId,
+      name: json['name'] as String? ?? '',
+      artistName: json['artistName'] as String?,
+      artistId: json['artistId'] as String?,
       imageUrl: json['imageUrl'] as String?,
       addedAt: DateTime.tryParse(addedAtRaw ?? '') ?? DateTime.now(),
     );
@@ -262,10 +333,12 @@ class LibraryCollectionsState {
   final List<CollectionTrackEntry> loved;
   final List<UserPlaylistCollection> playlists;
   final List<CollectionArtistEntry> favoriteArtists;
+  final List<CollectionAlbumEntry> favoriteAlbums;
   final bool isLoaded;
   final Set<String> _wishlistKeys;
   final Set<String> _lovedKeys;
   final Set<String> _favoriteArtistKeys;
+  final Set<String> _favoriteAlbumKeys;
   final Map<String, UserPlaylistCollection> _playlistsById;
   final Set<String> _allPlaylistTrackKeys;
 
@@ -274,10 +347,12 @@ class LibraryCollectionsState {
     this.loved = const [],
     this.playlists = const [],
     this.favoriteArtists = const [],
+    this.favoriteAlbums = const [],
     this.isLoaded = false,
     Set<String>? wishlistKeys,
     Set<String>? lovedKeys,
     Set<String>? favoriteArtistKeys,
+    Set<String>? favoriteAlbumKeys,
     Map<String, UserPlaylistCollection>? playlistsById,
     Set<String>? allPlaylistTrackKeys,
   }) : _wishlistKeys =
@@ -286,6 +361,8 @@ class LibraryCollectionsState {
        _favoriteArtistKeys =
            favoriteArtistKeys ??
            favoriteArtists.map((entry) => entry.key).toSet(),
+       _favoriteAlbumKeys =
+           favoriteAlbumKeys ?? favoriteAlbums.map((entry) => entry.key).toSet(),
        _playlistsById =
            playlistsById ??
            Map.fromEntries(
@@ -298,6 +375,7 @@ class LibraryCollectionsState {
   int get lovedCount => loved.length;
   int get playlistCount => playlists.length;
   int get favoriteArtistCount => favoriteArtists.length;
+  int get favoriteAlbumCount => favoriteAlbums.length;
 
   bool isInWishlist(Track track) {
     final key = trackCollectionKey(track);
@@ -329,6 +407,15 @@ class LibraryCollectionsState {
     return _favoriteArtistKeys.contains(artistKey);
   }
 
+  bool isFavoriteAlbum({required String albumId, required String? providerId}) {
+    final key = albumCollectionKey(albumId: albumId, providerId: providerId);
+    return _favoriteAlbumKeys.contains(key);
+  }
+
+  bool containsFavoriteAlbumKey(String albumKey) {
+    return _favoriteAlbumKeys.contains(albumKey);
+  }
+
   UserPlaylistCollection? playlistById(String playlistId) {
     return _playlistsById[playlistId];
   }
@@ -350,12 +437,14 @@ class LibraryCollectionsState {
     List<CollectionTrackEntry>? loved,
     List<UserPlaylistCollection>? playlists,
     List<CollectionArtistEntry>? favoriteArtists,
+    List<CollectionAlbumEntry>? favoriteAlbums,
     bool? isLoaded,
   }) {
     final nextWishlist = wishlist ?? this.wishlist;
     final nextLoved = loved ?? this.loved;
     final nextPlaylists = playlists ?? this.playlists;
     final nextFavoriteArtists = favoriteArtists ?? this.favoriteArtists;
+    final nextFavoriteAlbums = favoriteAlbums ?? this.favoriteAlbums;
     final keepWishlistIndex = identical(nextWishlist, this.wishlist);
     final keepLovedIndex = identical(nextLoved, this.loved);
     final keepPlaylistIndex = identical(nextPlaylists, this.playlists);
@@ -363,16 +452,22 @@ class LibraryCollectionsState {
       nextFavoriteArtists,
       this.favoriteArtists,
     );
+    final keepFavoriteAlbumIndex = identical(
+      nextFavoriteAlbums,
+      this.favoriteAlbums,
+    );
 
     return LibraryCollectionsState(
       wishlist: nextWishlist,
       loved: nextLoved,
       playlists: nextPlaylists,
       favoriteArtists: nextFavoriteArtists,
+      favoriteAlbums: nextFavoriteAlbums,
       isLoaded: isLoaded ?? this.isLoaded,
       wishlistKeys: keepWishlistIndex ? _wishlistKeys : null,
       lovedKeys: keepLovedIndex ? _lovedKeys : null,
       favoriteArtistKeys: keepFavoriteArtistIndex ? _favoriteArtistKeys : null,
+      favoriteAlbumKeys: keepFavoriteAlbumIndex ? _favoriteAlbumKeys : null,
       playlistsById: keepPlaylistIndex ? _playlistsById : null,
       allPlaylistTrackKeys: keepPlaylistIndex ? _allPlaylistTrackKeys : null,
     );
@@ -383,6 +478,7 @@ class LibraryCollectionsState {
     'loved': loved.map((e) => e.toJson()).toList(),
     'playlists': playlists.map((e) => e.toJson()).toList(),
     'favoriteArtists': favoriteArtists.map((e) => e.toJson()).toList(),
+    'favoriteAlbums': favoriteAlbums.map((e) => e.toJson()).toList(),
   };
 
   factory LibraryCollectionsState.fromJson(Map<String, dynamic> json) {
@@ -390,6 +486,7 @@ class LibraryCollectionsState {
     final lovedRaw = (json['loved'] as List?) ?? const [];
     final playlistsRaw = (json['playlists'] as List?) ?? const [];
     final favoriteArtistsRaw = (json['favoriteArtists'] as List?) ?? const [];
+    final favoriteAlbumsRaw = (json['favoriteAlbums'] as List?) ?? const [];
 
     return LibraryCollectionsState(
       wishlist: wishlistRaw
@@ -415,6 +512,12 @@ class LibraryCollectionsState {
           .whereType<Map<Object?, Object?>>()
           .map(
             (e) => CollectionArtistEntry.fromJson(Map<String, dynamic>.from(e)),
+          )
+          .toList(growable: false),
+      favoriteAlbums: favoriteAlbumsRaw
+          .whereType<Map<Object?, Object?>>()
+          .map(
+            (e) => CollectionAlbumEntry.fromJson(Map<String, dynamic>.from(e)),
           )
           .toList(growable: false),
       isLoaded: true,
@@ -484,6 +587,14 @@ class LibraryCollectionsNotifier extends Notifier<LibraryCollectionsState> {
         }
       }
 
+      final favoriteAlbums = <CollectionAlbumEntry>[];
+      for (final row in snapshot.favoriteAlbumRows) {
+        final parsed = _parseAlbumEntryRow(row);
+        if (parsed != null) {
+          favoriteAlbums.add(parsed);
+        }
+      }
+
       final trackKeysByPlaylist = <String, Set<String>>{};
       for (final row in snapshot.playlistTrackRows) {
         final playlistId = row['playlist_id'] as String?;
@@ -534,6 +645,7 @@ class LibraryCollectionsNotifier extends Notifier<LibraryCollectionsState> {
         loved: loved,
         playlists: playlists,
         favoriteArtists: favoriteArtists,
+        favoriteAlbums: favoriteAlbums,
         isLoaded: true,
       );
     } catch (_) {
@@ -625,6 +737,28 @@ class LibraryCollectionsNotifier extends Notifier<LibraryCollectionsState> {
     }
   }
 
+  CollectionAlbumEntry? _parseAlbumEntryRow(Map<String, dynamic> row) {
+    final key = row['album_key'] as String?;
+    final albumJson = row['album_json'] as String?;
+    if (key == null || key.isEmpty || albumJson == null || albumJson.isEmpty) {
+      return null;
+    }
+
+    try {
+      final decoded = jsonDecode(albumJson);
+      if (decoded is! Map) return null;
+      final map = Map<String, dynamic>.from(decoded);
+      final addedAtRaw = row['added_at'] as String?;
+      return CollectionAlbumEntry.fromJson({
+        ...map,
+        'key': key,
+        'addedAt': map['addedAt'] ?? addedAtRaw,
+      });
+    } catch (_) {
+      return null;
+    }
+  }
+
   bool _replacePlaylistById(
     String playlistId,
     UserPlaylistCollection Function(UserPlaylistCollection playlist) update,
@@ -668,6 +802,7 @@ class LibraryCollectionsNotifier extends Notifier<LibraryCollectionsState> {
           state,
         ).where((entry) => entry.key != key).toList(growable: false),
       );
+      _recordFavoritesSyncDelete(key);
       return false;
     }
 
@@ -682,7 +817,30 @@ class LibraryCollectionsNotifier extends Notifier<LibraryCollectionsState> {
       addedAt: entry.addedAt.toIso8601String(),
     );
     state = withList([entry, ...select(state)]);
+    _recordFavoritesSyncWrite(key, <String, Object?>{
+      'kind': 'track',
+      'entry': entry.toJson(),
+    });
     return true;
+  }
+
+  /// Cloud-sync outbox hooks (Phase 6). Fire-and-forget and fail-safe: when
+  /// no sync backend is configured these no-op, and a sync failure must never
+  /// break the favorites UX.
+  void _recordFavoritesSyncWrite(String key, Map<String, Object?> payload) {
+    try {
+      ref
+          .read(syncStateProvider.notifier)
+          .recordLocalWrite(SyncScope.favorites, key, payload);
+    } catch (_) {}
+  }
+
+  void _recordFavoritesSyncDelete(String key) {
+    try {
+      ref
+          .read(syncStateProvider.notifier)
+          .recordLocalDelete(SyncScope.favorites, key);
+    } catch (_) {}
   }
 
   Future<bool> toggleWishlist(Track track) => _toggleTrackEntry(
@@ -738,8 +896,71 @@ class LibraryCollectionsNotifier extends Notifier<LibraryCollectionsState> {
     );
     final updated = [entry, ...state.favoriteArtists];
     state = state.copyWith(favoriteArtists: updated);
+    _recordFavoritesSyncWrite(key, <String, Object?>{
+      'kind': 'artist',
+      'entry': entry.toJson(),
+    });
     return true;
   }
+
+  /// Toggles an album favorite. Returns `true` when the album is now
+  /// favorited, `false` when it was removed. Behavior intentionally mirrors
+  /// [toggleFavoriteArtist] (identity upstream of [_stripCollectionResourcePrefix],
+  /// newest-first state, SQLite write-through).
+  Future<bool> toggleFavoriteAlbum({
+    required String albumId,
+    required String? providerId,
+    required String name,
+    String? artistName,
+    String? artistId,
+    String? imageUrl,
+  }) async {
+    await _ensureLoaded();
+    final key = albumCollectionKey(albumId: albumId, providerId: providerId);
+    final sourceSeparator = key.indexOf(':');
+    final source = sourceSeparator > 0 ? key.substring(0, sourceSeparator) : '';
+    final trimmedProviderId = providerId?.trim();
+    final effectiveProviderId =
+        trimmedProviderId != null && trimmedProviderId.isNotEmpty
+        ? trimmedProviderId
+        : (source.isNotEmpty && source != 'builtin' ? source : null);
+    if (state.containsFavoriteAlbumKey(key)) {
+      await removeFavoriteAlbum(key);
+      return false;
+    }
+
+    final entry = CollectionAlbumEntry(
+      key: key,
+      albumId: _stripCollectionResourcePrefix(albumId),
+      providerId: effectiveProviderId,
+      name: name,
+      artistName: artistName,
+      artistId: artistId,
+      imageUrl: imageUrl,
+      addedAt: DateTime.now(),
+    );
+    await _db.upsertFavoriteAlbumEntry(
+      albumKey: key,
+      albumJson: jsonEncode(entry.toJson()),
+      addedAt: entry.addedAt.toIso8601String(),
+    );
+    final updated = [entry, ...state.favoriteAlbums];
+    state = state.copyWith(favoriteAlbums: updated);
+    _recordFavoritesSyncWrite(key, <String, Object?>{
+      'kind': 'album',
+      'entry': entry.toJson(),
+    });
+    return true;
+  }
+
+  Future<void> removeFavoriteAlbum(String albumKey) => _removeEntry(
+    albumKey,
+    contains: (key) => state.containsFavoriteAlbumKey(key),
+    select: (state) => state.favoriteAlbums,
+    keyOf: (entry) => entry.key,
+    withList: (list) => state.copyWith(favoriteAlbums: list),
+    dbDelete: _db.deleteFavoriteAlbumEntry,
+  );
 
   Future<void> _removeEntry<T>(
     String key, {
@@ -758,6 +979,7 @@ class LibraryCollectionsNotifier extends Notifier<LibraryCollectionsState> {
         state,
       ).where((entry) => keyOf(entry) != key).toList(growable: false),
     );
+    _recordFavoritesSyncDelete(key);
   }
 
   Future<void> removeFavoriteArtist(String artistKey) => _removeEntry(

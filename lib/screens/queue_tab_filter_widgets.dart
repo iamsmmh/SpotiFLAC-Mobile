@@ -226,7 +226,10 @@ extension _QueueTabFilterWidgets on _QueueTabState {
 
     final leadCount = activeDownloadIds.length + bridgeIds.length;
     final collectionEntries = filterMode == 'all'
-        ? _getVisibleCollectionEntries(collectionState)
+        ? _getVisibleCollectionEntries(
+            collectionState,
+            forYouItemCount: _forYouItemCount,
+          )
         : const <_CollectionEntry>[];
     final collectionCount = collectionEntries.length;
 

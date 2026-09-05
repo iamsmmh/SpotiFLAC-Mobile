@@ -2525,9 +2525,15 @@
   "@librarySourceScanCount": {
     "description": "Live progress for one library folder scan",
     "placeholders": {
-      "scanned": {"type": "int"},
-      "total": {"type": "int"},
-      "progress": {"type": "String"}
+      "scanned": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      },
+      "progress": {
+        "type": "String"
+      }
     }
   },
   "libraryExternalStorage": "External storage",
@@ -3246,8 +3252,12 @@
   "@trackReEnrichReviewSubtitle": {
     "description": "Summary shown above proposed batch metadata changes",
     "placeholders": {
-      "changeCount": {"type": "int"},
-      "trackCount": {"type": "int"}
+      "changeCount": {
+        "type": "int"
+      },
+      "trackCount": {
+        "type": "int"
+      }
     }
   },
   "trackReEnrichNoChanges": "No metadata changes were found for the selected tracks.",
@@ -6444,5 +6454,155 @@
   "settingsGroupHelp": "About & support",
   "@settingsGroupHelp": {
     "description": "Settings group covering the about page and donations"
+  },
+  "collectionFavoriteAlbums": "Favorite Albums",
+  "@collectionFavoriteAlbums": {
+    "description": "Collection folder title for favorite albums"
+  },
+  "collectionFavoriteAlbumsEmptyTitle": "No favorite albums yet",
+  "@collectionFavoriteAlbumsEmptyTitle": {
+    "description": "Empty state title for favorite albums screen"
+  },
+  "collectionFavoriteAlbumsEmptySubtitle": "Albums you mark as favorite will appear here.",
+  "@collectionFavoriteAlbumsEmptySubtitle": {
+    "description": "Empty state subtitle for favorite albums screen"
+  },
+  "collectionAddedToFavoriteAlbums": "\"{albumName}\" added to Favorite Albums",
+  "@collectionAddedToFavoriteAlbums": {
+    "description": "Snackbar after adding an album to favorite albums",
+    "placeholders": {
+      "albumName": {
+        "type": "String"
+      }
+    }
+  },
+  "collectionRemovedFromFavoriteAlbums": "\"{albumName}\" removed from Favorite Albums",
+  "@collectionRemovedFromFavoriteAlbums": {
+    "description": "Snackbar after removing an album from favorite albums",
+    "placeholders": {
+      "albumName": {
+        "type": "String"
+      }
+    }
+  },
+  "albumOptionAddToFavorites": "Add to favorite albums",
+  "@albumOptionAddToFavorites": {
+    "description": "Tooltip/menu action: add this album to favorite albums"
+  },
+  "albumOptionRemoveFromFavorites": "Remove from favorite albums",
+  "@albumOptionRemoveFromFavorites": {
+    "description": "Tooltip/menu action: remove this album from favorite albums"
+  },
+  "collectionAlbumCount": "{count, plural, =1{1 album} other{{count} albums}}",
+  "@collectionAlbumCount": {
+    "description": "Album count label for favorite albums",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "backupContentsAlbums": "{count, plural, =1{1 favorite album} other{{count} favorite albums}}",
+  "@backupContentsAlbums": {
+    "description": "Backup contents row for favorite albums count",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "homeRecentSearches": "Recent searches",
+  "@homeRecentSearches": {
+    "description": "Section title above recent search queries on the home tab"
+  },
+  "forYouTitle": "For You",
+  "@forYouTitle": {
+    "description": "Title of the personalized recommendations screen"
+  },
+  "forYouEmptyTitle": "Nothing to recommend yet",
+  "@forYouEmptyTitle": {
+    "description": "Empty state title for the For You screen"
+  },
+  "forYouEmptySubtitle": "Play music and your personalized picks will appear here.",
+  "@forYouEmptySubtitle": {
+    "description": "Empty state subtitle for the For You screen"
+  },
+  "forYouSectionRecentlyPlayed": "Recently played",
+  "@forYouSectionRecentlyPlayed": {
+    "description": "Recommendations section: recently played tracks"
+  },
+  "forYouSectionFrequentlyPlayed": "Frequently played",
+  "@forYouSectionFrequentlyPlayed": {
+    "description": "Recommendations section: most played tracks"
+  },
+  "forYouSectionArtists": "Artists for you",
+  "@forYouSectionArtists": {
+    "description": "Recommendations section: similar/favorite artists"
+  },
+  "forYouSectionDiscoveryMix": "Discovery mix",
+  "@forYouSectionDiscoveryMix": {
+    "description": "Recommendations section: rotating discovery mix"
+  },
+  "syncTitle": "Cloud sync",
+  "@syncTitle": {
+    "description": "Settings entry title for optional cloud synchronization"
+  },
+  "syncSubtitle": "Optional account sync for favorites, playlists and settings",
+  "@syncSubtitle": {
+    "description": "Settings entry subtitle for cloud synchronization"
+  },
+  "syncStatusDisabled": "Not configured",
+  "@syncStatusDisabled": {
+    "description": "Cloud sync status: no backend configured"
+  },
+  "syncStatusSignedOut": "Signed out",
+  "@syncStatusSignedOut": {
+    "description": "Cloud sync status: signed out"
+  },
+  "syncStatusIdle": "Up to date",
+  "@syncStatusIdle": {
+    "description": "Cloud sync status: idle / everything synchronized"
+  },
+  "syncStatusSyncing": "Syncing…",
+  "@syncStatusSyncing": {
+    "description": "Cloud sync status: sync cycle running"
+  },
+  "syncStatusError": "Sync error",
+  "@syncStatusError": {
+    "description": "Cloud sync status: last cycle failed"
+  },
+  "syncUnavailableMessage": "No sync backend is configured in this build. Firebase, Supabase and self-hosted adapters plug in here (docs/CLOUD_SYNC.md).",
+  "@syncUnavailableMessage": {
+    "description": "Cloud sync page message when no provider adapter is registered"
+  },
+  "syncLastSync": "Last sync: {time}",
+  "@syncLastSync": {
+    "description": "Cloud sync page: timestamp of last successful sync",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "syncPendingChanges": "{count, plural, =1{1 change waiting to upload} other{{count} changes waiting to upload}}",
+  "@syncPendingChanges": {
+    "description": "Cloud sync page: number of offline changes pending upload",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "syncSignIn": "Sign in",
+  "@syncSignIn": {
+    "description": "Cloud sync page: sign-in button"
+  },
+  "syncSignOut": "Sign out",
+  "@syncSignOut": {
+    "description": "Cloud sync page: sign-out button"
+  },
+  "syncNow": "Sync now",
+  "@syncNow": {
+    "description": "Cloud sync page: manual sync button"
   }
 }

@@ -23,6 +23,7 @@ import 'package:spotimusic/providers/extension_provider.dart';
 import 'package:spotimusic/providers/local_library_provider.dart';
 import 'package:spotimusic/providers/media_browse_provider.dart';
 import 'package:spotimusic/providers/playback_statistics_provider.dart';
+import 'package:spotimusic/providers/search_history_provider.dart';
 import 'package:spotimusic/providers/runtime_profile_provider.dart';
 import 'package:spotimusic/providers/settings_provider.dart';
 import 'package:spotimusic/providers/multi_provider_stream_provider.dart';
@@ -464,6 +465,10 @@ class _EagerInitializationState extends ConsumerState<_EagerInitialization>
     final statsNotifier = ref.read(playbackStatisticsProvider.notifier);
     unawaited(statsNotifier.load());
     installPlaybackStatisticsRecording(ref);
+
+    // Search history (Phase 9): restore the on-device query log that powers
+    // recent searches and local suggestions on the Home tab.
+    unawaited(ref.read(searchHistoryProvider.notifier).load());
 
     // Android Auto / AVRCP browse tree (queue, recents, loved, playlists,
     // albums, songs) backed by the offline stores; voice search included.

@@ -33,6 +33,10 @@ exists", "cover/sidecar writes are non-atomic" — both fixed since).
 | Opt-in read-only **LAN web player** for the download folder (Settings → Files) | ✅ **new in this pass** |
 | `spotimusic://` deep links (open/search/track-id forms, Android + iOS) | ✅ **new in this pass** |
 | Re-enrich never re-embeds filesystem artifacts (issue #562 hardening) | ✅ **new in this pass** |
+| Favorite albums (album page bookmark, Library folder, DB v3, backup) | ✅ **new in this pass** |
+| For You: on-device recommendation engine + Library tile/screen (Phase 7) | ✅ **new in this pass** |
+| Search history + fuzzy local suggestions on Home (Phase 9) | ✅ **new in this pass** |
+| Cloud sync architecture: provider port, merge orchestrator, Settings page, adapter docs (Phase 6) | ✅ **new in this pass** (interfaces + local machinery; backend adapters pluggable) |
 
 ## Engineering gates
 
@@ -54,6 +58,14 @@ exists", "cover/sidecar writes are non-atomic" — both fixed since).
   skip cleanly.
 
 ## What still needs the user / provider side
+
+- **Cloud sync** ships as the adapter architecture (orchestrator, outbox,
+  settings page). Enabling it requires registering a `CloudSyncProvider`
+  (Firebase/Supabase/self-hosted) with real project credentials —
+  intentionally not bundled.
+- **Persistent stream-byte caching** (play counts as offline copy) is designed
+  in `ARCHITECTURE.md` but deferred: it must be validated against the
+  verified audio pipeline with device coverage before shipping.
 
 - **Downloads** require at least one download extension (now one tap away via
   setup or the Store card). There is intentionally no built-in download
