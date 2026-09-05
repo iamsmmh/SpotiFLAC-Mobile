@@ -8,9 +8,11 @@ import 'package:audio_session/audio_session.dart'
 import 'package:audioplayers/audioplayers.dart';
 import 'package:spotimusic/core/data/background_playback_policy.dart';
 import 'package:spotimusic/engine/audio_characteristics.dart';
+import 'package:spotimusic/engine/crossfade_policy.dart';
 import 'package:spotimusic/engine/gapless_policy.dart';
 import 'package:spotimusic/engine/replay_gain.dart';
 import 'package:spotimusic/services/app_state_database.dart';
+import 'package:spotimusic/services/media_browse_tree.dart';
 import 'package:spotimusic/services/platform_bridge.dart';
 import 'package:spotimusic/utils/int_utils.dart';
 import 'package:spotimusic/utils/logger.dart';
@@ -31,6 +33,7 @@ void updateMusicPlayerStrings({
 
 bool _playbackNormalizationEnabled = false;
 bool _playbackGaplessEnabled = true;
+CrossfadeSettings _playbackCrossfade = const CrossfadeSettings.off();
 MusicPlayerHandler? _activeMusicPlayerHandler;
 
 /// Enables/disables ReplayGain volume normalization and re-applies it to the
@@ -46,6 +49,14 @@ void setPlaybackNormalizationEnabled(bool enabled) {
 /// FLAC→FLAC (or other lossless) sequence splices without a silence gap.
 void setPlaybackGaplessEnabled(bool enabled) {
   _playbackGaplessEnabled = enabled;
+}
+
+/// Configures crossfading between consecutive queue items. The handler
+/// overlaps the tail of the playing track with the head of the next one on a
+/// second player and ramps both with an equal-power curve; see
+/// [CrossfadePolicy] for when smart mode skips the overlap.
+void setPlaybackCrossfade(CrossfadeSettings settings) {
+  _playbackCrossfade = settings;
 }
 
 /// Parses a dynamic value to a finite double, or returns null. Accepts [num]
@@ -100,6 +111,12 @@ class PlayableMedia {
   final double? albumGainDb;
   final double? trackPeak;
 
+  /// When a signed stream URL stops being valid (null = unknown/long-lived).
+  /// Carried from the resolved `StreamDescriptor` so the player can hand the
+  /// item back to the engine for a proactive refresh *before* the CDN starts
+  /// rejecting range requests mid-track.
+  final DateTime? expiresAt;
+
   const PlayableMedia({
     required this.id,
     required this.source,
@@ -120,6 +137,7 @@ class PlayableMedia {
     this.trackGainDb,
     this.albumGainDb,
     this.trackPeak,
+    this.expiresAt,
   });
 
   bool get isContentUri => source.startsWith('content://');
@@ -176,6 +194,7 @@ class PlayableMedia {
     if (trackGainDb != null) 'trackGainDb': trackGainDb,
     if (albumGainDb != null) 'albumGainDb': albumGainDb,
     if (trackPeak != null) 'trackPeak': trackPeak,
+    if (expiresAt != null) 'expiresAtMs': expiresAt!.millisecondsSinceEpoch,
   };
 
   static PlayableMedia? fromJson(Map<String, dynamic> json) {
@@ -207,7 +226,14 @@ class PlayableMedia {
       trackGainDb: readFiniteDouble(json['trackGainDb']),
       albumGainDb: readFiniteDouble(json['albumGainDb']),
       trackPeak: readFiniteDouble(json['trackPeak']),
+      expiresAt: _readEpochMs(json['expiresAtMs']),
     );
+  }
+
+  static DateTime? _readEpochMs(dynamic value) {
+    final ms = readPositiveInt(value);
+    if (ms == null) return null;
+    return DateTime.fromMillisecondsSinceEpoch(ms);
   }
 
   MediaItem toMediaItem({String? resolvedSource}) {
@@ -241,6 +267,8 @@ class PlayableMedia {
         if (trackGainDb != null) 'track_gain_db': trackGainDb,
         if (albumGainDb != null) 'album_gain_db': albumGainDb,
         if (trackPeak != null) 'track_peak': trackPeak,
+        if (expiresAt != null)
+          'expires_at_ms': expiresAt!.millisecondsSinceEpoch,
       },
     );
   }
@@ -348,7 +376,29 @@ Duration normalizedPlaybackResumePosition(
 
 class MusicPlayerHandler extends BaseAudioHandler
     with QueueHandler, SeekHandler {
-  final AudioPlayer _player = AudioPlayer(playerId: 'music-player');
+  /// The player carrying the *current* queue item. During a crossfade the
+  /// incoming track starts on the standby player and the two swap roles, so
+  /// every event handler filters on `identical(player, _player)`.
+  AudioPlayer _player = AudioPlayer(playerId: 'music-player');
+
+  /// Second player used for crossfades; created on first use and kept for
+  /// reuse (each swap parks the finished outgoing player here).
+  AudioPlayer? _standbyPlayer;
+
+  /// The fading-out player of an in-flight crossfade, or null.
+  _CrossfadeOutgoing? _outgoing;
+  Timer? _crossfadeTimer;
+
+  /// Play generation for which a crossfade was already triggered (so the
+  /// position stream cannot start a second one for the same track).
+  int _crossfadeTriggeredGeneration = -1;
+
+  /// Cached crossfade plan for the current play generation.
+  _CrossfadePlan? _crossfadePlan;
+
+  /// Normalisation volume applied to the current item; the fade ramps scale
+  /// against it so ReplayGain is preserved through the overlap.
+  double _activeNormalizationVolume = 1.0;
   AudioSession? _audioSession;
   final List<PlayableMedia> _media = [];
   final List<MediaItem> _queueItems = [];
@@ -395,6 +445,23 @@ class MusicPlayerHandler extends BaseAudioHandler
   static const Duration _positionPersistInterval = Duration(seconds: 10);
   static const int _maxResolvedPathCacheEntries = 64;
 
+  /// Proactive stream-URL refresh (see [PlayableMedia.expiresAt]). Armed per
+  /// play request for remote sources with a known expiry; cancelled on any
+  /// track change/stop so a stale timer can never refresh the wrong item.
+  Timer? _expiryRefreshTimer;
+  static const Duration _expiryRefreshLeadTime = Duration(minutes: 2);
+  static const Duration _expiryRefreshMinDelay = Duration(seconds: 30);
+
+  /// Expiry of the concrete stream a *deferred* queue item resolved to. The
+  /// engine reports it right after resolution (the deferred placeholder
+  /// itself carries no expiry).
+  final Map<String, DateTime> _deferredSourceExpiry = {};
+
+  /// Runtime (post-`play()`) failures already forwarded for the current play
+  /// generation. audioplayers may report the same underlying error more than
+  /// once (platform error + log event); the failover hook must run once.
+  int _runtimeFailureGeneration = -1;
+
   MusicPlayerHandler() {
     _activeMusicPlayerHandler = this;
     _init();
@@ -403,12 +470,21 @@ class MusicPlayerHandler extends BaseAudioHandler
   void _init() {
     if (_initialized) return;
     _initialized = true;
-    _player.setReleaseMode(ReleaseMode.stop);
-    unawaited(_player.setAudioContext(_musicAudioContext));
+    _bindPlayer(_player);
     unawaited(_configureAudioSession());
+  }
+
+  /// Subscribes to one engine player. Events are only acted upon while that
+  /// player is the active [_player]; the outgoing half of a crossfade is
+  /// deliberately mute (its completion/stop must never advance the queue).
+  void _bindPlayer(AudioPlayer player) {
+    player.setReleaseMode(ReleaseMode.stop);
+    unawaited(player.setAudioContext(_musicAudioContext));
+    bool active() => identical(player, _player);
 
     _subscriptions.addAll([
-      _player.onPlayerStateChanged.listen((state) {
+      player.onPlayerStateChanged.listen((state) {
+        if (!active()) return;
         if (_switchingGeneration != 0 &&
             (state == PlayerState.stopped ||
                 state == PlayerState.completed ||
@@ -424,17 +500,108 @@ class MusicPlayerHandler extends BaseAudioHandler
         }
         _broadcastState(playerState: state);
       }),
-      _player.onPositionChanged.listen(_handlePositionChanged),
-      _player.onDurationChanged.listen((duration) {
+      player.onPositionChanged.listen((position) {
+        if (active()) _handlePositionChanged(position);
+      }),
+      player.onDurationChanged.listen((duration) {
+        if (!active()) return;
         final current = mediaItem.value;
         if (current != null && duration > Duration.zero) {
           mediaItem.add(current.copyWith(duration: duration));
         }
       }),
-      _player.onPlayerComplete.listen((_) {
+      player.onPlayerComplete.listen((_) {
+        if (!active()) return;
         unawaited(_handlePlayerComplete());
       }),
+      // Runtime failures (CDN drop, expired signed URL, decoder error) arrive
+      // on the event stream's *error* channel after play() has already
+      // returned. Without this listener they were only logged by the plugin
+      // and a streamed track silently stopped; now they reach the streaming
+      // engine's failover hook exactly like a synchronous play() failure.
+      player.eventStream.listen(
+        (_) {},
+        onError: (Object error, StackTrace stack) {
+          if (active()) _handleRuntimePlaybackError(error);
+        },
+      ),
     ]);
+  }
+
+  /// Forwards an asynchronous player error for the current item to the
+  /// failover hook (once per play generation) and reflects the stop in the
+  /// broadcast state so the UI never shows "playing" for a dead source.
+  void _handleRuntimePlaybackError(Object error) {
+    if (_disposed) return;
+    if (_index < 0 || _index >= _media.length) return;
+    // Errors raised while a source is still being prepared also fail the
+    // pending play() future (audioplayers awaits the prepared event), and
+    // that path already reports to the failover hook. Only *post*-prepare
+    // failures are handled here.
+    if (_switchingGeneration != 0 || !_sourceReady) return;
+    final generation = _playRequestGeneration;
+    if (_runtimeFailureGeneration == generation) return;
+    _runtimeFailureGeneration = generation;
+    final media = _media[_index];
+    _log.e('Runtime playback error for ${media.title}: $error');
+    _cancelExpiryRefresh();
+    _sourceReady = false;
+    final listener = playbackFailureListener;
+    if (listener != null && (media.isRemoteHttp || media.isDeferredStream)) {
+      listener(media, error);
+    }
+    _broadcastState(playerState: PlayerState.stopped);
+  }
+
+  void _cancelExpiryRefresh() {
+    _expiryRefreshTimer?.cancel();
+    _expiryRefreshTimer = null;
+  }
+
+  /// Records when the stream a deferred item just resolved to will expire
+  /// (null clears it). Called by the streaming engine from its deferred
+  /// resolver, before the handler starts the source.
+  void noteDeferredSourceExpiry(String mediaId, DateTime? expiresAt) {
+    if (expiresAt == null) {
+      _deferredSourceExpiry.remove(mediaId);
+      return;
+    }
+    if (_deferredSourceExpiry.length > 64) _deferredSourceExpiry.clear();
+    _deferredSourceExpiry[mediaId] = expiresAt;
+  }
+
+  /// Arms a one-shot refresh for a remote source whose signed URL expires at
+  /// a known time. The refresh is delegated to the engine through the same
+  /// failure hook used for failover, with a synthetic "expired" error, so the
+  /// engine re-resolves and swaps the source at the live position.
+  void _armExpiryRefresh(PlayableMedia media, String resolved, int generation) {
+    _cancelExpiryRefresh();
+    final expiresAt =
+        media.expiresAt ??
+        (media.isDeferredStream ? _deferredSourceExpiry[media.id] : null);
+    if (expiresAt == null || !_isHttpSource(resolved)) return;
+    if (playbackFailureListener == null) return;
+    final now = DateTime.now();
+    // Already expired: the source is played as-is and a real error (not a
+    // proactive refresh) drives failover, so a short-lived replacement URL
+    // can never loop refresh -> resolve -> refresh.
+    if (!expiresAt.isAfter(now)) return;
+    var delay = expiresAt.subtract(_expiryRefreshLeadTime).difference(now);
+    if (delay < _expiryRefreshMinDelay) delay = _expiryRefreshMinDelay;
+    _expiryRefreshTimer = Timer(delay, () {
+      _expiryRefreshTimer = null;
+      if (_disposed || generation != _playRequestGeneration) return;
+      if (_index < 0 || _index >= _media.length) return;
+      if (!identical(_media[_index], media)) return;
+      // Only refresh while audio is actually running; a paused stream is
+      // refreshed lazily by the next play() -> engine resolution.
+      if (_player.state != PlayerState.playing) return;
+      _log.i('Stream URL for ${media.title} is about to expire; refreshing');
+      playbackFailureListener?.call(
+        media,
+        const StreamUrlExpiringSignal(),
+      );
+    });
   }
 
   /// Configures the OS audio session and reacts to interruptions (e.g. another
@@ -539,7 +706,9 @@ class MusicPlayerHandler extends BaseAudioHandler
   Future<void> _pauseForFocusLoss({required String reason}) async {
     _log.i('Pausing internal player because of $reason');
     _playRequestGeneration++;
+    _cancelExpiryRefresh();
     _switchingGeneration = 0;
+    _endCrossfade();
     try {
       await _player.pause();
     } catch (e) {
@@ -634,6 +803,8 @@ class MusicPlayerHandler extends BaseAudioHandler
       return;
     }
 
+    _maybeStartCrossfade(position);
+
     final now = DateTime.now();
     final lastPersistAt = _lastPeriodicPersistAt;
     if (lastPersistAt != null &&
@@ -659,6 +830,226 @@ class MusicPlayerHandler extends BaseAudioHandler
       sameTransport: previous.isRemoteHttp == next.isRemoteHttp,
     );
     return decision.canSkipSourceTeardown;
+  }
+
+  // ---- Crossfade -----------------------------------------------------------
+
+  /// Next queue index playback would advance to when the current item ends,
+  /// or null when it would stop (end of queue, repeat-one, shuffle cycle
+  /// complete). Mirrors [_onComplete] / [_advanceShuffled] without side
+  /// effects, except that shuffle picks are random per call.
+  int? _peekNextIndex() {
+    if (_media.isEmpty || _index < 0 || _index >= _media.length) return null;
+    if (_repeatMode == AudioServiceRepeatMode.one) return null;
+    if (_shuffle) {
+      if (_media.length <= 1) return null;
+      if (_shufflePlayed.length >= _media.length &&
+          _repeatMode != AudioServiceRepeatMode.all) {
+        return null;
+      }
+      return _pickNextShuffle();
+    }
+    if (_index < _media.length - 1) return _index + 1;
+    if (_repeatMode == AudioServiceRepeatMode.all) return 0;
+    return null;
+  }
+
+  Duration? _currentTrackDuration(PlayableMedia media) {
+    final item = mediaItem.value;
+    if (item != null && item.id == media.id) {
+      final duration = item.duration;
+      if (duration != null && duration > Duration.zero) return duration;
+    }
+    final duration = media.duration;
+    return duration != null && duration > Duration.zero ? duration : null;
+  }
+
+  /// Plans (and caches per play generation) the crossfade into the next
+  /// item. Null when this transition must not crossfade.
+  _CrossfadePlan? _crossfadePlanFor(int generation, PlayableMedia current) {
+    final cached = _crossfadePlan;
+    if (cached != null &&
+        cached.generation == generation &&
+        cached.nextIndex < _media.length &&
+        _media[cached.nextIndex].id == cached.nextMediaId &&
+        cached.settings == _playbackCrossfade &&
+        cached.shuffle == _shuffle &&
+        cached.repeatMode == _repeatMode) {
+      return cached.decision.shouldCrossfade ? cached : null;
+    }
+    final settings = _playbackCrossfade;
+    final nextIndex = settings.enabled ? _peekNextIndex() : null;
+    if (nextIndex == null) {
+      _crossfadePlan = null;
+      return null;
+    }
+    final next = _media[nextIndex];
+    final duration = _currentTrackDuration(current);
+    // An unknown duration is re-evaluated on later ticks (the engine may
+    // still report it); every other verdict is final for this generation.
+    if (duration == null) return null;
+    final decision = const CrossfadePolicy().decide(
+      settings: settings,
+      trackDuration: duration,
+      current: current.characteristics,
+      next: next.characteristics,
+      sameTransport: current.isRemoteHttp == next.isRemoteHttp,
+      gaplessEnabled: _playbackGaplessEnabled,
+      sameAlbum:
+          current.album.trim().isNotEmpty &&
+          current.album.trim().toLowerCase() ==
+              next.album.trim().toLowerCase(),
+      sequentialNeighbours: !_shuffle && nextIndex == _index + 1,
+      repeatOne: _repeatMode == AudioServiceRepeatMode.one,
+    );
+    final plan = _CrossfadePlan(
+      generation: generation,
+      nextIndex: nextIndex,
+      nextMediaId: next.id,
+      settings: settings,
+      decision: decision,
+      duration: duration,
+      shuffle: _shuffle,
+      repeatMode: _repeatMode,
+    );
+    _crossfadePlan = plan;
+    return decision.shouldCrossfade ? plan : null;
+  }
+
+  void _maybeStartCrossfade(Duration position) {
+    if (!_playbackCrossfade.enabled) return;
+    if (!_sourceReady ||
+        _switchingGeneration != 0 ||
+        _outgoing != null ||
+        _userPaused ||
+        _interruptionActive) {
+      return;
+    }
+    final generation = _playRequestGeneration;
+    if (_crossfadeTriggeredGeneration == generation) return;
+    final current = _media[_index];
+    final plan = _crossfadePlanFor(generation, current);
+    if (plan == null) return;
+    if (!plan.decision.shouldStartAt(position, plan.duration)) return;
+    // Sanity: a fade that would start in the first seconds of the track
+    // means the duration metadata is wrong; let the track finish normally.
+    if (position < const Duration(seconds: 3)) return;
+
+    _crossfadeTriggeredGeneration = generation;
+    _log.i(
+      'Crossfade ${plan.decision.fade!.inMilliseconds}ms → '
+      '${_media[plan.nextIndex].title} (${plan.decision.reason})',
+    );
+    if (_shuffle && _shufflePlayed.length >= _media.length) {
+      // Repeat-all shuffle cycle boundary (see _advanceShuffled).
+      _shufflePlayed.clear();
+      _recent.clear();
+    }
+    // The outgoing track counts as listened to completion: nothing audible
+    // is skipped, only overlapped.
+    playbackStatsObserver?.onCompleted(current, plan.duration);
+    // Swap roles synchronously: the current player keeps playing as the
+    // outgoing half of the fade (its events are ignored from now on) and
+    // the incoming track starts on the standby player.
+    final incoming = _takeStandbyPlayer();
+    _outgoing = _CrossfadeOutgoing(
+      player: _player,
+      volume: _activeNormalizationVolume,
+      fade: plan.decision.fade!,
+      endsAt: DateTime.now().add(plan.duration - position),
+    );
+    _player = incoming;
+    unawaited(_playIndex(plan.nextIndex, crossfade: true));
+  }
+
+  /// Returns the idle second player, creating and binding it on first use.
+  /// Any fade still running is ended first so its player can be reused.
+  AudioPlayer _takeStandbyPlayer() {
+    _endCrossfade();
+    var standby = _standbyPlayer;
+    if (standby == null) {
+      standby = AudioPlayer(playerId: 'music-player-crossfade');
+      _bindPlayer(standby);
+    }
+    _standbyPlayer = null;
+    return standby;
+  }
+
+  /// Ends an in-flight crossfade immediately: the outgoing player stops and
+  /// is parked as standby, and the active player is restored to its full
+  /// normalised volume (a pause mid-ramp must not leave it half-faded).
+  void _endCrossfade() {
+    final timer = _crossfadeTimer;
+    _crossfadeTimer = null;
+    timer?.cancel();
+    final outgoing = _outgoing;
+    _outgoing = null;
+    if (outgoing == null) return;
+    _standbyPlayer = outgoing.player;
+    unawaited(_stopQuietly(outgoing.player));
+    if (timer != null) {
+      unawaited(_setVolumeQuietly(_player, _activeNormalizationVolume));
+    }
+  }
+
+  Future<void> _stopQuietly(AudioPlayer player) async {
+    try {
+      await player.stop();
+    } catch (e) {
+      _log.w('Failed to stop crossfade player: $e');
+    }
+  }
+
+  Future<void> _setVolumeQuietly(AudioPlayer player, double volume) async {
+    try {
+      await player.setVolume(volume.clamp(0.0, 1.0));
+    } catch (e) {
+      _log.w('Failed to set crossfade volume: $e');
+    }
+  }
+
+  /// Ramps the incoming player up and the outgoing one down over the fade
+  /// with an equal-power curve, then stops the outgoing player.
+  void _startCrossfadeRamp(int generation) {
+    final outgoing = _outgoing;
+    if (outgoing == null) return;
+    final startedAt = DateTime.now();
+    // Source preparation may have eaten into the overlap; never ramp past
+    // the moment the outgoing track ends on its own.
+    final remaining = outgoing.endsAt.difference(startedAt);
+    final span = remaining < outgoing.fade ? remaining : outgoing.fade;
+    final totalMs = span.inMilliseconds.clamp(200, 1 << 30);
+    _crossfadeTimer?.cancel();
+    _crossfadeTimer = Timer.periodic(const Duration(milliseconds: 60), (
+      timer,
+    ) {
+      if (_disposed ||
+          !identical(_outgoing, outgoing) ||
+          generation != _playRequestGeneration) {
+        timer.cancel();
+        if (identical(_crossfadeTimer, timer)) _crossfadeTimer = null;
+        return;
+      }
+      final elapsed = DateTime.now().difference(startedAt).inMilliseconds;
+      final progress = elapsed / totalMs;
+      final gains = CrossfadePolicy.equalPowerGains(progress);
+      // Read live so a normalization toggle mid-fade lands on the ramp.
+      unawaited(
+        _setVolumeQuietly(_player, gains.incoming * _activeNormalizationVolume),
+      );
+      unawaited(
+        _setVolumeQuietly(outgoing.player, gains.outgoing * outgoing.volume),
+      );
+      if (progress >= 1) {
+        timer.cancel();
+        if (identical(_crossfadeTimer, timer)) _crossfadeTimer = null;
+        if (identical(_outgoing, outgoing)) {
+          _outgoing = null;
+          _standbyPlayer = outgoing.player;
+          unawaited(_stopQuietly(outgoing.player));
+        }
+      }
+    });
   }
 
   // ReplayGain normalization: resolved path -> volume multiplier.
@@ -725,6 +1116,8 @@ class MusicPlayerHandler extends BaseAudioHandler
       if (resolved == null) return;
       final volume = await _normalizationVolumeFor(resolved, media);
       if (_index != index || generation != _playRequestGeneration) return;
+      _activeNormalizationVolume = volume;
+      if (_crossfadeTimer != null) return; // the ramp applies it
       try {
         await _player.setVolume(volume);
       } catch (e) {
@@ -1031,6 +1424,7 @@ class MusicPlayerHandler extends BaseAudioHandler
     int index, {
     bool recordHistory = true,
     Duration startPosition = Duration.zero,
+    bool crossfade = false,
   }) async {
     if (index < 0 || index >= _media.length) return;
     // A normal track change supersedes a pending restore. A restored start
@@ -1040,6 +1434,11 @@ class MusicPlayerHandler extends BaseAudioHandler
       _pendingRestorePosition = null;
     }
     final generation = ++_playRequestGeneration;
+    _cancelExpiryRefresh();
+    _crossfadePlan = null;
+    // Any explicit track change cuts a running fade short; a crossfade
+    // handoff keeps the outgoing player alive until the ramp finishes.
+    if (!crossfade) _endCrossfade();
     final previousIndex = _index;
     _index = index;
     _pausedByInterruption = false;
@@ -1063,7 +1462,8 @@ class MusicPlayerHandler extends BaseAudioHandler
     final media = _media[index];
     // Plan the gapless transition: between two compatible lossless items the
     // source teardown is skipped so the decoder splices without a gap.
-    final skipSourceTeardown = _planGaplessTeardown(previousIndex, media);
+    final skipSourceTeardown =
+        !crossfade && _planGaplessTeardown(previousIndex, media);
     final effectiveStartPosition = normalizedPlaybackResumePosition(
       startPosition,
       duration: media.duration,
@@ -1081,6 +1481,7 @@ class MusicPlayerHandler extends BaseAudioHandler
     if (!_isCurrentPlayRequest(generation, media)) return;
     if (resolved == null) {
       _log.e('No playable source for ${media.title}');
+      _endCrossfade();
       _broadcastState(playerState: PlayerState.stopped);
       return;
     }
@@ -1104,14 +1505,19 @@ class MusicPlayerHandler extends BaseAudioHandler
       if (!_isCurrentPlayRequest(generation, media)) return;
       await _activateAudioSession();
       if (!_isCurrentPlayRequest(generation, media)) return;
-      if (skipSourceTeardown) {
+      if (crossfade) {
+        // The standby player is already stopped; the outgoing one must keep
+        // playing until the ramp ends.
+        _log.d('Crossfade transition: starting next item on standby player');
+      } else if (skipSourceTeardown) {
         _log.d('Gapless transition: skipping source teardown');
       } else {
         await _player.stop();
       }
       _sourceReady = false;
       if (!_isCurrentPlayRequest(generation, media)) return;
-      await _player.setVolume(normalizationVolume);
+      _activeNormalizationVolume = normalizationVolume;
+      await _player.setVolume(crossfade ? 0.0 : normalizationVolume);
       if (!_isCurrentPlayRequest(generation, media)) return;
       // Progressive HTTP sources play with UrlSource (the streaming engine
       // preflighted them); local/content URIs use DeviceFileSource. Deferred
@@ -1147,12 +1553,18 @@ class MusicPlayerHandler extends BaseAudioHandler
       }
       unawaited(_persistSession(position: effectiveStartPosition));
       _log.i('Playing: ${media.title}');
+      if (crossfade) _startCrossfadeRamp(generation);
+      playbackSourceStartedListener?.call();
+      _armExpiryRefresh(media, resolved, generation);
       // Some files do not emit onDurationChanged reliably (stuck at 0:00);
       // poll the engine for the real duration as a fallback.
       unawaited(_ensureDurationKnown(index, generation));
     } catch (e) {
       if (!_isCurrentPlayRequest(generation, media)) return;
       _sourceReady = false;
+      // A failed incoming track must not leave the outgoing one playing on
+      // (its completion is ignored by design, so it would never advance).
+      _endCrossfade();
       _log.e('Playback failed for ${media.title}: $e');
       // Engine hook (streaming failover) observes runtime failures first; the
       // player still goes to stopped so the UI never lies about state.
@@ -1176,7 +1588,10 @@ class MusicPlayerHandler extends BaseAudioHandler
   }) async {
     if (_index < 0 || _index >= _media.length) return;
     final current = _media[_index];
-    if (!current.isRemoteHttp) return; // Engine-owned streams only.
+    // Engine-owned items only: pre-resolved progressive URLs *and* deferred
+    // queue items (whose placeholder source resolved to a stream at play
+    // time). Local files never go through failover.
+    if (!current.isRemoteHttp && !current.isDeferredStream) return;
     _media[_index] = item;
     _queueItems[_index] = item.toMediaItem();
     queue.add(List<MediaItem>.unmodifiable(_queueItems));
@@ -1398,9 +1813,11 @@ class MusicPlayerHandler extends BaseAudioHandler
   Future<void> pause() async {
     _log.i('Pausing internal player by user/control request');
     _playRequestGeneration++;
+    _cancelExpiryRefresh();
     _switchingGeneration = 0;
     _userPaused = true;
     _pausedByInterruption = false;
+    _endCrossfade();
     await _player.pause();
     _broadcastState(playerState: PlayerState.paused);
     await _persistSession(position: await _currentPositionForPersist());
@@ -1408,6 +1825,7 @@ class MusicPlayerHandler extends BaseAudioHandler
 
   @override
   Future<void> seek(Duration position) async {
+    _endCrossfade();
     await _player.seek(position);
     _broadcastPosition(position, force: true);
   }
@@ -1439,8 +1857,11 @@ class MusicPlayerHandler extends BaseAudioHandler
   @override
   Future<void> stop() async {
     _playRequestGeneration++;
+    _cancelExpiryRefresh();
     _switchingGeneration = 0;
     _userPaused = true;
+    _endCrossfade();
+    _crossfadePlan = null;
     await _player.stop();
     _sourceReady = false;
     _activeResolvedPath = null;
@@ -1482,6 +1903,7 @@ class MusicPlayerHandler extends BaseAudioHandler
 
   @override
   Future<void> skipToPrevious() async {
+    _endCrossfade();
     if (playbackState.value.position > const Duration(seconds: 3)) {
       await _player.seek(Duration.zero);
       _broadcastPosition(Duration.zero, force: true);
@@ -1511,16 +1933,38 @@ class MusicPlayerHandler extends BaseAudioHandler
   @override
   Future<void> skipToQueueItem(int index) => _playIndex(index);
 
+  /// Snapshot of the queue as playable media (for the browse tree).
+  List<PlayableMedia> currentQueueMedia() =>
+      List<PlayableMedia>.unmodifiable(_media);
+
+  /// Android Auto / AVRCP browsing. Delegates to the installed
+  /// [MediaBrowseBinding] (library, playlists, albums, recents); without one
+  /// (tests, very early startup) the queue is the whole tree, as before.
   @override
   Future<List<MediaItem>> getChildren(
     String parentMediaId, [
     Map<String, dynamic>? options,
   ]) async {
+    final binding = MediaBrowseBinding.current;
+    if (binding != null) {
+      try {
+        final page = _browsePage(options);
+        return await binding.tree.children(parentMediaId, page: page);
+      } catch (e) {
+        _log.w('Browse children failed for $parentMediaId: $e');
+      }
+    }
     if (parentMediaId == AudioService.browsableRootId ||
         parentMediaId == AudioService.recentRootId) {
       return List<MediaItem>.unmodifiable(_queueItems);
     }
     return const [];
+  }
+
+  static int _browsePage(Map<String, dynamic>? options) {
+    final raw = options?['android.media.browse.extra.PAGE'];
+    if (raw is int && raw >= 0) return raw;
+    return 0;
   }
 
   @override
@@ -1530,13 +1974,81 @@ class MusicPlayerHandler extends BaseAudioHandler
     return _queueItems[index];
   }
 
+  /// Plays a media id coming from the notification, a car head unit or a
+  /// browse result. Queue items play in place; browse results start their
+  /// enclosing container (album, playlist, section) from the tapped track.
   @override
   Future<void> playFromMediaId(
     String mediaId, [
     Map<String, dynamic>? extras,
   ]) async {
     final index = _media.indexWhere((m) => m.id == mediaId);
+    final containerId = extras?[MediaBrowseTree.containerExtraKey]?.toString();
+    if (index >= 0 &&
+        (containerId == null || containerId == MediaBrowseTree.queueId)) {
+      await _playIndex(index);
+      return;
+    }
+    final binding = MediaBrowseBinding.current;
+    if (binding == null) {
+      if (index >= 0) await _playIndex(index);
+      return;
+    }
+    try {
+      final media = containerId == null
+          ? null
+          : await binding.tree.containerMedia(containerId);
+      if (media != null && media.isNotEmpty) {
+        var start = media.indexWhere((m) => m.id == mediaId);
+        if (start < 0) start = 0;
+        await binding.playContainer(media, start);
+        return;
+      }
+    } catch (e) {
+      _log.w('Browse play failed for $mediaId: $e');
+    }
     if (index >= 0) await _playIndex(index);
+  }
+
+  /// Browse-service search (Android Auto search box, AVRCP search).
+  @override
+  Future<List<MediaItem>> search(
+    String query, [
+    Map<String, dynamic>? extras,
+  ]) async {
+    final binding = MediaBrowseBinding.current;
+    if (binding == null) return const [];
+    try {
+      return await binding.tree.search(query);
+    } catch (e) {
+      _log.w('Browse search failed: $e');
+      return const [];
+    }
+  }
+
+  /// Voice request ("play `<query>`"): plays the best offline match with the
+  /// remaining results queued behind it. An empty query resumes playback.
+  @override
+  Future<void> playFromSearch(
+    String query, [
+    Map<String, dynamic>? extras,
+  ]) async {
+    if (query.trim().isEmpty) {
+      await play();
+      return;
+    }
+    final binding = MediaBrowseBinding.current;
+    if (binding == null) return;
+    try {
+      final media = await binding.tree.source.searchMedia(query, limit: 50);
+      if (media.isEmpty) {
+        _log.i('Voice search "$query": no offline match');
+        return;
+      }
+      await binding.playContainer(media, 0);
+    } catch (e) {
+      _log.w('Voice search failed: $e');
+    }
   }
 
   @override
@@ -1606,12 +2118,21 @@ class MusicPlayerHandler extends BaseAudioHandler
       _activeMusicPlayerHandler = null;
     }
     _playRequestGeneration++;
+    _cancelExpiryRefresh();
+    _crossfadeTimer?.cancel();
+    _crossfadeTimer = null;
     for (final sub in _subscriptions) {
       await sub.cancel();
     }
     _subscriptions.clear();
     _sourceReady = false;
     await _player.dispose();
+    final outgoing = _outgoing?.player;
+    _outgoing = null;
+    if (outgoing != null) await outgoing.dispose();
+    final standby = _standbyPlayer;
+    _standbyPlayer = null;
+    if (standby != null) await standby.dispose();
     _activeResolvedPath = null;
     final tempPaths = <String>{
       ..._resolvedPathCache.values,
@@ -1642,10 +2163,56 @@ typedef PlaybackFailureListener = void Function(
   Object error,
 );
 
+/// Passed to [PlaybackFailureListener] when a stream's signed URL is about to
+/// expire and should be re-resolved proactively. The engine treats it as an
+/// `urlExpired` failure: same-provider re-resolution at the live position,
+/// and *not* a health penalty (nothing actually failed).
+class StreamUrlExpiringSignal implements Exception {
+  const StreamUrlExpiringSignal();
+
+  @override
+  String toString() => 'StreamUrlExpiringSignal: stream URL expiring soon';
+}
+
 PlaybackFailureListener? playbackFailureListener;
 
 void setPlaybackFailureListener(PlaybackFailureListener listener) {
   playbackFailureListener = listener;
+}
+
+/// Invoked right after an engine player has started a source. The native
+/// audio effects chain binds to player audio sessions, which only exist from
+/// this moment on (and may change when a player is recreated), so the DSP
+/// controller re-attaches here. Unset in tests / when effects are off.
+void Function()? playbackSourceStartedListener;
+
+/// Starts [media] from [startIndex]; installed by the app so the handler can
+/// route browse taps through the same play path as the in-app UI.
+typedef MediaBrowsePlayContainer =
+    Future<void> Function(List<PlayableMedia> media, int startIndex);
+
+/// The browse tree + play callback the audio service uses for Android Auto /
+/// AVRCP browsing. Process-global like the other handler hooks because the
+/// handler is created by `AudioService.init` outside any provider scope.
+class MediaBrowseBinding {
+  const MediaBrowseBinding({required this.tree, required this.playContainer});
+
+  final MediaBrowseTree tree;
+  final MediaBrowsePlayContainer playContainer;
+
+  static MediaBrowseBinding? _current;
+  static MediaBrowseBinding? get current => _current;
+
+  static void install({
+    required MediaBrowseTree tree,
+    required MediaBrowsePlayContainer playContainer,
+  }) {
+    _current = MediaBrowseBinding(tree: tree, playContainer: playContainer);
+  }
+
+  static void uninstall() {
+    _current = null;
+  }
 }
 
 /// Lazy source resolver installed by the streaming engine for queue items
@@ -1663,6 +2230,48 @@ void setDeferredStreamResolver(DeferredStreamResolver? resolver) {
 /// Runtime observer for privacy-first listening statistics. The callback is
 /// installed by the statistics provider at app bootstrap; it is a plain
 /// function pointer so the audio handler never needs to know about Riverpod.
+/// The fading-out half of a crossfade.
+class _CrossfadeOutgoing {
+  final AudioPlayer player;
+
+  /// Normalised volume the track was playing at (fade ramps scale it).
+  final double volume;
+  final Duration fade;
+
+  /// When the outgoing track would end by itself.
+  final DateTime endsAt;
+
+  const _CrossfadeOutgoing({
+    required this.player,
+    required this.volume,
+    required this.fade,
+    required this.endsAt,
+  });
+}
+
+/// Crossfade plan for one play generation.
+class _CrossfadePlan {
+  final int generation;
+  final int nextIndex;
+  final String nextMediaId;
+  final CrossfadeSettings settings;
+  final CrossfadeDecision decision;
+  final Duration duration;
+  final bool shuffle;
+  final AudioServiceRepeatMode repeatMode;
+
+  const _CrossfadePlan({
+    required this.generation,
+    required this.nextIndex,
+    required this.nextMediaId,
+    required this.settings,
+    required this.decision,
+    required this.duration,
+    required this.shuffle,
+    required this.repeatMode,
+  });
+}
+
 class PlaybackStatsObserver {
   final void Function(PlayableMedia media) onStarted;
   final void Function(PlayableMedia media, Duration? listened) onCompleted;

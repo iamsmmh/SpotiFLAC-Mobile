@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:spotimusic/models/download_item.dart';
 import 'package:spotimusic/models/track.dart';
 import 'package:spotimusic/providers/download_schedule_settings_provider.dart';
+import 'package:spotimusic/services/platform_bridge.dart';
 import 'package:spotimusic/services/queue_transfer_service.dart';
 import 'package:spotimusic/services/storage_breakdown_service.dart';
 
@@ -92,6 +93,142 @@ void main() {
       expect(restored.enabled, isTrue);
       expect(restored.startMinute, 22 * 60);
       expect(restored.endMinute, 7 * 60);
+    });
+
+    test('v1 store without device conditions decodes with them off', () {
+      final restored = DownloadScheduleSettings.fromJson({
+        'enabled': true,
+        'start_minute': 22 * 60,
+        'end_minute': 7 * 60,
+      });
+      expect(restored.requireCharging, isFalse);
+      expect(restored.requireWifi, isFalse);
+      expect(restored.minBatteryPercent, 0);
+      expect(restored.hasDeviceConditions, isFalse);
+      expect(restored.allDay, isFalse);
+    });
+
+    test('device conditions roundtrip and clamp', () {
+      const settings = DownloadScheduleSettings(
+        enabled: true,
+        startMinute: 0,
+        endMinute: 0,
+        requireCharging: true,
+        minBatteryPercent: 30,
+        requireWifi: true,
+      );
+      final restored = DownloadScheduleSettings.fromJson(settings.toJson());
+      expect(restored.requireCharging, isTrue);
+      expect(restored.minBatteryPercent, 30);
+      expect(restored.requireWifi, isTrue);
+      expect(restored.allDay, isTrue);
+      expect(restored.isWithinWindow(DateTime(2026, 9, 1, 12)), isTrue);
+      expect(settings.copyWith(minBatteryPercent: 250).minBatteryPercent, 100);
+      expect(settings.copyWith(minBatteryPercent: -5).minBatteryPercent, 0);
+    });
+
+    test('blockedReason honours WiFi, charger and battery floor', () {
+      const wifi = DownloadScheduleSettings(enabled: true, requireWifi: true);
+      expect(
+        wifi.blockedReason(
+          charging: false,
+          batteryLevel: 80,
+          powerKnown: true,
+          onWifi: false,
+        ),
+        'waiting for WiFi',
+      );
+      expect(
+        wifi.blockedReason(
+          charging: false,
+          batteryLevel: 80,
+          powerKnown: true,
+          onWifi: true,
+        ),
+        isNull,
+      );
+
+      const charger = DownloadScheduleSettings(
+        enabled: true,
+        requireCharging: true,
+      );
+      expect(
+        charger.blockedReason(
+          charging: false,
+          batteryLevel: 90,
+          powerKnown: true,
+          onWifi: true,
+        ),
+        'waiting for charger',
+      );
+      expect(
+        charger.blockedReason(
+          charging: true,
+          batteryLevel: 10,
+          powerKnown: true,
+          onWifi: true,
+        ),
+        isNull,
+      );
+      // Unknown power information never holds the queue hostage.
+      expect(
+        charger.blockedReason(
+          charging: false,
+          batteryLevel: -1,
+          powerKnown: false,
+          onWifi: true,
+        ),
+        isNull,
+      );
+
+      const floor = DownloadScheduleSettings(
+        enabled: true,
+        minBatteryPercent: 20,
+      );
+      expect(
+        floor.blockedReason(
+          charging: false,
+          batteryLevel: 15,
+          powerKnown: true,
+          onWifi: false,
+        ),
+        'battery below 20%',
+      );
+      // Plugged in: the floor does not apply.
+      expect(
+        floor.blockedReason(
+          charging: true,
+          batteryLevel: 15,
+          powerKnown: true,
+          onWifi: false,
+        ),
+        isNull,
+      );
+      expect(
+        floor.blockedReason(
+          charging: false,
+          batteryLevel: 20,
+          powerKnown: true,
+          onWifi: false,
+        ),
+        isNull,
+      );
+    });
+
+    test('PowerStatus decodes platform payloads defensively', () {
+      final status = PowerStatus.fromMap({
+        'charging': true,
+        'level': 87,
+        'known': true,
+      });
+      expect(status.charging, isTrue);
+      expect(status.level, 87);
+      expect(status.hasLevel, isTrue);
+      final unknown = PowerStatus.fromMap(const {});
+      expect(unknown.charging, isFalse);
+      expect(unknown.level, -1);
+      expect(unknown.hasLevel, isFalse);
+      expect(PowerStatus.fromMap({'level': 250}).level, 100);
     });
   });
 

@@ -7,12 +7,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:spotimusic/engine/smart_play.dart';
 import 'package:spotimusic/l10n/l10n.dart';
 import 'package:spotimusic/models/track.dart';
+import 'package:spotimusic/providers/audio_effects_provider.dart';
 import 'package:spotimusic/providers/download_history_provider.dart';
 import 'package:spotimusic/providers/engine_settings_provider.dart';
 import 'package:spotimusic/providers/music_player_provider.dart';
 import 'package:spotimusic/providers/now_playing_lyrics_provider.dart';
 import 'package:spotimusic/providers/playback_telemetry_provider.dart';
 import 'package:spotimusic/providers/streaming_engine_provider.dart';
+import 'package:spotimusic/screens/settings/equalizer_page.dart';
 import 'package:spotimusic/screens/track_metadata_screen.dart';
 import 'package:spotimusic/services/cover_cache_manager.dart';
 import 'package:spotimusic/services/history_database.dart';
@@ -683,6 +685,31 @@ class _LiquidPlayerScreenState extends ConsumerState<LiquidPlayerScreen>
             min: 0,
             max: 1,
             onChanged: (v) => controller.setBalance((v * 2) - 1),
+          ),
+          ListTile(
+            leading: const Icon(Icons.graphic_eq_rounded),
+            title: const Text('Equalizer & effects'),
+            subtitle: Consumer(
+              builder: (context, ref, _) {
+                final effects = ref.watch(audioEffectsProvider);
+                final settings = effects.settings;
+                final label = !effects.capabilities.any
+                    ? 'Not available on this device'
+                    : !settings.enabled
+                    ? 'Off'
+                    : settings.presetName ?? 'Custom curve';
+                return Text(label);
+              },
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.of(sheetContext).pop();
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const Scaffold(body: EqualizerPage()),
+                ),
+              );
+            },
           ),
         ],
       ),

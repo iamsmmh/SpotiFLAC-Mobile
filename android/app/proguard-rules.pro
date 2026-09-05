@@ -7,6 +7,10 @@
 -keep class io.flutter.plugins.** { *; }
 -keep class io.flutter.embedding.** { *; }
 
+# AudioEffectsController reads the audioplayers MediaPlayer session ids
+# reflectively (WrappedPlayer.player -> MediaPlayerWrapper.mediaPlayer).
+-keep class xyz.luan.audioplayers.** { *; }
+
 # Ignore missing Play Core classes (not used, but referenced by Flutter)
 -dontwarn com.google.android.play.core.splitcompat.**
 -dontwarn com.google.android.play.core.splitinstall.**

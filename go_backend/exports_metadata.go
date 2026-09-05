@@ -600,7 +600,7 @@ func DownloadCoverToFile(coverURL string, outputPath string, _ bool) (bridgeErr 
 		return fmt.Errorf("failed to download cover: %w", err)
 	}
 
-	if err := os.WriteFile(outputPath, data, 0644); err != nil {
+	if err := writeFileAtomic(outputPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write cover file: %w", err)
 	}
 
@@ -641,7 +641,7 @@ func ExtractCoverToFile(audioPath string, outputPath string) (bridgeErr error) {
 		return fmt.Errorf("failed to extract cover: %w", err)
 	}
 
-	if err := os.WriteFile(outputPath, coverData, 0644); err != nil {
+	if err := writeFileAtomic(outputPath, coverData, 0644); err != nil {
 		return fmt.Errorf("failed to write cover file: %w", err)
 	}
 

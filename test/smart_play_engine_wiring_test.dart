@@ -90,7 +90,7 @@ class _FakeNetworkMonitor extends NetworkStatusMonitor {
 ///
 /// These tests exercise the Smart Play decision ladder, preflight failover,
 /// queue building and deferred resolution - NOT audio output. The real
-/// [MusicPlayerController] drives audio_service/just_audio, whose platform
+/// [MusicPlayerController] drives audio_service/audioplayers, whose platform
 /// channels do not exist under `flutter test`; a real play attempt there
 /// surfaces an asynchronous MissingPluginException through the engine's
 /// playback-failure hook, which would (correctly, for production) penalize
@@ -546,6 +546,175 @@ void main() {
       expect(player.enqueued, hasLength(2));
       expect(player.enqueued.first.source, '/music/t1.flac');
       expect(player.enqueued.last.isDeferredStream, isTrue);
+    });
+  });
+
+  group('StreamingEngineController runtime failover', () {
+    Future<void> waitFor(bool Function() condition) async {
+      final deadline = DateTime.now().add(const Duration(seconds: 8));
+      while (!condition()) {
+        if (DateTime.now().isAfter(deadline)) {
+          fail('condition not met within 8s');
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+    }
+
+    StreamDescriptor descriptor(
+      String id,
+      String provider,
+      String uri,
+      AudioQualityLevel quality,
+    ) => StreamDescriptor(
+      id: id,
+      providerId: provider,
+      kind: StreamSourceKind.httpStream,
+      uri: uri,
+      quality: quality,
+    );
+
+    test('a mid-stream error fails over to the next provider and resumes',
+        () async {
+      final a = descriptor(
+        'a',
+        'providerA',
+        'https://a.example.com/1',
+        AudioQualityLevel.high,
+      );
+      final b = descriptor(
+        'b',
+        'providerB',
+        'https://b.example.com/2',
+        AudioQualityLevel.normal,
+      );
+      final container = _container(
+        adapters: [_FakeAdapter([a, b])],
+        validator: _ScriptedValidator(const <String>{}),
+      );
+      final engine = container.read(streamingEngineControllerProvider);
+      addTearDown(() => setDeferredStreamResolver(null));
+      final player =
+          container.read(musicPlayerControllerProvider) as _FakePlayerController;
+
+      final result = await engine.playTrack(_track('rf1'));
+      expect(result.started, isTrue, reason: result.message ?? '');
+      expect(player.played.single.source, a.uri);
+      expect(player.played.single.expiresAt, isNull);
+
+      // The audio pipeline reports the CDN dropping the stream *after*
+      // play() returned (event-stream error channel).
+      playbackFailureListener!(
+        player.played.single,
+        StateError('Source error: connection reset'),
+      );
+      await waitFor(() => player.played.length == 2);
+
+      expect(player.played.last.source, b.uri);
+      expect(engine.providerHealth.healthOf('providerA').failureCount, 1);
+      expect(
+        engine.integrityLog.countOutcome(StreamIntegrityOutcome.failure),
+        1,
+      );
+      expect(container.read(enginePlayContextProvider)?.providerId,
+          'providerB');
+    });
+
+    test('an expiring-URL signal refreshes the source without a penalty',
+        () async {
+      final expiresAt = DateTime.now().add(const Duration(minutes: 3));
+      final first = StreamDescriptor(
+        id: 'a1',
+        providerId: 'providerA',
+        kind: StreamSourceKind.httpStream,
+        uri: 'https://a.example.com/signed-1',
+        quality: AudioQualityLevel.high,
+        expiresAt: expiresAt,
+      );
+      final fresh = StreamDescriptor(
+        id: 'a2',
+        providerId: 'providerA',
+        kind: StreamSourceKind.httpStream,
+        uri: 'https://a.example.com/signed-2',
+        quality: AudioQualityLevel.high,
+        expiresAt: expiresAt.add(const Duration(hours: 1)),
+      );
+      final container = _container(
+        adapters: [_FakeAdapter([first, fresh])],
+        validator: _ScriptedValidator(const <String>{}),
+      );
+      final engine = container.read(streamingEngineControllerProvider);
+      addTearDown(() => setDeferredStreamResolver(null));
+      final player =
+          container.read(musicPlayerControllerProvider) as _FakePlayerController;
+
+      final result = await engine.playTrack(_track('rf2'));
+      expect(result.started, isTrue, reason: result.message ?? '');
+      final started = player.played.single;
+      // The expiry travels with the queue item so the handler can arm the
+      // proactive refresh timer.
+      expect(started.expiresAt, isNotNull);
+
+      playbackFailureListener!(started, const StreamUrlExpiringSignal());
+      await waitFor(() => player.played.length == 2);
+
+      expect(player.played.last.source, isNot(started.source));
+      expect(player.played.last.providerId, 'providerA');
+      // A refresh is not a failure: no health hit, no integrity failure.
+      expect(engine.providerHealth.healthOf('providerA').failureCount, 0);
+      expect(
+        engine.integrityLog.countOutcome(StreamIntegrityOutcome.failure),
+        0,
+      );
+    });
+
+    test('a deferred item failure excludes the stream it resolved to',
+        () async {
+      final a = descriptor(
+        'a',
+        'providerA',
+        'https://a.example.com/1',
+        AudioQualityLevel.high,
+      );
+      final b = descriptor(
+        'b',
+        'providerB',
+        'https://b.example.com/2',
+        AudioQualityLevel.normal,
+      );
+      final container = _container(
+        adapters: [_FakeAdapter([a, b])],
+        validator: _ScriptedValidator(const <String>{}),
+      );
+      final engine = container.read(streamingEngineControllerProvider);
+      addTearDown(() => setDeferredStreamResolver(null));
+      final player =
+          container.read(musicPlayerControllerProvider) as _FakePlayerController;
+
+      final t1 = _track('rf3a');
+      final t2 = _track('rf3b');
+      final result = await engine.playTracks([t1, t2], startIndex: 0);
+      expect(result.started, isTrue, reason: result.message ?? '');
+      final deferred = player.enqueued.single;
+      expect(deferred.isDeferredStream, isTrue);
+
+      // The queue reaches the deferred item and resolves it lazily.
+      final resolved = await engine.resolveDeferredSource(deferred);
+      final dead = [a, b].singleWhere((d) => d.uri == resolved);
+      final other = identical(dead, a) ? b : a;
+
+      // ...then that concrete stream dies. Failover must skip the dead URL
+      // (the deferred placeholder itself never matches a candidate) and
+      // charge the provider that actually served it.
+      final before = player.played.length;
+      playbackFailureListener!(deferred, StateError('Source error'));
+      await waitFor(() => player.played.length == before + 1);
+
+      expect(player.played.last.source, other.uri);
+      expect(engine.providerHealth.healthOf(dead.providerId).failureCount, 1);
+      expect(
+        engine.providerHealth.healthOf(other.providerId).failureCount,
+        0,
+      );
     });
   });
 

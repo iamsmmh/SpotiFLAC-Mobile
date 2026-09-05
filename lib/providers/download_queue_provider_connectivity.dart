@@ -133,6 +133,12 @@ extension _DownloadQueueConnectivity on DownloadQueueNotifier {
     _maybeCleanupOnNetworkChange(decision);
     _maybeOfferRetryAfterReconnect(results);
 
+    // The schedule's own WiFi condition reacts to network changes immediately
+    // instead of waiting for the next periodic re-evaluation.
+    if (_scheduleSettings.enabled && _scheduleSettings.requireWifi) {
+      unawaited(_applyScheduleGate());
+    }
+
     if (decision.shouldResumeWifiOnlyQueue && state.isPaused) {
       _networkPausedByWifiOnly = false;
       _log.i('WiFi restored, resuming network-paused queue');

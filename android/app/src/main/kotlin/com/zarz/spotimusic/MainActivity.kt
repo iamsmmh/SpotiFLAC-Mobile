@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
 import android.os.Build
+import android.os.BatteryManager
 import android.os.Bundle
 import android.os.storage.StorageManager
 import android.provider.DocumentsContract
@@ -404,6 +405,30 @@ class MainActivity: FlutterFragmentActivity() {
             is Number, is Boolean, is String -> value
             else -> value.toString()
         }
+    }
+
+    /// Battery/charging snapshot for the download scheduler ("only while
+    /// charging", "not below N%"). Uses the sticky ACTION_BATTERY_CHANGED
+    /// broadcast, so no receiver registration or permission is required.
+    private fun readPowerStatus(): Map<String, Any?> {
+        val intent = try {
+            registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        } catch (_: Exception) {
+            null
+        }
+        val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        val plugged = intent?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0
+        val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        val percent = if (level >= 0 && scale > 0) (level * 100) / scale else -1
+        val charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+            status == BatteryManager.BATTERY_STATUS_FULL ||
+            plugged != 0
+        return mapOf(
+            "charging" to charging,
+            "level" to percent,
+            "known" to (intent != null),
+        )
     }
 
     private fun parseJsonPayload(payload: String): Any {
@@ -904,6 +929,7 @@ class MainActivity: FlutterFragmentActivity() {
 
         val channel = MethodChannel(messenger, CHANNEL)
         backendChannel = channel
+        AudioEffectsController.bind(flutterEngine)
         registerLibraryStorageReceiver()
         if (pendingSessionGrantEvents.isNotEmpty()) {
             val events = pendingSessionGrantEvents.toList()
@@ -934,6 +960,17 @@ class MainActivity: FlutterFragmentActivity() {
                                 mapOf("ready" to true)
                             }
                             result.success(runtimeState)
+                        }
+                        "getPowerStatus" -> {
+                            result.success(readPowerStatus())
+                        }
+                        "audioEffectsCapabilities" -> {
+                            result.success(AudioEffectsController.shared.capabilities())
+                        }
+                        "applyAudioEffects" -> {
+                            @Suppress("UNCHECKED_CAST")
+                            val config = call.arguments as? Map<String, Any?> ?: emptyMap()
+                            result.success(AudioEffectsController.shared.apply(config))
                         }
                         "exitApp" -> {
                             flutterBackCallback?.isEnabled = false

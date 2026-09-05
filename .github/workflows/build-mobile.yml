@@ -165,8 +165,14 @@ jobs:
       - name: Build release APKs
         run: |
           set -euo pipefail
-          flutter build apk --release --split-per-abi \
-            --target-platform android-arm,android-arm64,android-x64
+          if ! flutter build apk --release --split-per-abi \
+              --target-platform android-arm,android-arm64,android-x64 2>&1 | tee build-apk.log; then
+            findings=$(grep -E "^e: |: error: |^Error: |What went wrong|FAILURE:|Caused by:|Execution failed" build-apk.log | head -40)
+            [ -n "$findings" ] || findings=$(tail -n 40 build-apk.log)
+            encoded=$(printf '%s' "$findings" | head -c 3500 | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error::${encoded}"
+            exit 1
+          fi
           ls -la build/app/outputs/flutter-apk/
 
       - name: Collect and rename APKs

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:spotimusic/engine/audio_effects.dart';
 import 'package:spotimusic/services/download_request_payload.dart';
 import 'package:spotimusic/utils/audio_format_utils.dart';
 import 'package:spotimusic/utils/logger.dart';
@@ -1207,6 +1208,43 @@ class PlatformBridge {
         }
       }
     } catch (_) {}
+  }
+
+  /// Battery/charging snapshot for the download scheduler. Never throws: an
+  /// unavailable channel (tests, desktop) reports an unknown status, which
+  /// the scheduler treats as "condition satisfied" rather than blocking.
+  static Future<PowerStatus> getPowerStatus() async {
+    try {
+      final result = await _channel.invokeMethod('getPowerStatus');
+      return PowerStatus.fromMap(_decodeMapResult(result));
+    } catch (_) {
+      return PowerStatus.unknown;
+    }
+  }
+
+  /// What the native effect chain can do on this device. Never throws; an
+  /// unavailable channel reports [AudioEffectsCapabilities.none].
+  static Future<AudioEffectsCapabilities> audioEffectsCapabilities() async {
+    try {
+      final result = await _channel.invokeMethod('audioEffectsCapabilities');
+      return AudioEffectsCapabilities.fromMap(_decodeMapResult(result));
+    } catch (_) {
+      return AudioEffectsCapabilities.none;
+    }
+  }
+
+  /// Applies the DSP chain (see `AudioEffectsSettings.toPlatformMap`) to the
+  /// music players' audio sessions. Returns the native status map
+  /// (`attached`, `players`, `reason`); never throws.
+  static Future<Map<String, dynamic>> applyAudioEffects(
+    Map<String, dynamic> config,
+  ) async {
+    try {
+      final result = await _channel.invokeMethod('applyAudioEffects', config);
+      return _decodeMapResult(result);
+    } catch (_) {
+      return const {'attached': false, 'reason': 'unavailable'};
+    }
   }
 
   static Future<void> pauseNativeDownloadWorker() async {
@@ -2441,4 +2479,44 @@ class PlatformBridge {
       'audio_dir': audioDir,
     });
   }
+}
+
+/// Device power snapshot reported by the platform (`getPowerStatus`).
+class PowerStatus {
+  /// Whether the device is plugged in (charging or full).
+  final bool charging;
+
+  /// Battery percentage 0–100, or -1 when the platform cannot report it.
+  final int level;
+
+  /// False when the platform had no battery information at all (simulator,
+  /// monitoring unavailable, channel missing).
+  final bool known;
+
+  const PowerStatus({
+    required this.charging,
+    required this.level,
+    required this.known,
+  });
+
+  static const PowerStatus unknown = PowerStatus(
+    charging: false,
+    level: -1,
+    known: false,
+  );
+
+  factory PowerStatus.fromMap(Map<String, dynamic> map) {
+    final level = map['level'];
+    return PowerStatus(
+      charging: map['charging'] == true,
+      level: level is num ? level.toInt().clamp(-1, 100) : -1,
+      known: map['known'] != false,
+    );
+  }
+
+  bool get hasLevel => known && level >= 0;
+
+  @override
+  String toString() =>
+      'PowerStatus(charging: $charging, level: $level, known: $known)';
 }

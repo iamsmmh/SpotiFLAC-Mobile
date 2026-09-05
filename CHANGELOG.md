@@ -22,7 +22,72 @@
   unrelated track; resolution falls through to the next provider or fails
   with a clear reason.
 
+- **Lyrics for streamed tracks**: the lyrics sheet (liquid player) and the
+  classic Now Playing lyrics page now query the configured online providers
+  (LRCLIB, Musixmatch, Apple Music, NetEase, QQ Music, Paxsenix — same
+  priority/fallback order as the download pipeline) for streamed tracks
+  instead of showing "No lyrics"; results are memoized per track for the
+  session (LRU + in-flight coalescing) and offline mode never touches the
+  network.
+- **Crossfade (1–12 s, smart mode)**: a second engine player overlaps the
+  tail of the playing track with the head of the next one and ramps both
+  with an equal-power curve (ReplayGain volumes preserved through the fade).
+  *Smart crossfade* keeps consecutive tracks of the same album, lossless
+  pairs that can be spliced gaplessly, and short interludes intact, and
+  shortens the overlap for short tracks. Off by default; works for local
+  files and progressive streams, never on repeat-one, and is cut short by
+  pause / seek / skip / audio-focus loss. Settings → Streaming → Audio
+  pipeline.
+- **Equalizer & effects (Android)**: new Settings page with a 10-band
+  equalizer (31 Hz–16 kHz, ±12 dB), twelve built-in presets, user presets
+  with save / delete / import / export (`.eqpresets.json`), bass boost,
+  virtualizer, loudness enhancer, and — on Android 9+ via
+  `DynamicsProcessing` — a single-band compressor and a brick-wall limiter.
+  The chain binds to both engine players' audio sessions (so crossfades stay
+  equalised) and re-binds whenever a source starts; older devices fall back
+  to the system `Equalizer` with the curve mapped onto the device's bands.
+  Everything is off by default. iOS reports the chain as unavailable (AVPlayer
+  output cannot host effect units) and the page disables the stages honestly.
+- **Download scheduler conditions**: the schedule can now require WiFi,
+  charging, and a minimum battery level in addition to (or instead of) the
+  time window; presets *Overnight* and *Charging on WiFi*. A new
+  `getPowerStatus` platform call feeds the charger/battery gate on Android
+  and iOS; conditions are re-checked every 30 s while a batch runs and the
+  queue header explains why it is holding (e.g. "waiting for WiFi").
+- **Android Auto / AVRCP browse tree**: the media browser exposes Now
+  playing, Recently played, Most played, Loved, Playlists, Albums and Songs
+  (paged) instead of a flat copy of the queue; tapping a song plays its
+  container from that song and voice search maps to the library. Tracks
+  without a local copy are enqueued as deferred engine items so they still
+  play through Smart Play.
+- **Proactive stream URL refresh**: resolved stream URLs carry their expiry
+  (`PlayableMedia.expiresAt`, persisted with the queue); the player hands the
+  item back to the streaming engine two minutes before a signed URL dies so
+  the engine re-resolves the same provider and swaps the source at the live
+  position — no health penalty, no audible failure.
+
 ### Fixed
+
+- **Mid-stream failures reached nobody**: the audio pipeline reports runtime
+  errors (CDN drop, expired signed URL, decoder error) on its event-stream
+  error channel *after* `play()` returned; only synchronous `play()` failures
+  were wired to the engine's failover hook, so a streamed track that died
+  mid-way simply stopped. Runtime errors now trigger the same failover path,
+  once per play generation.
+- **Deferred queue items could not fail over**: `replaceCurrentAndPlay`
+  rejected the `deferred-stream://` placeholder every non-tapped queue entry
+  is enqueued with, and failover compared candidate URLs against the
+  placeholder (never excluding the URL that actually died) and charged the
+  wrong provider. The engine now tracks the concrete stream each deferred
+  item resolved to, excludes it, charges its provider, invalidates the
+  resolver cache, preflights the replacement (one bounded second attempt) and
+  publishes the new play context.
+- **Exhausted chain stranded the queue**: when every source for a track is
+  dead the engine now auto-advances to the next queue item instead of
+  leaving playback stopped on it.
+- **Atomic writes (Go)**: the remaining lyrics `.lrc`, extension registry
+  cache and cover-art writes go through the fsync + rename helper so a kill
+  mid-write can no longer leave truncated files.
 
 - **Preflight provider failover**: a failed preflight now walks the ranked
   alternative candidates (bounded by the configured attempt budget and a
@@ -60,6 +125,13 @@
   estimate in the Diagnostics Center.
 
 ---
+
+### Removed
+
+- **Dead `just_audio` player**: `MultiProviderPlayer` / `StreamResumePoint`
+  (never instantiated — playback runs on the audio_service + audioplayers
+  handler) and the `just_audio` dependency. One audio pipeline, one fewer
+  native plugin in both app binaries.
 
 ## [5.0.0] - 2026-09-02
 - **Queue transfer**: Share the active download queue as a portable JSON file

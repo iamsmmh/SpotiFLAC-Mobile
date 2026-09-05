@@ -394,6 +394,24 @@ private func goCall<T>(_ body: (NSErrorPointer) -> T) throws -> T {
         }
     }
     
+    /// Battery/charging snapshot for the download scheduler ("only while
+    /// charging", "not below N%"). Monitoring is enabled lazily and stays on;
+    /// UIDevice reports -1 / .unknown when it is off or on the simulator.
+    private func readPowerStatus() -> [String: Any] {
+        let device = UIDevice.current
+        if !device.isBatteryMonitoringEnabled {
+            device.isBatteryMonitoringEnabled = true
+        }
+        let state = device.batteryState
+        let level = device.batteryLevel
+        let percent = level >= 0 ? Int((level * 100).rounded()) : -1
+        return [
+            "charging": state == .charging || state == .full,
+            "level": percent,
+            "known": state != .unknown,
+        ]
+    }
+
     private func handleMethodCall(call: FlutterMethodCall, result: @escaping FlutterResult) {
         switch call.method {
         case "beginBackgroundDownloadTask":
@@ -407,6 +425,27 @@ private func goCall<T>(_ body: (NSErrorPointer) -> T) throws -> T {
             return
         case "pickIosDirectory":
             pickIosDirectory(result: result)
+            return
+        case "getPowerStatus":
+            result(readPowerStatus())
+            return
+        case "audioEffectsCapabilities":
+            // The music pipeline renders through AVPlayer, whose output cannot
+            // host AudioUnit effects without re-routing decoding through an
+            // AVAudioEngine graph. Report the chain as unavailable so the
+            // settings UI disables the stages instead of pretending.
+            result([
+                "equalizer": false,
+                "bass_boost": false,
+                "virtualizer": false,
+                "enhancer": false,
+                "compressor": false,
+                "limiter": false,
+                "engine": "unavailable (AVPlayer)",
+            ])
+            return
+        case "applyAudioEffects":
+            result(["attached": false, "players": [], "reason": "unsupported on iOS"])
             return
         case "startWebAuthSession":
             let args = call.arguments as? [String: Any] ?? [:]

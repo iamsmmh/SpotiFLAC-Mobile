@@ -297,8 +297,15 @@ class PlaybackController extends Notifier<PlaybackState> {
           artistName: track.artistName,
         ),
     ]);
-    final localMatches = await localFuture;
-    final historyMatches = await historyFuture;
+    // Await both together: if one store throws while the other is still in
+    // flight, the second failure is absorbed by Future.wait instead of
+    // surfacing as an unhandled asynchronous error.
+    final matches = await Future.wait<List<Map<String, dynamic>?>>([
+      localFuture,
+      historyFuture,
+    ]);
+    final localMatches = matches[0];
+    final historyMatches = matches[1];
 
     final results = List<String?>.filled(tracks.length, null);
     final existsChecks = <String, Future<bool>>{};

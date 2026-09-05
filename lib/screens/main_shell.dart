@@ -82,7 +82,9 @@ class _MainShellState extends ConsumerState<MainShell>
     setPlaybackNormalizationEnabled(
       ref.read(settingsProvider).playbackNormalization,
     );
-    setPlaybackGaplessEnabled(ref.read(engineSettingsProvider).gaplessEnabled);
+    final engineSettings = ref.read(engineSettingsProvider);
+    setPlaybackGaplessEnabled(engineSettings.gaplessEnabled);
+    setPlaybackCrossfade(engineSettings.crossfade);
     // Deezer & co. localize artist/genre names by IP unless told the app's
     // language (issue #480).
     unawaited(
@@ -673,6 +675,12 @@ class _MainShellState extends ConsumerState<MainShell>
       enabled,
     ) {
       setPlaybackGaplessEnabled(enabled);
+    });
+    ref.listen(engineSettingsProvider.select((s) => s.crossfade), (
+      _,
+      crossfade,
+    ) {
+      setPlaybackCrossfade(crossfade);
     });
     final queueState = ref.watch(
       downloadQueueProvider.select((s) => s.queuedCount),

@@ -6,7 +6,9 @@ import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:spotimusic/l10n/l10n.dart';
 import 'package:spotimusic/providers/download_history_provider.dart';
+import 'package:spotimusic/providers/engine_settings_provider.dart';
 import 'package:spotimusic/providers/music_player_provider.dart';
+import 'package:spotimusic/providers/now_playing_lyrics_provider.dart';
 import 'package:spotimusic/providers/streaming_engine_provider.dart';
 import 'package:spotimusic/ui/widgets/liquid_glass_player_sheet.dart';
 import 'package:spotimusic/screens/downloaded_album_screen.dart';
@@ -222,6 +224,10 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
     final source = item.extras?['source']?.toString() ?? '';
     if (source.isEmpty) return;
     final resolvedSource = item.extras?['resolvedSource']?.toString();
+    if (isStreamedMediaItem(item)) {
+      unawaited(_loadStreamedItem(item, source, resolvedSource));
+      return;
+    }
     unawaited(
       _loadMetadataFor(
         source,
@@ -230,6 +236,46 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
         inspectUnresolvedContentUri: inspectUnresolvedContentUri,
       ),
     );
+  }
+
+  /// Streamed items have no file to probe: the metadata is what the queue
+  /// item carries and the lyrics come from the online providers through the
+  /// same session cache the liquid player's lyrics sheet uses.
+  Future<void> _loadStreamedItem(
+    MediaItem item,
+    String source,
+    String? resolvedSource,
+  ) async {
+    final effectiveResolvedSource = resolvedSource?.trim();
+    final sameItem =
+        source == _loadedSource &&
+        effectiveResolvedSource == _loadedResolvedSource;
+    final fallbackMetadata = playbackAudioMetadataFromMediaItem(item);
+    if (sameItem && (_loadingMeta || _loadedMetadataPath == source)) return;
+    _loadedSource = source;
+    _loadedResolvedSource = effectiveResolvedSource;
+    _loadedMetadataPath = null;
+    setState(() {
+      _loadingMeta = true;
+      _metadata = fallbackMetadata.isEmpty ? null : fallbackMetadata;
+      if (!sameItem) _lyrics = ParsedLyrics.empty;
+    });
+    final lyrics = await loadStreamedLyrics(
+      item,
+      offline: ref.read(engineOfflineModeProvider),
+      cache: ref.read(onlineLyricsCacheProvider),
+      fetch: ref.read(onlineLyricsFetcherProvider),
+    );
+    if (!mounted ||
+        _loadedSource != source ||
+        _loadedResolvedSource != effectiveResolvedSource) {
+      return;
+    }
+    setState(() {
+      _loadedMetadataPath = source;
+      _lyrics = lyrics;
+      _loadingMeta = false;
+    });
   }
 
   Future<void> _loadMetadataFor(

@@ -80,6 +80,57 @@ current track plays, and `AdaptiveBufferPlanner` sizes that prefix from the
 network profile and live bandwidth — poor links open a deeper low-bandwidth
 lookahead window.
 
+### Crossfade
+
+`CrossfadePolicy` (`lib/engine/crossfade_policy.dart`) is pure and evaluated on
+every position tick of the active player. Given the user setting
+(`EngineSettings.crossfadeSeconds` 0–12, `crossfadeSmart`), the outgoing
+track's duration and both items' `AudioCharacteristics`, it returns the
+overlap to use — or none for repeat-one, unknown durations, tracks shorter
+than 10 s (30 s in smart mode), and, in smart mode, album-continuous
+neighbours and lossless pairs the `GaplessPolicy` would splice instead. The
+overlap is capped at a third (smart: an eighth) of the track and clamped to
+1–12 s.
+
+When the remaining time drops inside the overlap the handler swaps roles
+*synchronously*: the current `AudioPlayer` becomes the outgoing half (its
+state/complete/error events are ignored from then on), the standby player
+(`music-player-crossfade`, created lazily and reused) takes the next item at
+volume 0, and once the source is ready a 60 ms timer ramps both players with
+`CrossfadePolicy.equalPowerGains` scaled by each track's normalisation volume,
+then stops the outgoing player and parks it as standby. The ramp never runs
+past the moment the outgoing track would end by itself, so a slow source
+resolve degrades to a shorter fade rather than a stretch of silence. Pause,
+seek, skip, stop, audio-focus loss and a failed incoming source all end the
+fade immediately (`_endCrossfade`) and restore the active player's full
+volume. Crossfade takes precedence over the gapless splice for a transition;
+with crossfade off (default) the gapless path is unchanged.
+
+### Equalizer / DSP chain
+
+`AudioEffectsSettings` (`lib/engine/audio_effects.dart`) is the platform-neutral
+description of the chain: ten band gains in dB, bass boost / virtualizer
+strengths (0–1), enhancer gain, compressor threshold/ratio, limiter ceiling.
+`audioEffectsProvider` persists it (`audio_effects_v1`) together with user
+presets, debounces changes, and pushes `toPlatformMap()` through
+`PlatformBridge.applyAudioEffects`. The handler exposes
+`playbackSourceStartedListener`, fired right after `play()` succeeds, because
+Android effect objects bind to an *audio session id* that only exists once a
+`MediaPlayer` has a source — and changes when audioplayers recreates the
+player.
+
+On Android `AudioEffectsController` (a process singleton, since the engine
+outlives the Activity) resolves the session ids of `music-player` and
+`music-player-crossfade` reflectively from the audioplayers plugin (kept by
+ProGuard), then owns one effect chain per session: `DynamicsProcessing`
+(API 28+: pre-EQ with exact octave cutoffs, one MBC band as the compressor,
+limiter) or `Equalizer` (older devices; `AudioEffectsPolicy.mapToDeviceBands`
+projects the ten requested bands onto whatever bands the device has), plus
+`BassBoost`, `Virtualizer` and `LoudnessEnhancer`. When the master switch is
+off or every stage is neutral the chain is released entirely, so the default
+audio path is untouched. Capabilities are reported to the UI so unsupported
+stages render disabled with a reason instead of silently doing nothing.
+
 ## Smart Play ladder
 
 ```
@@ -179,6 +230,47 @@ Failover also applies *before* playback: a failed preflight walks the ranked
 alternative candidates (bounded by the configured attempt budget and a
 tried-URI set), so Provider A → Provider B → Provider C succeeds without
 re-trying a URI that already failed.
+
+How a failure reaches the hook:
+
+- **Synchronous** — `play()` throws (audioplayers awaits the platform's
+  *prepared* event, so pre-prepare errors fail the future).
+- **Runtime** — the platform reports CDN drops, expired signed URLs and decoder
+  errors on the player's event-stream *error channel* after `play()` returned.
+  `MusicPlayerHandler` listens to it and forwards the current item once per
+  play generation (`_handleRuntimePlaybackError`).
+- **Proactive** — a resolved `StreamDescriptor.expiresAt` travels on
+  `PlayableMedia.expiresAt` (persisted with the queue; deferred items report it
+  through `noteDeferredSourceExpiry` at resolve time). The handler arms a timer
+  that fires two minutes before expiry (never sooner than 30 s after start,
+  never for an already-expired URL) and calls the hook with
+  `StreamUrlExpiringSignal`. The engine treats it as a refresh, not a failure:
+  same-provider fresh URL first, no health penalty, no backoff.
+
+What the engine does on failure (`_handlePlaybackFailure`):
+
+1. Resolve the *concrete* failed source — for a `deferred-stream://` queue
+   item that is the descriptor it resolved to (`_deferredSourceByMediaId`),
+   never the placeholder — so the dead URL is excluded and the right provider
+   is charged.
+2. Invalidate the multi-provider resolver cache for the track and re-query
+   every adapter for a fresh candidate set.
+3. Pick the next source via the session controller (health-filtered, expiry-
+   filtered), preflight it, and try one more alternative if it is dead on
+   arrival.
+4. `replaceCurrentAndPlay(item, resumeAt: t)` + publish the new play context.
+5. If the chain is exhausted and the queue has a later item, skip to it
+   instead of leaving playback stopped.
+
+## Lyrics for streamed tracks
+
+Local files use their embedded lyrics. Streamed items have no file, so
+`nowPlayingLyricsProvider` (and the classic Now Playing lyrics page) query the
+Go lyrics client — LRCLIB, Musixmatch, Apple Music, NetEase, QQ Music,
+Paxsenix in the priority/fallback order configured under *Lyrics* settings —
+keyed by track id + title + artist so a failover URL swap reuses the entry.
+Lookups are memoized per session (bounded LRU, in-flight coalescing, negative
+results cached) and skipped entirely in offline mode.
 
 ## Match confidence
 

@@ -257,7 +257,9 @@ func (s *extensionRepo) saveDiskCache() {
 	}
 
 	cachePath := filepath.Join(s.cacheDir, cacheFileName)
-	os.WriteFile(cachePath, data, 0644)
+	// Best-effort cache; atomic so a torn write can never be parsed as a
+	// (partially) valid registry on the next launch.
+	_ = writeFileAtomic(cachePath, data, 0644)
 }
 
 func (s *extensionRepo) fetchRegistry(forceRefresh bool) (*repoRegistry, error) {

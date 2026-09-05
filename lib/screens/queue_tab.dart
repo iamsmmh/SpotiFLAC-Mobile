@@ -1647,6 +1647,9 @@ class _QueueTabState extends ConsumerState<QueueTab> {
         final isPaused = ref.watch(
           downloadQueueProvider.select((state) => state.isPaused),
         );
+        final scheduleHoldReason = ref.watch(
+          downloadQueueProvider.select((state) => state.scheduleHoldReason),
+        );
         return SliverToBoxAdapter(
           child: AnimatedSwitcher(
             duration: const Duration(milliseconds: 260),
@@ -1675,7 +1678,12 @@ class _QueueTabState extends ConsumerState<QueueTab> {
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            context.l10n.queueDownloadingCount(queueCount),
+                            isPaused && scheduleHoldReason != null
+                                ? '${context.l10n.queueDownloadingCount(queueCount)} · '
+                                      'scheduled: $scheduleHoldReason'
+                                : context.l10n.queueDownloadingCount(
+                                    queueCount,
+                                  ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: Theme.of(context).textTheme.labelLarge
