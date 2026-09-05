@@ -7,11 +7,28 @@
 library;
 
 /// Data domains that can be synchronized.
+///
+/// `favorites`/`playlists`/`settings`/`history` shipped with Phase 6; the rest
+/// were added by the ecosystem layer (queue snapshot, download preferences,
+/// podcast subscriptions, optional social graph). Values are append-only: the
+/// [wireId] is persisted in backend documents, so a rename would orphan rows.
 enum SyncScope {
   favorites,
   playlists,
   settings,
-  history;
+  history,
+
+  /// Queue snapshot + playback position (Feature Group 2).
+  queueState,
+
+  /// Download quality/format/folder preferences (Feature Group 2).
+  downloadPreferences,
+
+  /// Podcast subscriptions and episode progress (Feature Group 9).
+  podcasts,
+
+  /// Optional social layer: profile, follows, shared playlists (Group 11).
+  social;
 
   /// Stable wire id. Used in provider documents/rows — never rename.
   String get wireId => name;

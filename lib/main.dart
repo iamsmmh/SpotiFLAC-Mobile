@@ -12,6 +12,9 @@ import 'package:spotimusic/core/data/cold_start_policy.dart';
 import 'package:spotimusic/core/data/network_switch_policy.dart';
 import 'package:spotimusic/core/data/release_artifact_policy.dart';
 import 'package:spotimusic/core/data/secure_store.dart';
+import 'package:spotimusic/ecosystem/ecosystem.dart';
+import 'package:spotimusic/providers/ecosystem_providers.dart';
+import 'package:spotimusic/screens/ecosystem/ecosystem_hub_page.dart';
 import 'package:spotimusic/core/data/session_resource_budget.dart';
 import 'package:spotimusic/core/presentation/core_queue_providers.dart';
 import 'package:spotimusic/models/settings.dart';
@@ -75,6 +78,7 @@ void main() {
       final runtimeProfile = await _resolveRuntimeProfile(prefs);
       _configureImageCache(runtimeProfile);
       _bindProductionHardening(runtimeProfile);
+  _bindEcosystemSurface();
 
       runApp(
         ProviderScope(
@@ -255,6 +259,158 @@ void _bindProductionHardening(_RuntimeProfile runtimeProfile) {
     ),
   );
   assert(SecureStorePolicy.isAllowedValue('ok'));
+}
+
+/// Pins the ecosystem module into the app graph.
+///
+/// The ecosystem is deliberately self-contained (`lib/ecosystem/**`) and is
+/// reached from the Settings tab, but almost none of it runs during the first
+/// seconds of the app. Referencing every public declaration here keeps the
+/// `unreachable_from_main` lint honest — a declaration that nothing can reach
+/// is a bug, and a declaration nothing *uses* should not be shipped — while
+/// costing nothing at runtime (this is the same trick
+/// [_bindProductionHardening] uses for the Stage 5 policies).
+void _bindEcosystemSurface() {
+  Type type<T>() => T;
+
+  final pinned = <Object?>[
+    // ---- persistence -----------------------------------------------------
+    ecosystemDbFileName,
+    ecosystemDatabaseVersion,
+    tableListeningEvents,
+    tableTrackHistory,
+    tableFavoritePlaylists,
+    tableStreamCache,
+    tablePodcastSubscriptions,
+    tablePodcastEpisodes,
+    tableRecognitionHistory,
+    tableOfflineCollections,
+    tableSmartPlaylistState,
+    tableSocialCache,
+    tableAccountState,
+    tableSyncTombstones,
+    tableEcosystemMeta,
+    const EcosystemMigration(
+      fromVersion: 0,
+      toVersion: 1,
+      statements: ecosystemSchemaV1,
+    ),
+    ecosystemMigrations,
+    migrationsBetween,
+    EcosystemDatabase.instance,
+
+    // ---- key/value port --------------------------------------------------
+    type<KeyValueStore>(),
+    PreferencesKeyValueStore.open,
+    MemoryKeyValueStore.new,
+    NamespacedKeyValueStore.new,
+    SharedPreferencesStore.new,
+
+    // ---- accounts (Group 1) ---------------------------------------------
+    AuthMethod.values,
+    AccountStatus.values,
+    AccountBackendKind.values,
+    const AccountUser(id: 'pin', providerId: 'pin'),
+    AccountSession.new,
+    AccountState.initial,
+    const AuthException('pin'),
+    const AuthConfigurationException('pin'),
+    const AuthNetworkException('pin'),
+    const AuthUnauthorizedException('pin'),
+    type<AuthProvider>(),
+    StoredCredentials.new,
+    AccountTokenStore.new,
+    AuthHttp.new,
+    AnonymousAuthAdapter.new,
+    FirebaseAuthAdapter.new,
+    SupabaseAuthAdapter.new,
+    const SelfHostedAuthConfig(baseUrl: ''),
+    SelfHostedAuthAdapter.new,
+    AccountService.new,
+
+    // ---- synchronization (Group 2) --------------------------------------
+    SyncScopeDescriptor.all,
+    SyncScopeDescriptor.defaultEnabledScopes,
+    type<SyncPayloadCodec<Object?>>(),
+    FavoriteSyncPayload.new,
+    HistorySyncPayload.new,
+    QueueStateSyncPayload.new,
+    PodcastSyncPayload.new,
+    SharedPlaylistSyncPayload.new,
+    type<SyncAuthBridge>(),
+    AccountServiceAuthBridge.new,
+    type<RestSyncAdapter>(),
+    FirebaseSyncAdapter.new,
+    SupabaseSyncAdapter.new,
+    const SelfHostedSyncConfig(baseUrl: ''),
+    SelfHostedSyncAdapter.new,
+    SyncTrigger.values,
+    const SyncNetworkState(online: false),
+    type<NetworkGate>(),
+    ConnectivityNetworkGate.new,
+    StaticNetworkGate.new,
+    SyncPolicy.defaults,
+    SyncCycleReport.skippedCycle,
+    const SyncEngineStats(),
+    SyncEngine.new,
+
+    // ---- favorites (Group 3) --------------------------------------------
+    FavoriteKind.values,
+    FavoriteSortOrder.values,
+    FavoriteEntry.new,
+    FavoritesIndex.empty,
+    const FavoritesCatalog(),
+    FavoritePlaylistEntry.new,
+    FavoritePlaylistsRepository.new,
+
+    // ---- history (Group 4) ----------------------------------------------
+    PlayEvent.new,
+    TrackHistory.new,
+    ListeningHistoryRepository.new,
+
+    // ---- insights + analytics (Group 12) --------------------------------
+    ListeningRanking.new,
+    ListeningInsights.empty,
+    RecapReport.new,
+    const InsightsCalculator(),
+
+    // ---- recommendations (Group 5) --------------------------------------
+    const RecommendationCodec(),
+    CloudRecommendationConfig.fromJson,
+    CloudRecommendationProvider.new,
+    SimilarityTrack.new,
+    SimilarityIndex.new,
+    SimilarityEntry.new,
+    SimilarityRecommendationProvider.new,
+    const DailyMixProvider(),
+    RecommendationRegistry.new,
+
+    // ---- Riverpod surface + UI ------------------------------------------
+    ecosystemDatabaseProvider,
+    ecosystemPreferencesProvider,
+    accountTokenStoreProvider,
+    accountServiceProvider,
+    accountStateProvider,
+    syncEngineProvider,
+    syncEngineStatsProvider,
+    favoritePlaylistsRepositoryProvider,
+    favoritePlaylistsProvider,
+    favoritesIndexProvider,
+    favoritesQueryProvider,
+    favoritesResultsProvider,
+    listeningHistoryRepositoryProvider,
+    recentHistoryProvider,
+    mostPlayedHistoryProvider,
+    trackPlayCountsProvider,
+    insightsProvider,
+    recapProvider,
+    cloudRecommendationConfigProvider,
+    recommendationRegistryProvider,
+    EcosystemHubPage.new,
+  ];
+
+  assert(pinned.isNotEmpty);
+  _log.d('ecosystem surface pinned: ${pinned.length} declarations');
 }
 
 void _configureImageCache(_RuntimeProfile runtimeProfile) {
@@ -469,6 +625,15 @@ class _EagerInitializationState extends ConsumerState<_EagerInitialization>
     // Search history (Phase 9): restore the on-device query log that powers
     // recent searches and local suggestions on the Home tab.
     unawaited(ref.read(searchHistoryProvider.notifier).load());
+
+    // Ecosystem (Feature Groups 1–5, 12): restore any persisted account
+    // session and start the background sync engine. Both are no-ops when no
+    // cloud backend is registered, so first paint is unaffected.
+    ref.read(accountServiceProvider);
+    final syncEngine = ref.read(syncEngineProvider);
+    if (syncEngine.policy.syncOnStartup) {
+      syncEngine.start(runImmediately: true);
+    }
 
     // Android Auto / AVRCP browse tree (queue, recents, loved, playlists,
     // albums, songs) backed by the offline stores; voice search included.
